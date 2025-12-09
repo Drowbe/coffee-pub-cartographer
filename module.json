@@ -48,7 +48,8 @@
   "esmodules": [
     "scripts/const.js",
     "scripts/settings.js",
-    "scripts/cartographer.js"
+    "scripts/cartographer.js",
+    "scripts/manager-drawing.js"
   ],
   "packs": [],
   

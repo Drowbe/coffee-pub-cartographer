@@ -109,22 +109,42 @@ export const registerSettings = () => {
 
 
     // --------------------------------------
-	// -- H3: EXAMPLE SUBHEADER
+	// -- H3: DRAWING TOOL SETTINGS
 	// --------------------------------------
-	registerHeader('ExampleSubheader', 'headingH3ExampleSubheader-Label', 'headingH3ExampleSubheader-Hint', 'H3', WORKFLOW_GROUPS.COMMON_SETTINGS);
+	registerHeader('DrawingToolSettings', 'headingH3DrawingToolSettings-Label', 'headingH3DrawingToolSettings-Hint', 'H3', WORKFLOW_GROUPS.COMMON_SETTINGS);
 
-    // -- Example Setting --
-	game.settings.register(MODULE.ID, 'exampleSetting', {
-        name: MODULE.ID + '.exampleSetting-Label',
-        hint: MODULE.ID + '.exampleSetting-Hint',
+    // -- Enable Player Drawing --
+	game.settings.register(MODULE.ID, 'drawing.enablePlayerDrawing', {
+        name: MODULE.ID + '.drawing.enablePlayerDrawing-Label',
+        hint: MODULE.ID + '.drawing.enablePlayerDrawing-Hint',
         scope: 'world',
         config: true,
-        default: "Example Value",
-        type: String,
+        default: true,
+        type: Boolean,
 		group: WORKFLOW_GROUPS.COMMON_SETTINGS
 	});
 
-    // Add more settings here as needed
+    // -- Drawing Timeout --
+	game.settings.register(MODULE.ID, 'drawing.timeout', {
+        name: MODULE.ID + '.drawing.timeout-Label',
+        hint: MODULE.ID + '.drawing.timeout-Hint',
+        scope: 'world',
+        config: true,
+        default: 3600,
+        type: Number,
+		group: WORKFLOW_GROUPS.COMMON_SETTINGS
+	});
+
+    // -- Allow Drawing Persistence --
+	game.settings.register(MODULE.ID, 'drawing.allowPersistence', {
+        name: MODULE.ID + '.drawing.allowPersistence-Label',
+        hint: MODULE.ID + '.drawing.allowPersistence-Hint',
+        scope: 'world',
+        config: true,
+        default: true,
+        type: Boolean,
+		group: WORKFLOW_GROUPS.COMMON_SETTINGS
+	});
     
 
 

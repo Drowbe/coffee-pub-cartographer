@@ -12,13 +12,17 @@
 		"headingH2CommonSettings-Label": "Common Settings",
 		"headingH2CommonSettings-Hint": "This is the common settings section of the module.",
 
-		"headingH3ExampleSubheader-Label": "Example Subheader",
-		"headingH3ExampleSubheader-Hint": "This is an example subheader for the module.",
+	"headingH3DrawingToolSettings-Label": "Drawing Tool Settings",
+	"headingH3DrawingToolSettings-Hint": "Configure settings for the temporary drawing tool.",
 
+	"drawing.enablePlayerDrawing-Label": "Enable Player Drawing",
+	"drawing.enablePlayerDrawing-Hint": "Allow players to draw temporarily on the canvas for planning purposes.",
 
-		
-		"exampleSetting-Label": "Example Setting",
-		"exampleSetting-Hint": "This is an example setting for the module."
+	"drawing.timeout-Label": "Drawing Timeout (seconds)",
+	"drawing.timeout-Hint": "Time before temporary drawings auto-expire. Set to 0 to never expire.",
+
+	"drawing.allowPersistence-Label": "Allow Drawing Persistence",
+	"drawing.allowPersistence-Hint": "Allow GM to convert temporary drawings to permanent drawings."
 	}
 }
 

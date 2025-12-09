@@ -1,6 +1,9 @@
 /* ------------------------------------ */
-/* --- COFFEE PUB CARTOGRAPHER STYLES --- */
+/* --- LOAD COMMON CSS FILES ---------- */
 /* ------------------------------------ */
 
-/* Add your module styles here */
+/* --- Shared ---------------------- */
+@import "common.css";
 
+/* --- Drawing Tool ---------------------- */
+@import "tool-drawing.css";
