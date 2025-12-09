@@ -147,27 +147,20 @@ class DrawingTool {
     }
     
     /**
-     * Register toolbar tools via Blacksmith Toolbar API
+     * Register toolbar tools in Cartographer toolbar panel
      */
     async registerToolbarTools() {
         try {
-            // Access Blacksmith API
-            const blacksmith = await BlacksmithAPI.get();
-            if (!blacksmith || !blacksmith.registerToolbarTool) {
-                console.warn(`${MODULE.NAME}: Blacksmith Toolbar API not available`);
-                return;
-            }
+            // Import toolbar manager dynamically to avoid circular dependency
+            const { cartographerToolbar } = await import('./manager-toolbar.js');
             
             const self = this;
             
-            // Register drawing tool toggle button
-            blacksmith.registerToolbarTool(`${MODULE.ID}-draw`, {
+            // Register drawing tool toggle button in Cartographer toolbar
+            cartographerToolbar.registerTool(`${MODULE.ID}-draw`, {
                 icon: "fa-solid fa-pen",
                 name: "Cartographer Drawing Tool",
                 title: "Toggle Drawing Tool (or hold 'D' key)",
-                button: true,
-                visible: true,
-                zone: "utilities",
                 active: () => self.state.active,
                 onClick: () => {
                     if (self.state.active) {
@@ -180,13 +173,10 @@ class DrawingTool {
             
             // Register GM-only clear drawings button
             if (game.user.isGM) {
-                blacksmith.registerToolbarTool(`${MODULE.ID}-clear`, {
+                cartographerToolbar.registerTool(`${MODULE.ID}-clear`, {
                     icon: "fa-solid fa-eraser",
                     name: "Clear All Drawings",
                     title: "Clear all temporary drawings (GM only)",
-                    button: true,
-                    visible: true,
-                    zone: "utilities",
                     onClick: () => {
                         if (game.user.isGM) {
                             self.clearAllDrawings();
@@ -196,7 +186,7 @@ class DrawingTool {
                 });
             }
             
-            console.log(`${MODULE.NAME}: Toolbar tools registered`);
+            console.log(`${MODULE.NAME}: Toolbar tools registered in Cartographer toolbar`);
         } catch (error) {
             console.error(`${MODULE.NAME}: Error registering toolbar tools:`, error);
         }

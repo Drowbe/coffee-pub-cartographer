@@ -1,0 +1,67 @@
+/* ------------------------------------ */
+/* --- COFFEE PUB CARTOGRAPHER TOOLBAR STYLES --- */
+/* ------------------------------------ */
+
+/* Cartographer Toolbar Panel */
+.coffee-pub-cartographer-toolbar {
+    position: fixed;
+    top: 50px; /* Below menubar */
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    border: 2px solid #4a5568;
+    border-radius: 8px;
+    padding: 8px;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+}
+
+/* Toolbar Content Container */
+.coffee-pub-cartographer-toolbar-content {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    align-items: center;
+}
+
+/* Toolbar Buttons */
+.coffee-pub-cartographer-toolbar-button {
+    width: 40px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #ffffff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    font-size: 18px;
+}
+
+.coffee-pub-cartographer-toolbar-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.4);
+    transform: translateY(-2px);
+}
+
+.coffee-pub-cartographer-toolbar-button.active {
+    background: rgba(74, 144, 226, 0.3);
+    border-color: #4a90e2;
+    box-shadow: 0 0 8px rgba(74, 144, 226, 0.5);
+}
+
+.coffee-pub-cartographer-toolbar-button:active {
+    transform: translateY(0);
+}
+
+/* Icon styling */
+.coffee-pub-cartographer-toolbar-button i {
+    pointer-events: none;
+}
+

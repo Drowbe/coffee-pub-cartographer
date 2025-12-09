@@ -5,6 +5,7 @@
 import { MODULE } from './const.js';
 import { registerSettings } from './settings.js';
 import { drawingTool } from './manager-drawing.js';
+import { cartographerToolbar } from './manager-toolbar.js';
 
 // ================================================================== 
 // ===== BLACKSMITH API INTEGRATION =================================
@@ -31,6 +32,14 @@ Hooks.once('ready', async () => {
             console.log(`✅ ${MODULE.NAME}: Registered with Blacksmith successfully`);
         } else {
             console.warn(`⚠️ ${MODULE.NAME}: Blacksmith not available`);
+        }
+        
+        // Initialize toolbar manager (menubar registration happens here)
+        // This must happen in 'ready' hook, not 'canvasReady'
+        try {
+            await cartographerToolbar.initialize();
+        } catch (error) {
+            console.error(`❌ ${MODULE.NAME}: Failed to initialize toolbar:`, error);
         }
         
         // Initialize module features
@@ -79,6 +88,7 @@ Hooks.once('canvasReady', async () => {
             console.log(`✅ ${MODULE.NAME}: Canvas Layer initialized`);
             
             // Initialize tools after Canvas Layer is available
+            // (Toolbar manager is already initialized in 'ready' hook)
             try {
                 await drawingTool.initialize(CartographerServices);
             } catch (error) {

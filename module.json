@@ -49,6 +49,7 @@
     "scripts/const.js",
     "scripts/settings.js",
     "scripts/cartographer.js",
+    "scripts/manager-toolbar.js",
     "scripts/manager-drawing.js"
   ],
   "packs": [],

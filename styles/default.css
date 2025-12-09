@@ -7,3 +7,6 @@
 
 /* --- Drawing Tool ---------------------- */
 @import "tool-drawing.css";
+
+/* --- Toolbar ---------------------- */
+@import "toolbar.css";
