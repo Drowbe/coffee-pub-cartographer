@@ -72,6 +72,10 @@ class CartographerToolbar {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 10 // Order for the group
                     },
+                    'color': {
+                        mode: 'switch', // Radio-button behavior: only one active at a time
+                        order: 15 // Order for the group
+                    },
                     'erase': {
                         mode: 'default', // Independent buttons (supports toggleable)
                         order: 20 // Order for the group
@@ -319,6 +323,7 @@ class CartographerToolbar {
      * @param {Function} toolConfig.onClick - Click handler function (required)
      * @param {string} [toolConfig.buttonColor] - RGBA button background color, e.g., "rgba(161, 60, 41, 0.9)" (optional)
      * @param {string} [toolConfig.borderColor] - RGBA border color, e.g., "rgba(161, 60, 41, 0.5)" (optional)
+     * @param {string} [toolConfig.iconColor] - Icon color, any valid CSS color, e.g., "#ff0000" (optional)
      * @param {number} [toolConfig.order] - Order/priority for button placement, lower numbers appear first (optional)
      */
     registerTool(toolId, toolConfig) {
@@ -378,6 +383,11 @@ class CartographerToolbar {
                 itemData.borderColor = toolConfig.borderColor; // RGBA string, e.g., "rgba(161, 60, 41, 0.5)"
             }
             
+            // Add optional iconColor if provided
+            if (toolConfig.iconColor) {
+                itemData.iconColor = toolConfig.iconColor; // Any valid CSS color, e.g., "#ff0000" or "rgba(255, 0, 0, 1.0)"
+            }
+            
             // Add optional order if provided
             if (toolConfig.order !== undefined && toolConfig.order !== null) {
                 itemData.order = toolConfig.order; // Number, lower values appear first
@@ -401,7 +411,7 @@ class CartographerToolbar {
                 BlacksmithUtils.postConsoleAndNotification(
                     MODULE.NAME,
                     'CARTOGRAPHER | Menubar | Registering secondary bar item',
-                    `barTypeId: ${barTypeId}, itemId: ${itemId}, order: ${toolConfig.order ?? 'default'}, buttonColor: ${toolConfig.buttonColor ?? 'none'}, borderColor: ${toolConfig.borderColor ?? 'none'}`,
+                    `barTypeId: ${barTypeId}, itemId: ${itemId}, order: ${toolConfig.order ?? 'default'}, buttonColor: ${toolConfig.buttonColor ?? 'none'}, borderColor: ${toolConfig.borderColor ?? 'none'}, iconColor: ${toolConfig.iconColor ?? 'none'}`,
                     true,
                     false
                 );

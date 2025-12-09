@@ -14,6 +14,13 @@ import { MODULE } from './const.js';
  * This is the first tool in the Cartographer multi-tool module
  */
 class DrawingTool {
+    // Color palette constants - defined once, can be moved to settings later
+    static strColor1 = 'rgba(38, 38, 38, 0.7)';   // Black
+    static strColor2 = 'rgba(186, 60, 49, 0.7)';  // Red
+    static strColor3 = 'rgba(76, 147, 204, 0.7)'; // Blue
+    static strColor4 = 'rgba(3, 105, 41, 0.7)';   // Green
+    static strColor5 = 'rgba(219, 130, 12, 0.7)'; // Yellow
+    
     constructor() {
         this.name = 'drawing';
         this.displayName = 'Drawing Tool';
@@ -26,7 +33,7 @@ class DrawingTool {
             active: false,
             brushSettings: {
                 size: 6, // Default to medium (6px)
-                color: '#000000',
+                color: DrawingTool.strColor1, // Default to first color (black)
                 type: 'pen' // pen, marker, highlighter
             },
             timedEraseEnabled: false, // Toggle for timed erase feature
@@ -61,6 +68,37 @@ class DrawingTool {
      */
     async initialize(services) {
         this.services = services;
+        
+        // Set default color to player color (always use player color as default)
+        // Handle different formats of game.user.color (Color object, string, number, or undefined)
+        let playerColorHex = '#000000'; // Default fallback
+        
+        if (game.user?.color) {
+            // Check if it's a Foundry Color object
+            if (game.user.color.constructor?.name === 'Color') {
+                // Foundry Color object - convert to number and then to hex
+                // Color objects can be converted to numbers directly
+                const colorValue = Number(game.user.color);
+                if (!isNaN(colorValue)) {
+                    playerColorHex = '#' + colorValue.toString(16).padStart(6, '0');
+                }
+            } else if (typeof game.user.color === 'string') {
+                playerColorHex = game.user.color;
+            } else if (typeof game.user.color === 'number') {
+                // Convert number to hex string
+                playerColorHex = '#' + game.user.color.toString(16).padStart(6, '0');
+            }
+        }
+        
+        // Ensure it's a valid hex string
+        if (!playerColorHex.startsWith('#')) {
+            playerColorHex = '#000000';
+        }
+        
+        const r = parseInt(playerColorHex.slice(1, 3), 16);
+        const g = parseInt(playerColorHex.slice(3, 5), 16);
+        const b = parseInt(playerColorHex.slice(5, 7), 16);
+        this.state.brushSettings.color = `rgba(${r}, ${g}, ${b}, 1.0)`;
         
         // Register settings
         this.registerSettings();
@@ -276,8 +314,103 @@ class DrawingTool {
                 }
             });
             
+            // Helper function to convert hex color to rgba format
+            const hexToRgba = (hex, alpha = 1.0) => {
+                // Ensure hex is a string and starts with #
+                if (typeof hex !== 'string' || !hex.startsWith('#')) {
+                    hex = '#000000';
+                }
+                const r = parseInt(hex.slice(1, 3), 16);
+                const g = parseInt(hex.slice(3, 5), 16);
+                const b = parseInt(hex.slice(5, 7), 16);
+                return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            };
+            
+            // Helper function to convert rgba to hex format
+            const rgbaToHex = (rgba) => {
+                const match = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)/);
+                if (match) {
+                    const r = parseInt(match[1], 10).toString(16).padStart(2, '0');
+                    const g = parseInt(match[2], 10).toString(16).padStart(2, '0');
+                    const b = parseInt(match[3], 10).toString(16).padStart(2, '0');
+                    return `#${r}${g}${b}`;
+                }
+                return '#000000'; // fallback
+            };
+            
+            // Get player color and convert to rgba
+            // Handle different formats of game.user.color (Color object, string, number, or undefined)
+            let playerColorHex = '#000000'; // Default fallback
+            
+            if (game.user?.color) {
+                // Check if it's a Foundry Color object
+                if (game.user.color.constructor?.name === 'Color') {
+                    // Foundry Color object - convert to number and then to hex
+                    const colorValue = Number(game.user.color);
+                    if (!isNaN(colorValue)) {
+                        playerColorHex = '#' + colorValue.toString(16).padStart(6, '0');
+                    }
+                } else if (typeof game.user.color === 'string') {
+                    playerColorHex = game.user.color;
+                } else if (typeof game.user.color === 'number') {
+                    // Convert number to hex string
+                    playerColorHex = '#' + game.user.color.toString(16).padStart(6, '0');
+                }
+            }
+            
+            // Ensure it's a valid hex string
+            if (!playerColorHex.startsWith('#')) {
+                playerColorHex = '#000000';
+            }
+            
+            const playerColorRgba = hexToRgba(playerColorHex, 1.0);
+            
+            // Register color buttons in switch group (radio-button behavior)
+            // Store references for updating active state
+            self._colorButtons = {
+                player: `${MODULE.ID}-color-player`,
+                black: `${MODULE.ID}-color-black`,
+                red: `${MODULE.ID}-color-red`,
+                blue: `${MODULE.ID}-color-blue`,
+                green: `${MODULE.ID}-color-green`,
+                yellow: `${MODULE.ID}-color-yellow`
+            };
+            
+            // Define color palette using static color constants
+            // These can be moved to settings later for user customization
+            const colorPalette = {
+                player: { rgba: playerColorRgba, name: 'Player Color', icon: 'fa-solid fa-user' },
+                black: { rgba: DrawingTool.strColor1, name: 'Black', icon: 'fa-solid fa-palette' },
+                red: { rgba: DrawingTool.strColor2, name: 'Red', icon: 'fa-solid fa-palette' },
+                blue: { rgba: DrawingTool.strColor3, name: 'Blue', icon: 'fa-solid fa-palette' },
+                green: { rgba: DrawingTool.strColor4, name: 'Green', icon: 'fa-solid fa-palette' },
+                yellow: { rgba: DrawingTool.strColor5, name: 'Yellow', icon: 'fa-solid fa-palette' }
+            };
+            
+            // Register color buttons
+            Object.entries(colorPalette).forEach(([colorKey, colorData], index) => {
+                // Convert rgba to hex for iconColor
+                const iconColorHex = rgbaToHex(colorData.rgba);
+                
+                cartographerToolbar.registerTool(self._colorButtons[colorKey], {
+                    icon: colorData.icon,
+                    tooltip: `${colorData.name} color`,
+                    group: "color", // Switch group
+                    order: index + 1, // Player color is first (order: 1)
+                    iconColor: iconColorHex, // Icon color using color variable (converted to hex)
+                    active: () => self.state.brushSettings.color === colorData.rgba,
+                    onClick: () => {
+                        self.setBrushSettings({ color: colorData.rgba });
+                        self.updateColorButtons();
+                    }
+                });
+            });
+            
             // Update line width buttons to reflect the default size (medium = 6px)
             self.updateLineWidthButtons();
+            
+            // Update color buttons to reflect the default color (black)
+            self.updateColorButtons();
             
             console.log(`${MODULE.NAME}: Toolbar tools registered in Cartographer toolbar`);
         } catch (error) {
@@ -754,14 +887,29 @@ class DrawingTool {
     
     /**
      * Convert CSS color to PIXI color (number)
+     * Supports hex (#RRGGBB) and rgba(r, g, b, a) formats
      * @param {string|number} cssColor - CSS color string or number
-     * @returns {number} PIXI color number
+     * @returns {number} PIXI color number (0xRRGGBB)
      */
     cssToPixiColor(cssColor) {
         if (typeof cssColor === 'number') return cssColor;
-        if (typeof cssColor === 'string' && cssColor.startsWith('#')) {
-            return parseInt(cssColor.slice(1), 16);
+        
+        if (typeof cssColor === 'string') {
+            // Handle hex format (#RRGGBB)
+            if (cssColor.startsWith('#')) {
+                return parseInt(cssColor.slice(1), 16);
+            }
+            
+            // Handle rgba format (rgba(r, g, b, a))
+            const rgbaMatch = cssColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)/);
+            if (rgbaMatch) {
+                const r = parseInt(rgbaMatch[1], 10);
+                const g = parseInt(rgbaMatch[2], 10);
+                const b = parseInt(rgbaMatch[3], 10);
+                return (r << 16) | (g << 8) | b;
+            }
         }
+        
         return 0x000000; // black fallback
     }
     
@@ -993,6 +1141,14 @@ class DrawingTool {
         if (settings.type !== undefined) {
             this.state.brushSettings.type = settings.type;
         }
+        
+        // Update button states when settings change
+        if (settings.size !== undefined) {
+            this.updateLineWidthButtons();
+        }
+        if (settings.color !== undefined) {
+            this.updateColorButtons();
+        }
     }
     
     /**
@@ -1014,6 +1170,70 @@ class DrawingTool {
             );
         } catch (error) {
             console.error(`${MODULE.NAME}: Error updating timed erase button:`, error);
+        }
+    }
+    
+    /**
+     * Update active state of color buttons in secondary bar
+     * Uses Blacksmith's updateSecondaryBarItemActive API
+     */
+    updateColorButtons() {
+        try {
+            const blacksmithModule = game.modules.get('coffee-pub-blacksmith');
+            if (!blacksmithModule?.api?.updateSecondaryBarItemActive) {
+                return;
+            }
+            
+            const barTypeId = MODULE.ID;
+            const currentColor = this.state.brushSettings.color;
+            
+            // Update active state for each color button
+            if (this._colorButtons) {
+                // Get current player color with proper type checking
+                let playerColorHex = '#000000'; // Default fallback
+                if (game.user?.color) {
+                    // Check if it's a Foundry Color object
+                    if (game.user.color.constructor?.name === 'Color' || game.user.color.toHex) {
+                        // Foundry Color object - use toHex() method
+                        playerColorHex = '#' + game.user.color.toHex();
+                    } else if (typeof game.user.color === 'string') {
+                        playerColorHex = game.user.color;
+                    } else if (typeof game.user.color === 'number') {
+                        // Convert number to hex string
+                        playerColorHex = '#' + game.user.color.toString(16).padStart(6, '0');
+                    }
+                }
+                
+                // Ensure it's a valid hex string
+                if (!playerColorHex.startsWith('#')) {
+                    playerColorHex = '#000000';
+                }
+                
+                const r = parseInt(playerColorHex.slice(1, 3), 16);
+                const g = parseInt(playerColorHex.slice(3, 5), 16);
+                const b = parseInt(playerColorHex.slice(5, 7), 16);
+                const playerColorRgba = `rgba(${r}, ${g}, ${b}, 1.0)`;
+                
+                // Use the same static color constants
+                const colorPalette = {
+                    player: playerColorRgba,
+                    black: DrawingTool.strColor1,
+                    red: DrawingTool.strColor2,
+                    blue: DrawingTool.strColor3,
+                    green: DrawingTool.strColor4,
+                    yellow: DrawingTool.strColor5
+                };
+                
+                Object.entries(colorPalette).forEach(([colorKey, colorRgba]) => {
+                    blacksmithModule.api.updateSecondaryBarItemActive(
+                        barTypeId,
+                        this._colorButtons[colorKey],
+                        currentColor === colorRgba
+                    );
+                });
+            }
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error updating color buttons:`, error);
         }
     }
     
