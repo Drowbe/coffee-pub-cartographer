@@ -41,6 +41,9 @@ class DrawingTool {
         // PIXI drawings storage
         this._pixiDrawings = [];
         this._cleanupScheduled = false;
+        
+        // Preview graphics (shown while drawing)
+        this._previewGraphics = null;
     }
     
     /**
@@ -123,14 +126,17 @@ class DrawingTool {
         this.state.active = true;
         
         // Disable Foundry's default drawing controls to prevent conflicts
-        if (canvas.drawings && canvas.drawings.controls) {
-            canvas.drawings.controls.visible = false;
-            canvas.drawings.controls.active = false;
-        }
-        
-        // Switch to a non-drawing layer to prevent Foundry's drawing tool from activating
-        if (canvas.activeLayer && canvas.activeLayer.name === "drawings") {
-            canvas.tokens.activate();
+        if (canvas.drawings) {
+            // Hide drawing controls
+            if (canvas.drawings.controls) {
+                canvas.drawings.controls.visible = false;
+                canvas.drawings.controls.active = false;
+            }
+            
+            // Switch away from drawing layer if active
+            if (canvas.activeLayer && canvas.activeLayer.name === "drawings") {
+                canvas.tokens.activate();
+            }
         }
         
         this.attachCanvasHandlers();
@@ -216,6 +222,12 @@ class DrawingTool {
                 event.preventDefault();
                 event.stopPropagation();
                 event.stopImmediatePropagation();
+                
+                // Ensure we're not on the drawings layer
+                if (canvas.activeLayer && canvas.activeLayer.name === "drawings") {
+                    canvas.tokens.activate();
+                }
+                
                 self.startDrawing(event);
                 return false;
             }
@@ -295,7 +307,7 @@ class DrawingTool {
      * @param {PointerEvent} event - Pointer event
      */
     startDrawing(event) {
-        if (!canvas || !canvas.scene) return;
+        if (!canvas || !canvas.scene || !this.services?.canvasLayer) return;
         
         // Get world coordinates from pointer event
         const worldCoords = this.getWorldCoordinates(event);
@@ -306,6 +318,20 @@ class DrawingTool {
         // First point is always [0, 0] relative to start position
         this.state.drawingPoints = [[0, 0]];
         
+        // Create preview graphics for real-time drawing
+        // Use absolute coordinates for preview (matches what user sees)
+        this._previewGraphics = new PIXI.Graphics();
+        this._previewGraphics.lineStyle(
+            this.state.brushSettings.size,
+            this.cssToPixiColor(this.state.brushSettings.color),
+            1.0
+        );
+        // Start at the absolute position
+        this._previewGraphics.moveTo(worldCoords.x, worldCoords.y);
+        
+        // Add to layer for immediate display
+        this.services.canvasLayer.addChild(this._previewGraphics);
+        
         console.log(`${MODULE.NAME}: Drawing started at`, worldCoords);
     }
     
@@ -314,16 +340,39 @@ class DrawingTool {
      * @param {PointerEvent} event - Pointer event
      */
     updateDrawing(event) {
-        if (!canvas || !this.state.isDrawing) return;
+        if (!canvas || !this.state.isDrawing || !this._previewGraphics || !this.services?.canvasLayer) return;
         
         // Get world coordinates from pointer event
         const worldCoords = this.getWorldCoordinates(event);
         if (!worldCoords) return;
         
-        // Add point to drawing path (relative to start point)
+        // Add point to drawing path (relative to start point) for final drawing
         const relativeX = worldCoords.x - this.state.drawingStartPoint.x;
         const relativeY = worldCoords.y - this.state.drawingStartPoint.y;
         this.state.drawingPoints.push([relativeX, relativeY]);
+        
+        // Clear and redraw preview graphics to avoid coordinate issues
+        // This ensures clean drawing without weird lines
+        this._previewGraphics.clear();
+        this._previewGraphics.lineStyle(
+            this.state.brushSettings.size,
+            this.cssToPixiColor(this.state.brushSettings.color),
+            1.0
+        );
+        
+        // Redraw entire path using absolute coordinates
+        const startX = this.state.drawingStartPoint.x;
+        const startY = this.state.drawingStartPoint.y;
+        
+        if (this.state.drawingPoints.length > 0) {
+            const firstPoint = this.state.drawingPoints[0];
+            this._previewGraphics.moveTo(startX + firstPoint[0], startY + firstPoint[1]);
+            
+            for (let i = 1; i < this.state.drawingPoints.length; i++) {
+                const point = this.state.drawingPoints[i];
+                this._previewGraphics.lineTo(startX + point[0], startY + point[1]);
+            }
+        }
     }
     
     /**
@@ -340,7 +389,14 @@ class DrawingTool {
         }
         
         try {
-            // Draw directly on BlacksmithLayer using PIXI graphics
+            // Remove preview graphics
+            if (this._previewGraphics && this._previewGraphics.parent) {
+                this.services.canvasLayer.removeChild(this._previewGraphics);
+                this._previewGraphics.destroy();
+                this._previewGraphics = null;
+            }
+            
+            // Create final drawing on BlacksmithLayer using PIXI graphics
             // This avoids Foundry's Drawing API validation issues
             this.createPIXIDrawing(
                 this.state.drawingStartPoint.x,
@@ -364,6 +420,19 @@ class DrawingTool {
     }
     
     /**
+     * Convert CSS color to PIXI color (number)
+     * @param {string|number} cssColor - CSS color string or number
+     * @returns {number} PIXI color number
+     */
+    cssToPixiColor(cssColor) {
+        if (typeof cssColor === 'number') return cssColor;
+        if (typeof cssColor === 'string' && cssColor.startsWith('#')) {
+            return parseInt(cssColor.slice(1), 16);
+        }
+        return 0x000000; // black fallback
+    }
+    
+    /**
      * Create a drawing directly on BlacksmithLayer using PIXI graphics
      * This bypasses Foundry's Drawing API and validation issues
      * @param {number} startX - Starting X coordinate
@@ -379,18 +448,9 @@ class DrawingTool {
         
         const layer = this.services.canvasLayer;
         
-        // Convert CSS color to PIXI color (number)
-        function cssToPixiColor(cssColor) {
-            if (typeof cssColor === 'number') return cssColor;
-            if (cssColor.startsWith('#')) {
-                return parseInt(cssColor.slice(1), 16);
-            }
-            return 0x000000; // black fallback
-        }
-        
         // Create PIXI Graphics object
         const graphics = new PIXI.Graphics();
-        graphics.lineStyle(strokeWidth, cssToPixiColor(strokeColor), 1.0);
+        graphics.lineStyle(strokeWidth, this.cssToPixiColor(strokeColor), 1.0);
         
         // Draw the path
         if (points.length > 0) {
@@ -480,6 +540,13 @@ class DrawingTool {
      * Cancel the current drawing
      */
     cancelDrawing() {
+        // Remove preview graphics if exists
+        if (this._previewGraphics && this._previewGraphics.parent && this.services?.canvasLayer) {
+            this.services.canvasLayer.removeChild(this._previewGraphics);
+            this._previewGraphics.destroy();
+            this._previewGraphics = null;
+        }
+        
         this.state.isDrawing = false;
         this.state.drawingPoints = [];
         this.state.drawingStartPoint = null;
