@@ -301,11 +301,13 @@ class CartographerToolbar {
      * @param {string} toolId - Unique tool identifier
      * @param {Object} toolConfig - Tool configuration
      * @param {string} toolConfig.icon - FontAwesome icon class (required)
-     * @param {string} [toolConfig.title] - Tooltip text (optional)
-     * @param {string} [toolConfig.name] - Alternative to title (optional)
-     * @param {Function} [toolConfig.active] - Function that returns boolean for active state (optional)
+     * @param {string} [toolConfig.label] - Text label (optional)
+     * @param {string} [toolConfig.tooltip] - Custom tooltip text (optional)
+     * @param {string} [toolConfig.title] - Alternative to tooltip (optional, for backwards compatibility)
+     * @param {boolean|Function} [toolConfig.active] - Active state (boolean or function that returns boolean) (optional)
      * @param {Function} toolConfig.onClick - Click handler function (required)
-     * @param {string} [toolConfig.color] - RGBA color value for button styling, e.g., "rgba(255, 0, 0, 0.5)" (optional)
+     * @param {string} [toolConfig.buttonColor] - RGBA button background color, e.g., "rgba(161, 60, 41, 0.9)" (optional)
+     * @param {string} [toolConfig.borderColor] - RGBA border color, e.g., "rgba(161, 60, 41, 0.5)" (optional)
      * @param {number} [toolConfig.order] - Order/priority for button placement, lower numbers appear first (optional)
      */
     registerTool(toolId, toolConfig) {
@@ -331,14 +333,33 @@ class CartographerToolbar {
             // Convert our tool config to Blacksmith secondary bar item format
             const itemData = {
                 icon: toolConfig.icon,
-                title: toolConfig.title || toolConfig.name || toolId, // Use title, name, or fallback to toolId
-                active: toolConfig.active, // Optional: function that returns boolean
+                tooltip: toolConfig.tooltip || toolConfig.title || toolConfig.name || toolId, // Use tooltip, title, name, or fallback to toolId
                 onClick: toolConfig.onClick
             };
             
-            // Add optional color if provided
-            if (toolConfig.color) {
-                itemData.color = toolConfig.color; // RGBA string, e.g., "rgba(255, 0, 0, 0.5)"
+            // Add optional label if provided
+            if (toolConfig.label) {
+                itemData.label = toolConfig.label;
+            }
+            
+            // Add optional active state if provided
+            if (toolConfig.active !== undefined) {
+                // Can be boolean or function that returns boolean
+                if (typeof toolConfig.active === 'function') {
+                    itemData.active = toolConfig.active();
+                } else {
+                    itemData.active = toolConfig.active;
+                }
+            }
+            
+            // Add optional buttonColor if provided
+            if (toolConfig.buttonColor) {
+                itemData.buttonColor = toolConfig.buttonColor; // RGBA string, e.g., "rgba(161, 60, 41, 0.9)"
+            }
+            
+            // Add optional borderColor if provided
+            if (toolConfig.borderColor) {
+                itemData.borderColor = toolConfig.borderColor; // RGBA string, e.g., "rgba(161, 60, 41, 0.5)"
             }
             
             // Add optional order if provided
@@ -346,11 +367,19 @@ class CartographerToolbar {
                 itemData.order = toolConfig.order; // Number, lower values appear first
             }
             
+            // Log the complete itemData being sent to Blacksmith API
+            console.log(`${MODULE.NAME}: Registering secondary bar item:`, {
+                barTypeId: barTypeId,
+                itemId: itemId,
+                itemData: itemData,
+                fullConfig: JSON.stringify(itemData, null, 2)
+            });
+            
             if (typeof BlacksmithUtils !== 'undefined') {
                 BlacksmithUtils.postConsoleAndNotification(
                     MODULE.NAME,
                     'CARTOGRAPHER | Menubar | Registering secondary bar item',
-                    `barTypeId: ${barTypeId}, itemId: ${itemId}, order: ${toolConfig.order ?? 'default'}`,
+                    `barTypeId: ${barTypeId}, itemId: ${itemId}, order: ${toolConfig.order ?? 'default'}, buttonColor: ${toolConfig.buttonColor ?? 'none'}, borderColor: ${toolConfig.borderColor ?? 'none'}`,
                     true,
                     false
                 );
