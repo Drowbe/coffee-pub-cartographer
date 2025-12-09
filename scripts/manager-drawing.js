@@ -303,7 +303,7 @@ class DrawingTool {
             });
             
             cartographerToolbar.registerTool(self._lineWidthButtons.thick, {
-                icon: "fa-solid fa-grip-lines-vertical",
+                icon: "fa-solid fa-bars",
                 tooltip: "Thick line (12px)",
                 group: "line-width", // Switch group
                 order: 3,
@@ -380,11 +380,11 @@ class DrawingTool {
             // These can be moved to settings later for user customization
             const colorPalette = {
                 player: { rgba: playerColorRgba, name: 'Player Color', icon: 'fa-solid fa-user' },
-                black: { rgba: DrawingTool.strColor1, name: 'Black', icon: 'fa-solid fa-palette' },
-                red: { rgba: DrawingTool.strColor2, name: 'Red', icon: 'fa-solid fa-palette' },
-                blue: { rgba: DrawingTool.strColor3, name: 'Blue', icon: 'fa-solid fa-palette' },
-                green: { rgba: DrawingTool.strColor4, name: 'Green', icon: 'fa-solid fa-palette' },
-                yellow: { rgba: DrawingTool.strColor5, name: 'Yellow', icon: 'fa-solid fa-palette' }
+                black: { rgba: DrawingTool.strColor1, name: 'Black', icon: 'fa-solid fa-circle' },
+                red: { rgba: DrawingTool.strColor2, name: 'Red', icon: 'fa-solid fa-circle' },
+                blue: { rgba: DrawingTool.strColor3, name: 'Blue', icon: 'fa-solid fa-circle' },
+                green: { rgba: DrawingTool.strColor4, name: 'Green', icon: 'fa-solid fa-circle' },
+                yellow: { rgba: DrawingTool.strColor5, name: 'Yellow', icon: 'fa-solid fa-circle' }
             };
             
             // Register color buttons
@@ -1193,9 +1193,12 @@ class DrawingTool {
                 let playerColorHex = '#000000'; // Default fallback
                 if (game.user?.color) {
                     // Check if it's a Foundry Color object
-                    if (game.user.color.constructor?.name === 'Color' || game.user.color.toHex) {
-                        // Foundry Color object - use toHex() method
-                        playerColorHex = '#' + game.user.color.toHex();
+                    if (game.user.color.constructor?.name === 'Color') {
+                        // Foundry Color object - convert to number and then to hex
+                        const colorValue = Number(game.user.color);
+                        if (!isNaN(colorValue)) {
+                            playerColorHex = '#' + colorValue.toString(16).padStart(6, '0');
+                        }
                     } else if (typeof game.user.color === 'string') {
                         playerColorHex = game.user.color;
                     } else if (typeof game.user.color === 'number') {
