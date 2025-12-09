@@ -1,0 +1,9 @@
+{
+	"coffee-pub-cartographer": {
+		
+		"enableFeature-Label": "Enable Feature",
+		"enableFeature-Hint": "Enable or disable the main feature of this module."
+		
+	}
+}
+
