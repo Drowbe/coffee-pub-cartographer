@@ -161,7 +161,7 @@ class DrawingTool {
             return;
         }
         
-        // Register keyboard handlers for "D" key activation
+        // Register keyboard handlers for backslash (\) key activation
         this.registerKeyboardHandlers();
         
         // Register scene change cleanup hook
@@ -204,7 +204,7 @@ class DrawingTool {
             // Register drawing tool toggle button in Cartographer toolbar
             cartographerToolbar.registerTool(`${MODULE.ID}-draw`, {
                 icon: "fa-solid fa-pen",
-                tooltip: "Toggle Drawing Tool (or hold 'D' key)",
+                    tooltip: "Toggle Drawing Tool (or hold \\ key)",
                 active: () => self.state.active,
                 order: 1, // First button
                 onClick: () => {
@@ -419,17 +419,18 @@ class DrawingTool {
     }
     
     /**
-     * Register keyboard handlers for "D" key activation
+     * Register keyboard handlers for backslash (\) key activation
      */
     registerKeyboardHandlers() {
         const self = this;
         
-        // Handle "D" key down - activate drawing mode
+        // Handle backslash key down - activate drawing mode
         // Drawing will start automatically on first mouse move
         this._keyHandlers.keydown = (event) => {
-            // Only activate if "D" key is pressed and not already active
+            // Only activate if backslash key is pressed and not already active
             // Ignore if typing in an input field
-            if (event.key.toLowerCase() === 'd' && 
+            // event.key === '\\' or event.code === 'Backslash' for backslash key
+            if ((event.key === '\\' || event.code === 'Backslash') && 
                 !event.ctrlKey && 
                 !event.altKey && 
                 !event.metaKey &&
@@ -443,9 +444,9 @@ class DrawingTool {
             }
         };
         
-        // Handle "D" key up - stop drawing and deactivate
+        // Handle backslash key up - stop drawing and deactivate
         this._keyHandlers.keyup = (event) => {
-            if (event.key.toLowerCase() === 'd' && this._keyDown) {
+            if ((event.key === '\\' || event.code === 'Backslash') && this._keyDown) {
                 this._keyDown = false;
                 
                 // Finish any active drawing first
@@ -659,7 +660,7 @@ class DrawingTool {
         
         // Attach pointer event handlers with capture phase to intercept before Foundry
         this._handlePointerDown = (event) => {
-            // If key-based mode is active, ignore mouse clicks (drawing is controlled by "D" key)
+            // If key-based mode is active, ignore mouse clicks (drawing is controlled by backslash key)
             if (self._keyDown) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -684,9 +685,9 @@ class DrawingTool {
         };
         
         this._handlePointerMove = (event) => {
-            // Update drawing while "D" is held OR while manually drawing
+            // Update drawing while backslash is held OR while manually drawing
             if (self.state.active) {
-                // Key-based mode: if "D" is held, start/continue drawing on mouse move
+                // Key-based mode: if backslash is held, start/continue drawing on mouse move
                 if (self._keyDown) {
                     if (!self.state.isDrawing) {
                         // Start drawing on first mouse move while "D" is held
@@ -705,7 +706,7 @@ class DrawingTool {
         
         this._handlePointerUp = (event) => {
             // Only finish on mouse up if NOT using key-based activation
-            // Key-based mode finishes when "D" is released, not on mouse up
+            // Key-based mode finishes when backslash is released, not on mouse up
             if (self.state.active && self.state.isDrawing && !self._keyDown) {
                 self.finishDrawing(event);
             }
