@@ -487,153 +487,6 @@ class DrawingTool {
     }
     
     /**
-     * Create a temporary drawing using Foundry's Drawing API
-     * @param {number} startX - Starting X coordinate
-     * @param {number} startY - Starting Y coordinate
-     * @param {Array} points - Array of [x, y] coordinate pairs
-     * @param {number} strokeWidth - Brush size
-     * @param {string} strokeColor - Brush color
-     * @returns {Promise<Drawing>} Created drawing object
-     */
-    async createTemporaryDrawing(startX, startY, points, strokeWidth, strokeColor) {
-        if (!canvas || !canvas.scene) {
-            throw new Error('Canvas or scene not available');
-        }
-        
-        // Validate minimum requirements for a visible drawing
-        if (!points || points.length < 2) {
-            throw new Error('Drawing must have at least 2 points');
-        }
-        
-        // Ensure stroke width is valid (minimum 1) - Foundry requires visible line
-        const validStrokeWidth = Math.max(1, strokeWidth || 2);
-        
-        // Convert stroke color to numeric format (0xRRGGBB) for v13
-        // Foundry v13 requires strokeColor to be a NUMBER, not a CSS string
-        function normalizeStrokeColor(input) {
-            if (typeof input === "number") {
-                console.log(`${MODULE.NAME}: Color already numeric:`, input);
-                return input;
-            }
-            
-            if (typeof input === "string") {
-                let c = input.trim().toLowerCase();
-                if (c.startsWith("#")) c = c.slice(1);
-                if (c.startsWith("0x")) c = c.slice(2);
-                
-                const parsed = Number.parseInt(c, 16);
-                if (!Number.isNaN(parsed)) {
-                    console.log(`${MODULE.NAME}: Converted color "${input}" to numeric:`, parsed);
-                    return parsed;
-                }
-            }
-            
-            // Fallback to black
-            console.warn(`${MODULE.NAME}: Invalid color "${strokeColor}", using black (0x000000)`);
-            return 0x000000;
-        }
-        
-        const strokeColorNumeric = normalizeStrokeColor(strokeColor);
-        console.log(`${MODULE.NAME}: Final strokeColor:`, strokeColorNumeric, `(type: ${typeof strokeColorNumeric})`);
-        
-        // Get timeout setting
-        const timeout = BlacksmithUtils?.getSettingSafely(
-            MODULE.ID,
-            'drawing.timeout',
-            3600
-        ) || 3600;
-        
-        // Calculate expiration time (0 = never expire)
-        const expiresAt = timeout > 0 ? Date.now() + (timeout * 1000) : null;
-        
-        // Prepare drawing data for v13
-        // v13 requires: strokeColor as NUMBER (0xRRGGBB), strokeAlpha > 0 for visible line
-        const drawingData = {
-            type: "f", // freehand
-            author: game.user.id,
-            x: startX,
-            y: startY,
-            bezierFactor: 0,
-            points: points, // Points are relative to x, y
-            strokeWidth: validStrokeWidth,
-            strokeColor: strokeColorNumeric, // NUMBER, not string!
-            strokeAlpha: 1.0, // Required for visible line in v13
-            
-            // Explicitly "no fill" / "no text"
-            fillColor: null,
-            fillAlpha: 0,
-            text: "",
-            textAlpha: 0,
-            textColor: null
-        };
-        
-        // Add flags AFTER creation succeeds, not during creation
-        // This avoids validation issues
-        
-        // Debug: Log full drawing data before creation
-        console.log(`${MODULE.NAME}: Creating drawing with:`, {
-            type: drawingData.type,
-            points: drawingData.points.length,
-            firstPoint: drawingData.points[0],
-            lastPoint: drawingData.points[drawingData.points.length - 1],
-            strokeWidth: drawingData.strokeWidth,
-            strokeColor: drawingData.strokeColor,
-            strokeColorType: typeof drawingData.strokeColor,
-            strokeAlpha: drawingData.strokeAlpha,
-            x: drawingData.x,
-            y: drawingData.y,
-            fullData: drawingData
-        });
-        
-        // Minimal test succeeded, so schema is correct
-        // The issue might be with the points array or flags interfering
-        
-        // Create drawing using Foundry's Drawing API
-        // Use the EXACT same format as the minimal test that succeeded
-        const drawings = await canvas.scene.createEmbeddedDocuments("Drawing", [drawingData]);
-        
-        if (!drawings || drawings.length === 0) {
-            throw new Error('Failed to create drawing');
-        }
-        
-        const drawing = drawings[0];
-        
-        // Now add flags via update (after creation succeeds)
-        if (expiresAt || this.state.brushSettings.type) {
-            try {
-                await drawing.update({
-                    flags: {
-                        [MODULE.ID]: {
-                            temporary: true,
-                            layerManaged: true,
-                            playerDrawn: true,
-                            expiresAt: expiresAt,
-                            brushType: this.state.brushSettings.type,
-                            sessionId: game.sessionId
-                        }
-                    }
-                });
-            } catch (flagError) {
-                console.warn(`${MODULE.NAME}: Failed to add flags to drawing:`, flagError);
-                // Continue anyway - drawing was created successfully
-            }
-        }
-        
-        // Log creation
-        if (BlacksmithUtils) {
-            BlacksmithUtils.postConsoleAndNotification(
-                MODULE.ID,
-                'Drawing created',
-                { drawingId: drawing.id },
-                false,
-                false
-            );
-        }
-        
-        return drawing;
-    }
-    
-    /**
      * Get brush settings
      * @returns {Object} Brush settings object
      */
@@ -656,6 +509,11 @@ class DrawingTool {
             this.state.brushSettings.type = settings.type;
         }
     }
+    
+    /**
+     * OLD CODE REMOVED - Using PIXI graphics directly instead of Foundry's Drawing API
+     * The createTemporaryDrawing function has been replaced with createPIXIDrawing
+     */
 }
 
 // ================================================================== 
