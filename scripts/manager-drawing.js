@@ -159,9 +159,9 @@ class DrawingTool {
             // Register drawing tool toggle button in Cartographer toolbar
             cartographerToolbar.registerTool(`${MODULE.ID}-draw`, {
                 icon: "fa-solid fa-pen",
-                name: "Cartographer Drawing Tool",
                 title: "Toggle Drawing Tool (or hold 'D' key)",
                 active: () => self.state.active,
+                order: 1, // First button
                 onClick: () => {
                     if (self.state.active) {
                         self.deactivate();
@@ -175,8 +175,9 @@ class DrawingTool {
             if (game.user.isGM) {
                 cartographerToolbar.registerTool(`${MODULE.ID}-clear`, {
                     icon: "fa-solid fa-eraser",
-                    name: "Clear All Drawings",
                     title: "Clear all temporary drawings (GM only)",
+                    order: 2, // Second button
+                    color: "rgba(255, 100, 100, 0.3)", // Optional: red tint for destructive action
                     onClick: () => {
                         if (game.user.isGM) {
                             self.clearAllDrawings();

@@ -300,6 +300,13 @@ class CartographerToolbar {
      * Register a tool in the Cartographer secondary bar using Blacksmith API
      * @param {string} toolId - Unique tool identifier
      * @param {Object} toolConfig - Tool configuration
+     * @param {string} toolConfig.icon - FontAwesome icon class (required)
+     * @param {string} [toolConfig.title] - Tooltip text (optional)
+     * @param {string} [toolConfig.name] - Alternative to title (optional)
+     * @param {Function} [toolConfig.active] - Function that returns boolean for active state (optional)
+     * @param {Function} toolConfig.onClick - Click handler function (required)
+     * @param {string} [toolConfig.color] - RGBA color value for button styling, e.g., "rgba(255, 0, 0, 0.5)" (optional)
+     * @param {number} [toolConfig.order] - Order/priority for button placement, lower numbers appear first (optional)
      */
     registerTool(toolId, toolConfig) {
         try {
@@ -324,16 +331,26 @@ class CartographerToolbar {
             // Convert our tool config to Blacksmith secondary bar item format
             const itemData = {
                 icon: toolConfig.icon,
-                title: toolConfig.title || toolConfig.name,
+                title: toolConfig.title || toolConfig.name || toolId, // Use title, name, or fallback to toolId
                 active: toolConfig.active, // Optional: function that returns boolean
                 onClick: toolConfig.onClick
             };
+            
+            // Add optional color if provided
+            if (toolConfig.color) {
+                itemData.color = toolConfig.color; // RGBA string, e.g., "rgba(255, 0, 0, 0.5)"
+            }
+            
+            // Add optional order if provided
+            if (toolConfig.order !== undefined && toolConfig.order !== null) {
+                itemData.order = toolConfig.order; // Number, lower values appear first
+            }
             
             if (typeof BlacksmithUtils !== 'undefined') {
                 BlacksmithUtils.postConsoleAndNotification(
                     MODULE.NAME,
                     'CARTOGRAPHER | Menubar | Registering secondary bar item',
-                    `barTypeId: ${barTypeId}, itemId: ${itemId}`,
+                    `barTypeId: ${barTypeId}, itemId: ${itemId}, order: ${toolConfig.order ?? 'default'}`,
                     true,
                     false
                 );
@@ -352,7 +369,7 @@ class CartographerToolbar {
                     BlacksmithUtils.postConsoleAndNotification(
                         MODULE.NAME,
                         'CARTOGRAPHER | Menubar | Tool registered in secondary bar',
-                        `Item ID: ${itemId}`,
+                        `Item ID: ${itemId}, Order: ${toolConfig.order ?? 'default'}`,
                         false,
                         false
                     );
