@@ -41,7 +41,7 @@ class DrawingTool {
         
         // PIXI drawings storage
         this._pixiDrawings = [];
-        this._cleanupScheduled = false;
+        this._cleanupInterval = null; // Store interval ID for cleanup
         
         // Preview graphics (shown while drawing)
         this._previewGraphics = null;
@@ -96,6 +96,12 @@ class DrawingTool {
         
         // Hooks are automatically cleaned up by BlacksmithHookManager via context
         this.hookIds = [];
+        
+        // Clear cleanup interval if it exists
+        if (this._cleanupInterval) {
+            clearInterval(this._cleanupInterval);
+            this._cleanupInterval = null;
+        }
         
         console.log(`${MODULE.NAME}: ${this.displayName} cleanup`);
     }
@@ -201,6 +207,16 @@ class DrawingTool {
                         if (game.user.isGM) {
                             self.state.timedEraseEnabled = !self.state.timedEraseEnabled;
                             self.updateTimedEraseButton();
+                            
+                            // Restart cleanup with new interval based on timed erase state
+                            if (self._cleanupInterval) {
+                                clearInterval(self._cleanupInterval);
+                                self._cleanupInterval = null;
+                            }
+                            // Schedule cleanup with appropriate interval
+                            if (self._pixiDrawings && self._pixiDrawings.length > 0) {
+                                self.scheduleCleanup();
+                            }
                             
                             const status = self.state.timedEraseEnabled ? 'enabled' : 'disabled';
                             const timeout = BlacksmithUtils?.getSettingSafely(
@@ -885,16 +901,25 @@ class DrawingTool {
     
     /**
      * Schedule cleanup of expired drawings
+     * Uses a shorter interval when timed erase is enabled for more responsive cleanup
      */
     scheduleCleanup() {
-        if (this._cleanupScheduled) return;
+        // If cleanup is already scheduled, don't create another interval
+        if (this._cleanupInterval) return;
         
-        this._cleanupScheduled = true;
+        // Determine cleanup interval based on timed erase setting
+        // If timed erase is enabled, check more frequently (every 2 seconds)
+        // Otherwise, check every 10 seconds
+        const interval = this.state.timedEraseEnabled ? 2000 : 10000;
         
-        // Clean up expired drawings periodically
-        setInterval(() => {
+        this._cleanupInterval = setInterval(() => {
             this.cleanupExpiredDrawings();
-        }, 60000); // Check every minute
+        }, interval);
+        
+        // Also check immediately if timed erase is enabled
+        if (this.state.timedEraseEnabled) {
+            this.cleanupExpiredDrawings();
+        }
     }
     
     /**
@@ -906,6 +931,7 @@ class DrawingTool {
         const now = Date.now();
         const layer = this.services.canvasLayer;
         
+        let removedCount = 0;
         this._pixiDrawings = this._pixiDrawings.filter(drawing => {
             if (drawing.expiresAt && now > drawing.expiresAt) {
                 // Remove from layer
@@ -913,14 +939,19 @@ class DrawingTool {
                     layer.removeChild(drawing.graphics);
                     drawing.graphics.destroy();
                 }
+                removedCount++;
                 return false; // Remove from array
             }
             return true; // Keep in array
         });
         
-        if (this._pixiDrawings.length === 0) {
-            this._cleanupScheduled = false;
+        // If we removed drawings and timed erase is enabled, log it
+        if (removedCount > 0 && this.state.timedEraseEnabled) {
+            console.log(`${MODULE.NAME}: Cleaned up ${removedCount} expired drawing(s)`);
         }
+        
+        // If no drawings remain and cleanup interval exists, we can keep it running
+        // in case new drawings are added, so we don't clear the interval
     }
     
     /**
