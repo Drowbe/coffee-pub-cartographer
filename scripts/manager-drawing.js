@@ -44,6 +44,13 @@ class DrawingTool {
         
         // Preview graphics (shown while drawing)
         this._previewGraphics = null;
+        
+        // Key-based activation
+        this._keyDown = false;
+        this._keyHandlers = {
+            keydown: null,
+            keyup: null
+        };
     }
     
     /**
@@ -78,6 +85,14 @@ class DrawingTool {
         // Detach canvas handlers
         this.detachCanvasHandlers();
         
+        // Remove keyboard handlers
+        if (this._keyHandlers.keydown) {
+            document.removeEventListener('keydown', this._keyHandlers.keydown);
+        }
+        if (this._keyHandlers.keyup) {
+            document.removeEventListener('keyup', this._keyHandlers.keyup);
+        }
+        
         // Hooks are automatically cleaned up by BlacksmithHookManager via context
         this.hookIds = [];
         
@@ -101,9 +116,65 @@ class DrawingTool {
             return;
         }
         
-        // Canvas interactions will be set up when tool is activated
-        // No hooks needed here - we'll attach event listeners directly
+        // Register keyboard handlers for "D" key activation
+        this.registerKeyboardHandlers();
+        
         console.log(`${MODULE.NAME}: Hooks registered for drawing tool`);
+    }
+    
+    /**
+     * Register keyboard handlers for "D" key activation
+     */
+    registerKeyboardHandlers() {
+        const self = this;
+        
+        // Handle "D" key down - activate drawing mode
+        // Drawing will start automatically on first mouse move
+        this._keyHandlers.keydown = (event) => {
+            // Only activate if "D" key is pressed and not already active
+            // Ignore if typing in an input field
+            if (event.key.toLowerCase() === 'd' && 
+                !event.ctrlKey && 
+                !event.altKey && 
+                !event.metaKey &&
+                event.target.tagName !== 'INPUT' &&
+                event.target.tagName !== 'TEXTAREA' &&
+                !this._keyDown) {
+                
+                this._keyDown = true;
+                this.activate(true); // keyBased = true
+                // Drawing will start on first mouse move (handled in pointermove)
+            }
+        };
+        
+        // Handle "D" key up - stop drawing and deactivate
+        this._keyHandlers.keyup = (event) => {
+            if (event.key.toLowerCase() === 'd' && this._keyDown) {
+                this._keyDown = false;
+                
+                // Finish any active drawing first
+                if (this.state.isDrawing) {
+                    // Get current mouse position for final point
+                    const mousePosition = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
+                    if (mousePosition) {
+                        const syntheticEvent = {
+                            clientX: mousePosition.x + canvas.app.view.getBoundingClientRect().left,
+                            clientY: mousePosition.y + canvas.app.view.getBoundingClientRect().top
+                        };
+                        this.finishDrawing(syntheticEvent);
+                    } else {
+                        // Fallback: finish with empty event
+                        this.finishDrawing({ clientX: 0, clientY: 0 });
+                    }
+                }
+                
+                this.deactivate(true); // keyBased = true
+            }
+        };
+        
+        // Attach to document
+        document.addEventListener('keydown', this._keyHandlers.keydown);
+        document.addEventListener('keyup', this._keyHandlers.keyup);
     }
     
     /**
@@ -116,12 +187,17 @@ class DrawingTool {
     
     /**
      * Activate the drawing tool
+     * @param {boolean} keyBased - If true, activated via key press (no console message)
      */
-    activate() {
+    activate(keyBased = false) {
         if (!this.canUserDraw()) {
-            console.warn(`${MODULE.NAME}: User cannot draw - check settings`);
+            if (!keyBased) {
+                console.warn(`${MODULE.NAME}: User cannot draw - check settings`);
+            }
             return false;
         }
+        
+        if (this.state.active) return true; // Already active
         
         this.state.active = true;
         
@@ -140,14 +216,20 @@ class DrawingTool {
         }
         
         this.attachCanvasHandlers();
-        console.log(`${MODULE.NAME}: ${this.displayName} activated`);
+        
+        if (!keyBased) {
+            console.log(`${MODULE.NAME}: ${this.displayName} activated`);
+        }
         return true;
     }
     
     /**
      * Deactivate the drawing tool
+     * @param {boolean} keyBased - If true, deactivated via key release (no console message)
      */
-    deactivate() {
+    deactivate(keyBased = false) {
+        if (!this.state.active) return; // Already inactive
+        
         this.state.active = false;
         this.detachCanvasHandlers();
         
@@ -161,7 +243,9 @@ class DrawingTool {
             canvas.drawings.controls.visible = true;
         }
         
-        console.log(`${MODULE.NAME}: ${this.displayName} deactivated`);
+        if (!keyBased) {
+            console.log(`${MODULE.NAME}: ${this.displayName} deactivated`);
+        }
     }
     
     /**
@@ -217,6 +301,14 @@ class DrawingTool {
         
         // Attach pointer event handlers with capture phase to intercept before Foundry
         this._handlePointerDown = (event) => {
+            // If key-based mode is active, ignore mouse clicks (drawing is controlled by "D" key)
+            if (self._keyDown) {
+                event.preventDefault();
+                event.stopPropagation();
+                return false;
+            }
+            
+            // Manual activation mode (console): allow mouse clicks
             if (self.state.active && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
                 // Prevent Foundry's default drawing tool from activating
                 event.preventDefault();
@@ -234,13 +326,29 @@ class DrawingTool {
         };
         
         this._handlePointerMove = (event) => {
-            if (self.state.active && self.state.isDrawing) {
-                self.updateDrawing(event);
+            // Update drawing while "D" is held OR while manually drawing
+            if (self.state.active) {
+                // Key-based mode: if "D" is held, start/continue drawing on mouse move
+                if (self._keyDown) {
+                    if (!self.state.isDrawing) {
+                        // Start drawing on first mouse move while "D" is held
+                        self.startDrawing(event);
+                    } else {
+                        // Continue drawing
+                        self.updateDrawing(event);
+                    }
+                } 
+                // Manual mode: only update if already drawing (mouse button was clicked)
+                else if (self.state.isDrawing) {
+                    self.updateDrawing(event);
+                }
             }
         };
         
         this._handlePointerUp = (event) => {
-            if (self.state.active && self.state.isDrawing) {
+            // Only finish on mouse up if NOT using key-based activation
+            // Key-based mode finishes when "D" is released, not on mouse up
+            if (self.state.active && self.state.isDrawing && !self._keyDown) {
                 self.finishDrawing(event);
             }
         };
