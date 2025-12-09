@@ -63,10 +63,21 @@ class CartographerToolbar {
             
             const barTypeId = MODULE.ID;
             const barConfig = {
-                name: "Cartographer Tools",
+                name: "Cartographer",
                 icon: "fa-solid fa-map",
-                title: "Cartographer Tools",
-                persistence: "manual" // manual = stays open until closed, auto = closes after delay
+                title: "Cartographer",
+                persistence: "manual", // manual = stays open until closed, auto = closes after delay
+                groups: {
+                    'line-width': {
+                        mode: 'switch', // Radio-button behavior: only one active at a time
+                        order: 10 // Order for the group
+                    },
+                    'erase': {
+                        mode: 'default', // Independent buttons (supports toggleable)
+                        order: 20 // Order for the group
+                    }
+                    // 'default' group is automatically created for items without a group
+                }
             };
             
             if (typeof BlacksmithUtils !== 'undefined') {
@@ -190,7 +201,7 @@ class CartographerToolbar {
                 icon: "fa-solid fa-map",
                 name: "Cartographer",
                 title: "Cartographer Tools",
-                zone: "left",              // Optional: left, middle, right (default: left)
+                zone: "middle",              // Optional: left, middle, right (default: middle)
                 order: 5,                  // Optional: order within zone
                 moduleId: MODULE.ID,       // Optional: your module ID
                 gmOnly: false,             // Optional: whether tool is GM-only
@@ -342,6 +353,11 @@ class CartographerToolbar {
                 itemData.label = toolConfig.label;
             }
             
+            // Add optional toggleable if provided (for default-mode groups)
+            if (toolConfig.toggleable !== undefined) {
+                itemData.toggleable = toolConfig.toggleable; // Boolean: makes button toggleable
+            }
+            
             // Add optional active state if provided
             if (toolConfig.active !== undefined) {
                 // Can be boolean or function that returns boolean
@@ -367,10 +383,16 @@ class CartographerToolbar {
                 itemData.order = toolConfig.order; // Number, lower values appear first
             }
             
+            // Add optional group if provided (items without group go to 'default' group)
+            if (toolConfig.group) {
+                itemData.group = toolConfig.group; // Group ID, e.g., 'line-width'
+            }
+            
             // Log the complete itemData being sent to Blacksmith API
             console.log(`${MODULE.NAME}: Registering secondary bar item:`, {
                 barTypeId: barTypeId,
                 itemId: itemId,
+                group: toolConfig.group || 'default',
                 itemData: itemData,
                 fullConfig: JSON.stringify(itemData, null, 2)
             });

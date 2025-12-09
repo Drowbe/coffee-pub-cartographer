@@ -25,10 +25,11 @@ class DrawingTool {
         this.state = {
             active: false,
             brushSettings: {
-                size: 2,
+                size: 6, // Default to medium (6px)
                 color: '#000000',
                 type: 'pen' // pen, marker, highlighter
             },
+            timedEraseEnabled: false, // Toggle for timed erase feature
             currentDrawing: null,
             isDrawing: false,
             drawingPoints: [],
@@ -171,13 +172,15 @@ class DrawingTool {
                 }
             });
             
-            // Register GM-only clear drawings button
+            // Register GM-only erase group buttons
             if (game.user.isGM) {
+                // Clear all drawings button
                 cartographerToolbar.registerTool(`${MODULE.ID}-clear`, {
                     icon: "fa-solid fa-eraser",
                     tooltip: "Clear all temporary drawings (GM only)",
-                    order: 2, // Second button
-                    buttonColor: "rgba(161, 60, 41, 0.9)", // Red tint for destructive action
+                    group: "erase", // Erase group
+                    order: 1,
+                    buttonColor: "rgba(161, 60, 41, 0.2)", // Red tint for destructive action
                     onClick: () => {
                         if (game.user.isGM) {
                             self.clearAllDrawings();
@@ -185,7 +188,80 @@ class DrawingTool {
                         }
                     }
                 });
+                
+                // Timed erase toggle button
+                cartographerToolbar.registerTool(`${MODULE.ID}-timed-erase`, {
+                    icon: "fa-solid fa-clock",
+                    tooltip: "Toggle timed erase (drawings auto-delete after timeout)",
+                    group: "erase", // Erase group
+                    order: 2,
+                    toggleable: true, // Makes it a toggle button
+                    active: () => self.state.timedEraseEnabled,
+                    onClick: () => {
+                        if (game.user.isGM) {
+                            self.state.timedEraseEnabled = !self.state.timedEraseEnabled;
+                            self.updateTimedEraseButton();
+                            
+                            const status = self.state.timedEraseEnabled ? 'enabled' : 'disabled';
+                            const timeout = BlacksmithUtils?.getSettingSafely(
+                                MODULE.ID,
+                                'drawing.timedEraseTimeout',
+                                30
+                            ) || 30;
+                            ui.notifications.info(
+                                `${MODULE.NAME}: Timed erase ${status} (${timeout}s timeout)`
+                            );
+                        }
+                    }
+                });
             }
+            
+            // Register line width buttons in switch group (radio-button behavior)
+            // Store references for updating active state
+            self._lineWidthButtons = {
+                thin: `${MODULE.ID}-line-width-thin`,
+                medium: `${MODULE.ID}-line-width-medium`,
+                thick: `${MODULE.ID}-line-width-thick`
+            };
+            
+            cartographerToolbar.registerTool(self._lineWidthButtons.thin, {
+                icon: "fa-solid fa-minus",
+                tooltip: "Thin line (3px)",
+                group: "line-width", // Switch group
+                order: 1,
+                active: () => self.state.brushSettings.size === 3,
+                onClick: () => {
+                    self.setBrushSettings({ size: 3 });
+                    self.updateLineWidthButtons();
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._lineWidthButtons.medium, {
+                icon: "fa-solid fa-grip-lines",
+                tooltip: "Medium line (6px)",
+                group: "line-width", // Switch group
+                order: 2,
+                active: () => self.state.brushSettings.size === 6,
+                onClick: () => {
+                    self.setBrushSettings({ size: 6 });
+                    self.updateLineWidthButtons();
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._lineWidthButtons.thick, {
+                icon: "fa-solid fa-grip-lines-vertical",
+                tooltip: "Thick line (12px)",
+                group: "line-width", // Switch group
+                order: 3,
+                active: () => self.state.brushSettings.size === 12,
+                onClick: () => {
+                    self.setBrushSettings({ size: 12 });
+                    self.updateLineWidthButtons();
+                }
+            });
+            
+            // Update line width buttons to reflect the default size (medium = 6px)
+            self.updateLineWidthButtons();
             
             console.log(`${MODULE.NAME}: Toolbar tools registered in Cartographer toolbar`);
         } catch (error) {
@@ -782,9 +858,22 @@ class DrawingTool {
     
     /**
      * Get expiration time for drawings
+     * Uses timed erase timeout if enabled, otherwise uses the regular timeout setting
      * @returns {number|null} Timestamp when drawing expires, or null if never
      */
     getExpirationTime() {
+        // If timed erase is enabled, use the timed erase timeout
+        if (this.state.timedEraseEnabled) {
+            const timedEraseTimeout = BlacksmithUtils?.getSettingSafely(
+                MODULE.ID,
+                'drawing.timedEraseTimeout',
+                30
+            ) || 30;
+            
+            return timedEraseTimeout > 0 ? Date.now() + (timedEraseTimeout * 1000) : null;
+        }
+        
+        // Otherwise use the regular timeout setting
         const timeout = BlacksmithUtils?.getSettingSafely(
             MODULE.ID,
             'drawing.timeout',
@@ -872,6 +961,65 @@ class DrawingTool {
         }
         if (settings.type !== undefined) {
             this.state.brushSettings.type = settings.type;
+        }
+    }
+    
+    /**
+     * Update active state of timed erase button in secondary bar
+     * Uses Blacksmith's updateSecondaryBarItemActive API
+     */
+    updateTimedEraseButton() {
+        try {
+            const blacksmithModule = game.modules.get('coffee-pub-blacksmith');
+            if (!blacksmithModule?.api?.updateSecondaryBarItemActive) {
+                return;
+            }
+            
+            const barTypeId = MODULE.ID;
+            blacksmithModule.api.updateSecondaryBarItemActive(
+                barTypeId,
+                `${MODULE.ID}-timed-erase`,
+                this.state.timedEraseEnabled
+            );
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error updating timed erase button:`, error);
+        }
+    }
+    
+    /**
+     * Update active state of line width buttons in secondary bar
+     * Uses Blacksmith's updateSecondaryBarItemActive API
+     */
+    updateLineWidthButtons() {
+        try {
+            const blacksmithModule = game.modules.get('coffee-pub-blacksmith');
+            if (!blacksmithModule?.api?.updateSecondaryBarItemActive) {
+                return;
+            }
+            
+            const barTypeId = MODULE.ID;
+            const currentSize = this.state.brushSettings.size;
+            
+            // Update all three buttons based on current size
+            if (this._lineWidthButtons) {
+                blacksmithModule.api.updateSecondaryBarItemActive(
+                    barTypeId,
+                    this._lineWidthButtons.thin,
+                    currentSize === 3
+                );
+                blacksmithModule.api.updateSecondaryBarItemActive(
+                    barTypeId,
+                    this._lineWidthButtons.medium,
+                    currentSize === 6
+                );
+                blacksmithModule.api.updateSecondaryBarItemActive(
+                    barTypeId,
+                    this._lineWidthButtons.thick,
+                    currentSize === 12
+                );
+            }
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error updating line width buttons:`, error);
         }
     }
     

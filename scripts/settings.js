@@ -145,6 +145,22 @@ export const registerSettings = () => {
         type: Boolean,
 		group: WORKFLOW_GROUPS.COMMON_SETTINGS
 	});
+
+    // -- Timed Erase Timeout --
+	game.settings.register(MODULE.ID, 'drawing.timedEraseTimeout', {
+        name: MODULE.ID + '.drawing.timedEraseTimeout-Label',
+        hint: MODULE.ID + '.drawing.timedEraseTimeout-Hint',
+        scope: 'world',
+        config: true,
+        default: 30,
+        type: Number,
+        range: {
+            min: 5,
+            max: 120,
+            step: 5
+        },
+		group: WORKFLOW_GROUPS.COMMON_SETTINGS
+	});
     
 
 

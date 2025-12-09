@@ -22,7 +22,10 @@
 	"drawing.timeout-Hint": "Time before temporary drawings auto-expire. Set to 0 to never expire.",
 
 	"drawing.allowPersistence-Label": "Allow Drawing Persistence",
-	"drawing.allowPersistence-Hint": "Allow GM to convert temporary drawings to permanent drawings."
+	"drawing.allowPersistence-Hint": "Allow GM to convert temporary drawings to permanent drawings.",
+
+	"drawing.timedEraseTimeout-Label": "Timed Erase Timeout (seconds)",
+	"drawing.timedEraseTimeout-Hint": "Time before drawings auto-delete when timed erase is enabled. Range: 5-120 seconds."
 	}
 }
 
