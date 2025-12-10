@@ -1286,8 +1286,8 @@ class DrawingTool {
             this._lastDrawing = userDrawings[0];
         }
         
-        // Broadcast deletion to other clients
-        this.broadcastDrawingDeletion(false, game.user.id);
+        // Broadcast specific drawing deletion to other clients (by ID, not all user drawings)
+        this.broadcastDrawingDeletion(false, game.user.id, drawingToRemove.id);
         
         ui.notifications.info(`${MODULE.NAME}: Last drawing undone`);
     }
@@ -1979,10 +1979,58 @@ class DrawingTool {
                 this.clearAllDrawings(false); // false = don't broadcast (already received via socket)
                 console.log(`${MODULE.NAME}: All drawings cleared by GM ${data.userId}`);
             }
+        } else if (data.drawingId) {
+            // Delete specific drawing by ID (for undo)
+            this.deleteDrawingById(data.drawingId, false); // false = don't broadcast (already received via socket)
         } else {
-            // Clear drawings from specific user
+            // Clear all drawings from specific user (legacy behavior)
             this.clearUserDrawings(data.userId, false); // false = don't broadcast (already received via socket)
             console.log(`${MODULE.NAME}: Drawings cleared for user ${data.userId}`);
+        }
+    }
+    
+    /**
+     * Delete a specific drawing by ID
+     * @param {string} drawingId - Drawing ID to delete
+     * @param {boolean} broadcast - Whether to broadcast the deletion
+     */
+    deleteDrawingById(drawingId, broadcast = true) {
+        if (!this._pixiDrawings || !this.services?.canvasLayer) {
+            return;
+        }
+        
+        // Find the drawing
+        const drawingIndex = this._pixiDrawings.findIndex(d => d.id === drawingId);
+        if (drawingIndex === -1) {
+            return; // Drawing not found
+        }
+        
+        const drawing = this._pixiDrawings[drawingIndex];
+        
+        // Remove from canvas
+        const layer = this.services.canvasLayer;
+        if (drawing.graphics && layer.children.includes(drawing.graphics)) {
+            layer.removeChild(drawing.graphics);
+        }
+        
+        // Remove from array
+        this._pixiDrawings.splice(drawingIndex, 1);
+        
+        // Update _lastDrawing if it was the one removed
+        if (this._lastDrawing && this._lastDrawing.id === drawingId) {
+            // Find the most recent drawing by this user for next undo
+            const userDrawings = this._pixiDrawings.filter(d => d.userId === game.user.id);
+            if (userDrawings.length > 0) {
+                userDrawings.sort((a, b) => b.createdAt - a.createdAt);
+                this._lastDrawing = userDrawings[0];
+            } else {
+                this._lastDrawing = null;
+            }
+        }
+        
+        // Broadcast if requested
+        if (broadcast) {
+            this.broadcastDrawingDeletion(false, drawing.userId, drawingId);
         }
     }
     
@@ -2320,11 +2368,13 @@ class DrawingTool {
      * Broadcast drawing deletion to other clients
      * @param {boolean} clearAll - Whether all drawings were cleared
      * @param {string} userId - Optional user ID if clearing specific user's drawings
+     * @param {string} drawingId - Optional specific drawing ID to delete (for undo)
      */
-    async broadcastDrawingDeletion(clearAll = false, userId = null) {
+    async broadcastDrawingDeletion(clearAll = false, userId = null, drawingId = null) {
         await socketManager.broadcast('drawing', 'deleted', {
             userId: userId || game.user.id,
-            clearAll: clearAll
+            clearAll: clearAll,
+            drawingId: drawingId || null // Include specific drawing ID if provided
         });
     }
     
