@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Contact shadow effects for lines and symbols
   - Undo functionality for last drawing
   - Timed erase with configurable timeout (5-120 seconds)
+  - Fade-out animations when drawings are deleted (300ms smooth fade)
   - Player permissions: players can draw and erase their own drawings
 - **Toolbar Integration**: Secondary toolbar via Blacksmith Menubar API
   - Mode selection: line tool and symbol tools
@@ -76,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Client-scope settings for toolbar state persistence
 - Debug logging with `BlacksmithUtils.postConsoleAndNotification`
 - Multiple socket API access patterns for compatibility
+- Smooth fade-out animations using `requestAnimationFrame` with ease-out curves
 
 ## [1.0.0] - Initial Release
 
