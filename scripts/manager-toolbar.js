@@ -80,6 +80,10 @@ class CartographerToolbar {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 10 // Order for the group
                     },
+                    'lineStyle': {
+                        mode: 'switch', // Radio-button behavior: only one active at a time
+                        order: 12 // Order for the group (between line-width and color)
+                    },
                     'color': {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 15 // Order for the group

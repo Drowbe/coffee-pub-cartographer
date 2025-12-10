@@ -36,8 +36,9 @@ class DrawingTool {
         // Drawing state
         this.state = {
             active: false,
-            drawingMode: 'line', // 'line', 'plus', 'x', 'dot', 'arrow'
+            drawingMode: 'line', // 'line', 'plus', 'x', 'dot', 'arrow', 'square'
             symbolSize: 'medium', // 'small', 'medium', 'large' - controls square bounding box size
+            lineStyle: 'solid', // 'solid', 'dotted', 'dashed'
             brushSettings: {
                 size: 6, // Default to medium (6px)
                 color: DrawingTool.strColor1, // Default to first color (black)
@@ -218,7 +219,8 @@ class DrawingTool {
                 plus: `${MODULE.ID}-mode-plus`,
                 x: `${MODULE.ID}-mode-x`,
                 dot: `${MODULE.ID}-mode-dot`,
-                arrow: `${MODULE.ID}-mode-arrow`
+                arrow: `${MODULE.ID}-mode-arrow`,
+                square: `${MODULE.ID}-mode-square`
             };
             
             // Register line tool button in mode group
@@ -299,8 +301,71 @@ class DrawingTool {
                 }
             });
             
+            cartographerToolbar.registerTool(self._modeButtons.square, {
+                icon: "fa-solid fa-square",
+                tooltip: "Rounded Square Symbol (click to stamp)",
+                group: "mode", // Switch group
+                order: 6,
+                active: () => self.state.drawingMode === 'square',
+                onClick: () => {
+                    self.setDrawingMode('square');
+                    self.updateModeButtons();
+                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
+                    if (!self.state.active) {
+                        self.activate();
+                    }
+                }
+            });
+            
             // Update mode buttons to reflect the default mode (line)
             self.updateModeButtons();
+            
+            // Register line style buttons in switch group (radio-button behavior)
+            // Store references for updating active state
+            self._lineStyleButtons = {
+                solid: `${MODULE.ID}-line-style-solid`,
+                dotted: `${MODULE.ID}-line-style-dotted`,
+                dashed: `${MODULE.ID}-line-style-dashed`
+            };
+            
+            cartographerToolbar.registerTool(self._lineStyleButtons.solid, {
+                icon: "fa-solid fa-minus",
+                tooltip: "Solid line style",
+                group: "lineStyle", // Switch group
+                order: 1,
+                active: () => self.state.lineStyle === 'solid',
+                onClick: () => {
+                    self.state.lineStyle = 'solid';
+                    self.updateLineStyleButtons();
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._lineStyleButtons.dotted, {
+                icon: "fa-solid fa-circle-dot",
+                tooltip: "Dotted line style",
+                group: "lineStyle", // Switch group
+                order: 2,
+                active: () => self.state.lineStyle === 'dotted',
+                onClick: () => {
+                    self.state.lineStyle = 'dotted';
+                    self.updateLineStyleButtons();
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._lineStyleButtons.dashed, {
+                icon: "fa-solid fa-grip-lines",
+                tooltip: "Dashed line style",
+                group: "lineStyle", // Switch group
+                order: 3,
+                active: () => self.state.lineStyle === 'dashed',
+                onClick: () => {
+                    self.state.lineStyle = 'dashed';
+                    self.updateLineStyleButtons();
+                }
+            });
+            
+            // Update line style buttons to reflect the default style (solid)
+            self.updateLineStyleButtons();
             
             // Register symbol size buttons in switch group (radio-button behavior)
             // Store references for updating active state
@@ -760,15 +825,19 @@ class DrawingTool {
                 
             case 'arrow':
                 // Chevron arrow with notched left edge - using drawPolygon
-                // Must fit within squareSize x squareSize box (like circle)
-                const leftX = worldX - halfSize + padding;
-                const rightX = worldX + halfSize - padding;
+                // Scale to match circle visual size (circle uses radius = halfSize - padding)
+                // Arrow should be roughly same visual size, so scale down to ~85% of available space
+                const scaleFactor = 0.85;
+                const scaledHalfSize = (halfSize - padding) * scaleFactor;
+                
+                const leftX = worldX - scaledHalfSize;
+                const rightX = worldX + scaledHalfSize;
                 const centerY = worldY;
-                const topY = centerY - (halfSize - padding);
-                const bottomY = centerY + (halfSize - padding);
+                const topY = centerY - scaledHalfSize;
+                const bottomY = centerY + scaledHalfSize;
                 
                 // Notch: split left edge, move middle point 25% of width to the right
-                const availableWidth = 2 * (halfSize - padding);
+                const availableWidth = 2 * scaledHalfSize;
                 const notchX = leftX + (availableWidth * 0.25);
                 const notchY = centerY;
                 
@@ -794,6 +863,37 @@ class DrawingTool {
                 // Draw main arrow
                 graphics.beginFill(strokeColor, symbolAlpha);
                 graphics.drawPolygon(arrowPoints);
+                graphics.endFill();
+                break;
+                
+            case 'square':
+                // Rounded square - using drawRoundedRect
+                // Scale to match circle visual size (circle uses radius = halfSize - padding)
+                const squareScaleFactor = 0.85;
+                const squareScaledHalfSize = (halfSize - padding) * squareScaleFactor;
+                const squareSize = squareScaledHalfSize * 2;
+                const cornerRadius = squareSize * 0.2; // 20% corner radius for rounded corners
+                
+                // Draw shadow rounded square
+                graphics.beginFill(shadowColor, shadowAlpha);
+                graphics.drawRoundedRect(
+                    worldX - squareScaledHalfSize + shadowOffset,
+                    worldY - squareScaledHalfSize + shadowOffset,
+                    squareSize,
+                    squareSize,
+                    cornerRadius
+                );
+                graphics.endFill();
+                
+                // Draw main rounded square
+                graphics.beginFill(strokeColor, symbolAlpha);
+                graphics.drawRoundedRect(
+                    worldX - squareScaledHalfSize,
+                    worldY - squareScaledHalfSize,
+                    squareSize,
+                    squareSize,
+                    cornerRadius
+                );
                 graphics.endFill();
                 break;
         }
@@ -1250,22 +1350,18 @@ class DrawingTool {
             }
         }
         
-        // Draw main line on top
-        this._previewGraphics.lineStyle(
+        // Draw main line on top with line style
+        const lineStyle = this.state.lineStyle || 'solid';
+        this._drawLineWithStyle(
+            this._previewGraphics,
+            this.state.drawingPoints,
+            startX,
+            startY,
             this.state.brushSettings.size,
             previewColor,
-            previewAlpha
+            previewAlpha,
+            lineStyle
         );
-        
-        if (this.state.drawingPoints.length > 0) {
-            const firstPoint = this.state.drawingPoints[0];
-            this._previewGraphics.moveTo(startX + firstPoint[0], startY + firstPoint[1]);
-            
-            for (let i = 1; i < this.state.drawingPoints.length; i++) {
-                const point = this.state.drawingPoints[i];
-                this._previewGraphics.lineTo(startX + point[0], startY + point[1]);
-            }
-        }
     }
     
     /**
@@ -1398,18 +1494,9 @@ class DrawingTool {
             }
         }
         
-        // Draw main line on top
-        graphics.lineStyle(strokeWidth, drawingColor, drawingAlpha);
-        
-        if (points.length > 0) {
-            const firstPoint = points[0];
-            graphics.moveTo(startX + firstPoint[0], startY + firstPoint[1]);
-            
-            for (let i = 1; i < points.length; i++) {
-                const point = points[i];
-                graphics.lineTo(startX + point[0], startY + point[1]);
-            }
-        }
+        // Draw main line on top with line style
+        const lineStyle = this.state.lineStyle || 'solid';
+        this._drawLineWithStyle(graphics, points, startX, startY, strokeWidth, drawingColor, drawingAlpha, lineStyle);
         
         // Add to layer
         layer.addChild(graphics);
@@ -1450,6 +1537,103 @@ class DrawingTool {
         this.scheduleCleanup();
         
         return graphics;
+    }
+    
+    /**
+     * Draw a line with the specified style (solid, dotted, dashed)
+     * @param {PIXI.Graphics} graphics - PIXI Graphics object
+     * @param {Array} points - Array of relative points [[dx, dy], ...]
+     * @param {number} startX - Starting X coordinate
+     * @param {number} startY - Starting Y coordinate
+     * @param {number} strokeWidth - Line width
+     * @param {number} color - PIXI color number
+     * @param {number} alpha - Alpha value
+     * @param {string} style - Line style: 'solid', 'dotted', 'dashed'
+     */
+    _drawLineWithStyle(graphics, points, startX, startY, strokeWidth, color, alpha, style) {
+        if (!points || points.length === 0) return;
+        
+        graphics.lineStyle(strokeWidth, color, alpha);
+        
+        if (style === 'solid') {
+            // Solid line - draw normally
+            const firstPoint = points[0];
+            graphics.moveTo(startX + firstPoint[0], startY + firstPoint[1]);
+            
+            for (let i = 1; i < points.length; i++) {
+                const point = points[i];
+                graphics.lineTo(startX + point[0], startY + point[1]);
+            }
+        } else if (style === 'dotted') {
+            // Dotted line - draw small circles along the path
+            const dotSpacing = strokeWidth * 3; // Space between dots
+            const dotRadius = strokeWidth * 0.5; // Dot radius
+            
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
+                const x1 = startX + p1[0];
+                const y1 = startY + p1[1];
+                const x2 = startX + p2[0];
+                const y2 = startY + p2[1];
+                
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const steps = Math.floor(dist / dotSpacing);
+                
+                for (let j = 0; j <= steps; j++) {
+                    const t = j / Math.max(steps, 1);
+                    const x = x1 + dx * t;
+                    const y = y1 + dy * t;
+                    graphics.beginFill(color, alpha);
+                    graphics.drawCircle(x, y, dotRadius);
+                    graphics.endFill();
+                }
+            }
+        } else if (style === 'dashed') {
+            // Dashed line - draw line segments with gaps
+            const dashLength = strokeWidth * 4; // Length of each dash
+            const gapLength = strokeWidth * 2; // Length of each gap
+            
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
+                const x1 = startX + p1[0];
+                const y1 = startY + p1[1];
+                const x2 = startX + p2[0];
+                const y2 = startY + p2[1];
+                
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist === 0) continue;
+                
+                const unitX = dx / dist;
+                const unitY = dy / dist;
+                
+                let currentDist = 0;
+                let isDrawing = true;
+                
+                while (currentDist < dist) {
+                    const segmentLength = isDrawing ? dashLength : gapLength;
+                    const nextDist = Math.min(currentDist + segmentLength, dist);
+                    
+                    if (isDrawing) {
+                        const startX_seg = x1 + unitX * currentDist;
+                        const startY_seg = y1 + unitY * currentDist;
+                        const endX_seg = x1 + unitX * nextDist;
+                        const endY_seg = y1 + unitY * nextDist;
+                        
+                        graphics.moveTo(startX_seg, startY_seg);
+                        graphics.lineTo(endX_seg, endY_seg);
+                    }
+                    
+                    currentDist = nextDist;
+                    isDrawing = !isDrawing;
+                }
+            }
+        }
     }
     
     /**
@@ -1656,7 +1840,7 @@ class DrawingTool {
      * @param {string} mode - Drawing mode: 'line', 'plus', 'x', 'dot', 'arrow'
      */
     setDrawingMode(mode) {
-        if (['line', 'plus', 'x', 'dot', 'arrow'].includes(mode)) {
+        if (['line', 'plus', 'x', 'dot', 'arrow', 'square'].includes(mode)) {
             this.state.drawingMode = mode;
         }
     }
@@ -1687,7 +1871,7 @@ class DrawingTool {
             
             // Update active state for each mode button
             if (this._modeButtons) {
-                const modes = ['line', 'plus', 'x', 'dot', 'arrow'];
+                const modes = ['line', 'plus', 'x', 'dot', 'arrow', 'square'];
                 modes.forEach(mode => {
                     blacksmithModule.api.updateSecondaryBarItemActive(
                         barTypeId,
@@ -1728,6 +1912,36 @@ class DrawingTool {
             }
         } catch (error) {
             console.error(`${MODULE.NAME}: Error updating symbol size buttons:`, error);
+        }
+    }
+    
+    /**
+     * Update active state of line style buttons in secondary bar
+     * Uses Blacksmith's updateSecondaryBarItemActive API
+     */
+    updateLineStyleButtons() {
+        try {
+            const blacksmithModule = game.modules.get('coffee-pub-blacksmith');
+            if (!blacksmithModule?.api?.updateSecondaryBarItemActive) {
+                return;
+            }
+            
+            const barTypeId = MODULE.ID;
+            const currentStyle = this.state.lineStyle;
+            
+            // Update active state for each line style button
+            if (this._lineStyleButtons) {
+                const styles = ['solid', 'dotted', 'dashed'];
+                styles.forEach(style => {
+                    blacksmithModule.api.updateSecondaryBarItemActive(
+                        barTypeId,
+                        this._lineStyleButtons[style],
+                        currentStyle === style
+                    );
+                });
+            }
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error updating line style buttons:`, error);
         }
     }
     
@@ -1919,15 +2133,19 @@ class DrawingTool {
                 
             case 'arrow':
                 // Chevron arrow with notched left edge - using drawPolygon
-                // Must fit within squareSize x squareSize box (like circle)
-                const leftX = x - halfSize + padding;
-                const rightX = x + halfSize - padding;
+                // Scale to match circle visual size (circle uses radius = halfSize - padding)
+                // Arrow should be roughly same visual size, so scale down to ~85% of available space
+                const scaleFactor = 0.70;
+                const scaledHalfSize = (halfSize - padding) * scaleFactor;
+                
+                const leftX = x - scaledHalfSize;
+                const rightX = x + scaledHalfSize;
                 const centerY = y;
-                const topY = centerY - (halfSize - padding);
-                const bottomY = centerY + (halfSize - padding);
+                const topY = centerY - scaledHalfSize;
+                const bottomY = centerY + scaledHalfSize;
                 
                 // Notch: split left edge, move middle point 25% of width to the right
-                const availableWidth = 2 * (halfSize - padding);
+                const availableWidth = 2 * scaledHalfSize;
                 const notchX = leftX + (availableWidth * 0.25);
                 const notchY = centerY;
                 
@@ -1953,6 +2171,37 @@ class DrawingTool {
                 // Draw main arrow
                 graphics.beginFill(strokeColor, symbolAlpha);
                 graphics.drawPolygon(arrowPoints);
+                graphics.endFill();
+                break;
+                
+            case 'square':
+                // Rounded square - using drawRoundedRect
+                // Scale to match circle visual size (circle uses radius = halfSize - padding)
+                const squareScaleFactor = 0.85;
+                const squareScaledHalfSize = (halfSize - padding) * squareScaleFactor;
+                const squareSize = squareScaledHalfSize * 2;
+                const cornerRadius = squareSize * 0.08; // 8% corner radius for rounded corners
+                
+                // Draw shadow rounded square
+                graphics.beginFill(shadowColor, shadowAlpha);
+                graphics.drawRoundedRect(
+                    x - squareScaledHalfSize + shadowOffset,
+                    y - squareScaledHalfSize + shadowOffset,
+                    squareSize,
+                    squareSize,
+                    cornerRadius
+                );
+                graphics.endFill();
+                
+                // Draw main rounded square
+                graphics.beginFill(strokeColor, symbolAlpha);
+                graphics.drawRoundedRect(
+                    x - squareScaledHalfSize,
+                    y - squareScaledHalfSize,
+                    squareSize,
+                    squareSize,
+                    cornerRadius
+                );
                 graphics.endFill();
                 break;
                 
