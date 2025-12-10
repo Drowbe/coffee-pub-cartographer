@@ -759,7 +759,7 @@ class DrawingTool {
                 break;
                 
             case 'arrow':
-                // Simple triangle pointing right - using drawPolygon
+                // Chevron arrow with notched left edge - using drawPolygon
                 // Must fit within squareSize x squareSize box (like circle)
                 const leftX = worldX - halfSize + padding;
                 const rightX = worldX + halfSize - padding;
@@ -767,26 +767,32 @@ class DrawingTool {
                 const topY = centerY - (halfSize - padding);
                 const bottomY = centerY + (halfSize - padding);
                 
-                // Polygon points: top-left, right tip, bottom-left (triangle pointing right)
-                const trianglePoints = [
+                // Notch: split left edge, move middle point 20px to the right
+                const notchX = leftX + 20;
+                const notchY = centerY;
+                
+                // Polygon points: top-left, notch (inner), bottom-left, right tip
+                const arrowPoints = [
                     leftX, topY,      // Top-left corner
-                    rightX, centerY,  // Right tip
-                    leftX, bottomY   // Bottom-left corner
+                    notchX, notchY,   // Notch point (middle of left edge, moved right)
+                    leftX, bottomY,   // Bottom-left corner
+                    rightX, centerY   // Right tip
                 ];
                 
-                // Draw shadow triangle
+                // Draw shadow arrow
                 graphics.beginFill(shadowColor, shadowAlpha);
                 const shadowPoints = [
                     leftX + shadowOffset, topY + shadowOffset,
-                    rightX + shadowOffset, centerY + shadowOffset,
-                    leftX + shadowOffset, bottomY + shadowOffset
+                    notchX + shadowOffset, notchY + shadowOffset,
+                    leftX + shadowOffset, bottomY + shadowOffset,
+                    rightX + shadowOffset, centerY + shadowOffset
                 ];
                 graphics.drawPolygon(shadowPoints);
                 graphics.endFill();
                 
-                // Draw main triangle
+                // Draw main arrow
                 graphics.beginFill(strokeColor, symbolAlpha);
-                graphics.drawPolygon(trianglePoints);
+                graphics.drawPolygon(arrowPoints);
                 graphics.endFill();
                 break;
         }
@@ -1911,7 +1917,7 @@ class DrawingTool {
                 break;
                 
             case 'arrow':
-                // Simple triangle pointing right - using drawPolygon
+                // Chevron arrow with notched left edge - using drawPolygon
                 // Must fit within squareSize x squareSize box (like circle)
                 const leftX = x - halfSize + padding;
                 const rightX = x + halfSize - padding;
@@ -1919,26 +1925,32 @@ class DrawingTool {
                 const topY = centerY - (halfSize - padding);
                 const bottomY = centerY + (halfSize - padding);
                 
-                // Polygon points: top-left, right tip, bottom-left (triangle pointing right)
-                const trianglePoints = [
+                // Notch: split left edge, move middle point 20px to the right
+                const notchX = leftX + 20;
+                const notchY = centerY;
+                
+                // Polygon points: top-left, notch (inner), bottom-left, right tip
+                const arrowPoints = [
                     leftX, topY,      // Top-left corner
-                    rightX, centerY,  // Right tip
-                    leftX, bottomY    // Bottom-left corner
+                    notchX, notchY,   // Notch point (middle of left edge, moved right)
+                    leftX, bottomY,   // Bottom-left corner
+                    rightX, centerY   // Right tip
                 ];
                 
-                // Draw shadow triangle
+                // Draw shadow arrow
                 graphics.beginFill(shadowColor, shadowAlpha);
                 const shadowPoints = [
                     leftX + shadowOffset, topY + shadowOffset,
-                    rightX + shadowOffset, centerY + shadowOffset,
-                    leftX + shadowOffset, bottomY + shadowOffset
+                    notchX + shadowOffset, notchY + shadowOffset,
+                    leftX + shadowOffset, bottomY + shadowOffset,
+                    rightX + shadowOffset, centerY + shadowOffset
                 ];
                 graphics.drawPolygon(shadowPoints);
                 graphics.endFill();
                 
-                // Draw main triangle
+                // Draw main arrow
                 graphics.beginFill(strokeColor, symbolAlpha);
-                graphics.drawPolygon(trianglePoints);
+                graphics.drawPolygon(arrowPoints);
                 graphics.endFill();
                 break;
                 
