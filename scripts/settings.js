@@ -194,6 +194,16 @@ export const registerSettings = () => {
 		default: 'rgba(0, 0, 0, 1.0)', // Default to black
 		type: String
 	});
+	
+	// Timed erase toggle state (erase group)
+	game.settings.register(MODULE.ID, 'toolbar.timedEraseEnabled', {
+		name: '', // Hidden setting
+		hint: '',
+		scope: 'client',
+		config: false, // Hidden from settings UI
+		default: false,
+		type: Boolean
+	});
     
 
 

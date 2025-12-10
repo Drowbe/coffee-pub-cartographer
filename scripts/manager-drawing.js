@@ -139,6 +139,12 @@ class DrawingTool {
             this.state.brushSettings.color = `rgba(${r}, ${g}, ${b}, 1.0)`;
         }
         
+        // Load timed erase toggle state
+        const savedTimedEraseEnabled = game.settings.get(MODULE.ID, 'toolbar.timedEraseEnabled');
+        if (typeof savedTimedEraseEnabled === 'boolean') {
+            this.state.timedEraseEnabled = savedTimedEraseEnabled;
+        }
+        
         // Register settings
         this.registerSettings();
         
@@ -154,6 +160,11 @@ class DrawingTool {
             'created': (data) => this.handleRemoteDrawingCreation(data),
             'deleted': (data) => this.handleRemoteDrawingDeletion(data)
         });
+        
+        // If timed erase was enabled, start cleanup interval
+        if (this.state.timedEraseEnabled) {
+            this.scheduleCleanup();
+        }
         
         console.log(`✅ ${MODULE.NAME}: ${this.displayName} initialized`);
     }
@@ -560,6 +571,10 @@ class DrawingTool {
                 active: () => self.state.timedEraseEnabled,
                 onClick: () => {
                     self.state.timedEraseEnabled = !self.state.timedEraseEnabled;
+                    
+                    // Save state to settings
+                    game.settings.set(MODULE.ID, 'toolbar.timedEraseEnabled', self.state.timedEraseEnabled);
+                    
                     self.updateTimedEraseButton();
                     
                     // Restart cleanup with new interval based on timed erase state
@@ -731,6 +746,9 @@ class DrawingTool {
             
             // Update line width buttons to reflect the default size (medium = 6px)
             self.updateLineWidthButtons();
+            
+            // Update timed erase button to reflect saved state
+            self.updateTimedEraseButton();
             
             // Update color buttons to reflect the default color (black)
             self.updateColorButtons();
