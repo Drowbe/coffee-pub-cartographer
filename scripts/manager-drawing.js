@@ -1938,12 +1938,9 @@ class DrawingTool {
      * @param {Object} data - Drawing data from socket
      */
     handleRemoteDrawingCreation(data) {
-        console.log(`${MODULE.NAME}: handleRemoteDrawingCreation called with data:`, data);
-        
         // Skip if this is our own drawing (already rendered locally)
         if (data.userId === game.user.id) {
-            console.debug(`${MODULE.NAME}: Skipping own drawing from user ${data.userId}`);
-            return;
+            return; // Silently skip own events
         }
         
         // Validate required data
@@ -1954,12 +1951,10 @@ class DrawingTool {
         
         // Check if drawing already exists (prevent duplicates)
         if (this._pixiDrawings && this._pixiDrawings.some(d => d.id === data.drawingId)) {
-            console.debug(`${MODULE.NAME}: Drawing ${data.drawingId} already exists, skipping`);
-            return;
+            return; // Silently skip duplicates
         }
         
-        console.log(`${MODULE.NAME}: Creating remote drawing ${data.drawingId} from user ${data.userId}`);
-        // Create the remote drawing
+        // Create the remote drawing (no logging to reduce spam)
         this.createRemoteDrawing(data);
     }
     
@@ -1993,6 +1988,7 @@ class DrawingTool {
     
     /**
      * Create a drawing from remote data
+     * NOTE: This method does NOT broadcast - it's only for rendering remote drawings
      * @param {Object} data - Drawing data from socket
      */
     createRemoteDrawing(data) {
@@ -2019,6 +2015,7 @@ class DrawingTool {
     
     /**
      * Create a remote line drawing
+     * NOTE: This method does NOT broadcast - it's only for rendering remote drawings
      * @param {Object} data - Line drawing data
      */
     createRemoteLine(data) {
@@ -2084,36 +2081,230 @@ class DrawingTool {
     
     /**
      * Create a remote symbol drawing
+     * NOTE: This method does NOT broadcast - it's only for rendering remote drawings
      * @param {Object} data - Symbol drawing data
      */
     createRemoteSymbol(data) {
-        // Use the existing _createSymbolAt method with remote data
-        // We need to extract the symbol size from data or use default
-        const symbolSize = data.symbolSize || 'medium';
-        const originalSymbolSize = this.state.symbolSize;
+        const layer = this.services.canvasLayer;
+        const graphics = new PIXI.Graphics();
         
-        // Temporarily set symbol size if provided
-        if (data.symbolSize) {
-            this.state.symbolSize = symbolSize;
+        // Use REMOTE data for color, size, etc. - NOT local state
+        const symbolSize = data.symbolSize || 'medium';
+        const strokeColor = data.strokeColor || DrawingTool.strColor1; // Use remote color
+        const strokeWidth = data.strokeWidth || 6; // Use remote stroke width
+        
+        // Symbol size determines the square bounding box
+        const symbolSizeMap = {
+            small: DrawingTool.strSmallSymbolSize,
+            medium: DrawingTool.strMediumSymbolSize,
+            large: DrawingTool.strLargeSymbolSize
+        };
+        const squareSize = symbolSizeMap[symbolSize] || symbolSizeMap.medium;
+        
+        // Use remote color (convert from CSS to PIXI)
+        const drawingColor = this.cssToPixiColor(strokeColor);
+        const drawingAlpha = 1.0;
+        const shadowOffset = 2;
+        const shadowAlpha = drawingAlpha * 0.3;
+        const shadowColor = 0x000000;
+        
+        // Calculate symbol dimensions
+        const halfSize = squareSize / 2;
+        const padding = strokeWidth * 0.5; // Padding to prevent clipping
+        const centerX = data.x;
+        const centerY = data.y;
+        
+        // Create symbol using the same logic as _createSymbolAt but with remote data
+        // This ensures we use the REMOTE color, not local state
+        this._drawSymbolShape(graphics, data.symbolType, centerX, centerY, halfSize, padding, strokeWidth, drawingColor, drawingAlpha, shadowColor, shadowAlpha, shadowOffset);
+        
+        // Add to layer
+        layer.addChild(graphics);
+        
+        // Store reference with REMOTE metadata
+        if (!this._pixiDrawings) {
+            this._pixiDrawings = [];
         }
         
-        // Create the symbol
-        this._createSymbolAt(data.symbolType, data.x, data.y);
+        this._pixiDrawings.push({
+            id: data.drawingId,
+            graphics: graphics,
+            createdAt: data.createdAt || Date.now(),
+            expiresAt: data.expiresAt || null,
+            userId: data.userId,
+            userName: data.userName || 'Unknown',
+            symbolType: data.symbolType,
+            x: data.x,
+            y: data.y,
+            strokeWidth: strokeWidth,
+            strokeColor: strokeColor,
+            symbolSize: symbolSize
+        });
         
-        // Restore original symbol size
-        this.state.symbolSize = originalSymbolSize;
-        
-        // Update the last created drawing with remote metadata
-        if (this._pixiDrawings && this._pixiDrawings.length > 0) {
-            const lastDrawing = this._pixiDrawings[this._pixiDrawings.length - 1];
-            if (lastDrawing.id.startsWith('symbol-')) {
-                // Update with remote data
-                lastDrawing.id = data.drawingId;
-                lastDrawing.createdAt = data.createdAt || Date.now();
-                lastDrawing.expiresAt = data.expiresAt || null;
-                lastDrawing.userId = data.userId;
-                lastDrawing.userName = data.userName || 'Unknown';
-            }
+        // Schedule cleanup if needed
+        this.scheduleCleanup();
+    }
+    
+    /**
+     * Draw a symbol shape (extracted from _createSymbolAt for reuse)
+     * @private
+     */
+    _drawSymbolShape(graphics, symbolType, centerX, centerY, halfSize, padding, strokeWidth, strokeColor, alpha, shadowColor, shadowAlpha, shadowOffset) {
+        // This is the drawing logic from _createSymbolAt, but accepts all parameters
+        // so we can use remote data instead of local state
+        switch (symbolType) {
+            case 'plus':
+                // Plus sign - two perpendicular lines
+                const plusSize = (halfSize - padding) * 0.7;
+                
+                // Shadow
+                graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+                graphics.moveTo(centerX - plusSize + shadowOffset, centerY + shadowOffset);
+                graphics.lineTo(centerX + plusSize + shadowOffset, centerY + shadowOffset);
+                graphics.moveTo(centerX + shadowOffset, centerY - plusSize + shadowOffset);
+                graphics.lineTo(centerX + shadowOffset, centerY + plusSize + shadowOffset);
+                
+                // Main
+                graphics.lineStyle(strokeWidth, strokeColor, alpha);
+                graphics.moveTo(centerX - plusSize, centerY);
+                graphics.lineTo(centerX + plusSize, centerY);
+                graphics.moveTo(centerX, centerY - plusSize);
+                graphics.lineTo(centerX, centerY + plusSize);
+                break;
+                
+            case 'x':
+                // X mark - two diagonal lines
+                const xSize = (halfSize - padding) * 0.7;
+                
+                // Shadow
+                graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+                graphics.moveTo(centerX - xSize + shadowOffset, centerY - xSize + shadowOffset);
+                graphics.lineTo(centerX + xSize + shadowOffset, centerY + xSize + shadowOffset);
+                graphics.moveTo(centerX + xSize + shadowOffset, centerY - xSize + shadowOffset);
+                graphics.lineTo(centerX - xSize + shadowOffset, centerY + xSize + shadowOffset);
+                
+                // Main
+                graphics.lineStyle(strokeWidth, strokeColor, alpha);
+                graphics.moveTo(centerX - xSize, centerY - xSize);
+                graphics.lineTo(centerX + xSize, centerY + xSize);
+                graphics.moveTo(centerX + xSize, centerY - xSize);
+                graphics.lineTo(centerX - xSize, centerY + xSize);
+                break;
+                
+            case 'dot':
+                // Circle
+                const dotRadius = (halfSize - padding) * 0.7;
+                
+                // Shadow
+                graphics.beginFill(shadowColor, shadowAlpha);
+                graphics.drawCircle(centerX + shadowOffset, centerY + shadowOffset, dotRadius);
+                graphics.endFill();
+                
+                // Main
+                graphics.beginFill(strokeColor, alpha);
+                graphics.drawCircle(centerX, centerY, dotRadius);
+                graphics.endFill();
+                break;
+                
+            case 'arrow':
+            case 'arrow-up':
+            case 'arrow-down':
+            case 'arrow-left':
+                // Arrow - use existing arrow drawing logic
+                const arrowScaleFactor = 0.70;
+                const scaledHalfSizeArrow = (halfSize - padding) * arrowScaleFactor;
+                
+                let currentLeftX = centerX - scaledHalfSizeArrow;
+                let currentRightX = centerX + scaledHalfSizeArrow;
+                let currentTopY = centerY - scaledHalfSizeArrow;
+                let currentBottomY = centerY + scaledHalfSizeArrow;
+                let currentCenterY = centerY;
+                
+                const arrowAvailableWidth = 2 * scaledHalfSizeArrow;
+                const arrowNotchX = currentLeftX + (arrowAvailableWidth * 0.25);
+                const arrowNotchY = currentCenterY;
+                
+                let basePoints = [
+                    currentLeftX, currentTopY,
+                    arrowNotchX, arrowNotchY,
+                    currentLeftX, currentBottomY,
+                    currentRightX, currentCenterY
+                ];
+                
+                let rotatedPoints = [];
+                let rotationAngle = 0;
+                
+                switch (symbolType) {
+                    case 'arrow-up':
+                        rotationAngle = -Math.PI / 2;
+                        break;
+                    case 'arrow-down':
+                        rotationAngle = Math.PI / 2;
+                        break;
+                    case 'arrow-left':
+                        rotationAngle = Math.PI;
+                        break;
+                    default:
+                        rotationAngle = 0;
+                        break;
+                }
+                
+                for (let i = 0; i < basePoints.length; i += 2) {
+                    const px = basePoints[i];
+                    const py = basePoints[i + 1];
+                    const translatedX = px - centerX;
+                    const translatedY = py - centerY;
+                    const rotatedX = translatedX * Math.cos(rotationAngle) - translatedY * Math.sin(rotationAngle);
+                    const rotatedY = translatedX * Math.sin(rotationAngle) + translatedY * Math.cos(rotationAngle);
+                    rotatedPoints.push(rotatedX + centerX, rotatedY + centerY);
+                }
+                
+                // Shadow
+                graphics.beginFill(shadowColor, shadowAlpha);
+                const shadowArrowPoints = [];
+                for (let i = 0; i < rotatedPoints.length; i += 2) {
+                    shadowArrowPoints.push(rotatedPoints[i] + shadowOffset, rotatedPoints[i + 1] + shadowOffset);
+                }
+                graphics.drawPolygon(shadowArrowPoints);
+                graphics.endFill();
+                
+                // Main
+                graphics.beginFill(strokeColor, alpha);
+                graphics.drawPolygon(rotatedPoints);
+                graphics.endFill();
+                break;
+                
+            case 'square':
+                const squareScaleFactor = 0.85;
+                const squareScaledHalfSize = (halfSize - padding) * squareScaleFactor;
+                const squareSize = squareScaledHalfSize * 2;
+                const cornerRadius = squareSize * 0.08;
+                
+                const squareX = centerX - squareScaledHalfSize;
+                const squareY = centerY - squareScaledHalfSize;
+                
+                // Shadow
+                graphics.beginFill(shadowColor, shadowAlpha);
+                graphics.drawRoundedRect(
+                    squareX + shadowOffset,
+                    squareY + shadowOffset,
+                    squareSize,
+                    squareSize,
+                    cornerRadius
+                );
+                graphics.endFill();
+                
+                // Main
+                graphics.beginFill(strokeColor, alpha);
+                graphics.drawRoundedRect(
+                    squareX,
+                    squareY,
+                    squareSize,
+                    squareSize,
+                    cornerRadius
+                );
+                graphics.endFill();
+                break;
         }
     }
     

@@ -232,13 +232,16 @@ class SocketManager {
             // Full registered event name format: 'moduleId.toolId-eventName'
             const registeredEventName = `${MODULE.ID}.${fullEventName}`;
             
-            // Debug: Log what we're about to emit
-            console.log(`${MODULE.NAME}: Broadcasting socket event:`, {
-                registeredEventName: registeredEventName,
-                hasData: !!data,
-                socketReady: this.socketReady,
-                dataKeys: data ? Object.keys(data) : []
-            });
+            // Debug: Log what we're about to emit (debug mode only)
+            if (typeof BlacksmithUtils !== 'undefined') {
+                BlacksmithUtils.postConsoleAndNotification(
+                    MODULE.NAME,
+                    `CARTOGRAPHER | Socket | Broadcasting: ${registeredEventName}`,
+                    `Data keys: ${data ? Object.keys(data).join(', ') : 'none'}`,
+                    true, // debug = true
+                    false
+                );
+            }
             
             // Emit event using Blacksmith socket API
             // Based on Blacksmith API, emit takes the full event name (moduleId.eventName)
