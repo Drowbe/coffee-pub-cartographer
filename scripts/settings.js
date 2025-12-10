@@ -162,6 +162,61 @@ export const registerSettings = () => {
 		group: WORKFLOW_GROUPS.COMMON_SETTINGS
 	});
     
+    // --------------------------------------
+	// -- HIDDEN CLIENT-SCOPE SETTINGS (Toolbar State)
+	// --------------------------------------
+	// These settings persist the user's toolbar selections but are hidden from the settings UI
+	
+	// Drawing mode selection (mode group)
+	game.settings.register(MODULE.ID, 'toolbar.drawingMode', {
+		name: '', // Hidden setting
+		hint: '',
+		scope: 'client',
+		config: false, // Hidden from settings UI
+		default: 'line',
+		type: String
+	});
+	
+	// Symbol size selection (symbols group)
+	game.settings.register(MODULE.ID, 'toolbar.symbolSize', {
+		name: '', // Hidden setting
+		hint: '',
+		scope: 'client',
+		config: false, // Hidden from settings UI
+		default: 'medium',
+		type: String
+	});
+	
+	// Line width selection (line-width group)
+	game.settings.register(MODULE.ID, 'toolbar.lineWidth', {
+		name: '', // Hidden setting
+		hint: '',
+		scope: 'client',
+		config: false, // Hidden from settings UI
+		default: 6, // Medium (6px)
+		type: Number
+	});
+	
+	// Line style selection (lineStyle group)
+	game.settings.register(MODULE.ID, 'toolbar.lineStyle', {
+		name: '', // Hidden setting
+		hint: '',
+		scope: 'client',
+		config: false, // Hidden from settings UI
+		default: 'solid',
+		type: String
+	});
+	
+	// Color selection (color group)
+	game.settings.register(MODULE.ID, 'toolbar.color', {
+		name: '', // Hidden setting
+		hint: '',
+		scope: 'client',
+		config: false, // Hidden from settings UI
+		default: 'rgba(0, 0, 0, 1.0)', // Default to black
+		type: String
+	});
+    
 
 
 

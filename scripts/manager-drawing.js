@@ -80,36 +80,60 @@ class DrawingTool {
     async initialize(services) {
         this.services = services;
         
-        // Set default color to player color (always use player color as default)
-        // Handle different formats of game.user.color (Color object, string, number, or undefined)
-        let playerColorHex = '#000000'; // Default fallback
+        // Load saved toolbar selections from client-scope settings
+        const savedDrawingMode = game.settings.get(MODULE.ID, 'toolbar.drawingMode');
+        const savedSymbolSize = game.settings.get(MODULE.ID, 'toolbar.symbolSize');
+        const savedLineWidth = game.settings.get(MODULE.ID, 'toolbar.lineWidth');
+        const savedLineStyle = game.settings.get(MODULE.ID, 'toolbar.lineStyle');
+        const savedColor = game.settings.get(MODULE.ID, 'toolbar.color');
         
-        if (game.user?.color) {
-            // Check if it's a Foundry Color object
-            if (game.user.color.constructor?.name === 'Color') {
-                // Foundry Color object - convert to number and then to hex
-                // Color objects can be converted to numbers directly
-                const colorValue = Number(game.user.color);
-                if (!isNaN(colorValue)) {
-                    playerColorHex = '#' + colorValue.toString(16).padStart(6, '0');
+        // Apply saved selections if valid, otherwise use defaults
+        if (['line', 'plus', 'x', 'dot', 'arrow', 'square'].includes(savedDrawingMode)) {
+            this.state.drawingMode = savedDrawingMode;
+        }
+        if (['small', 'medium', 'large'].includes(savedSymbolSize)) {
+            this.state.symbolSize = savedSymbolSize;
+        }
+        if (typeof savedLineWidth === 'number' && savedLineWidth > 0) {
+            this.state.brushSettings.size = savedLineWidth;
+        }
+        if (['solid', 'dotted', 'dashed'].includes(savedLineStyle)) {
+            this.state.lineStyle = savedLineStyle;
+        }
+        if (savedColor && typeof savedColor === 'string') {
+            this.state.brushSettings.color = savedColor;
+        } else {
+            // Set default color to player color if no saved color
+            // Handle different formats of game.user.color (Color object, string, number, or undefined)
+            let playerColorHex = '#000000'; // Default fallback
+            
+            if (game.user?.color) {
+                // Check if it's a Foundry Color object
+                if (game.user.color.constructor?.name === 'Color') {
+                    // Foundry Color object - convert to number and then to hex
+                    // Color objects can be converted to numbers directly
+                    const colorValue = Number(game.user.color);
+                    if (!isNaN(colorValue)) {
+                        playerColorHex = '#' + colorValue.toString(16).padStart(6, '0');
+                    }
+                } else if (typeof game.user.color === 'string') {
+                    playerColorHex = game.user.color;
+                } else if (typeof game.user.color === 'number') {
+                    // Convert number to hex string
+                    playerColorHex = '#' + game.user.color.toString(16).padStart(6, '0');
                 }
-            } else if (typeof game.user.color === 'string') {
-                playerColorHex = game.user.color;
-            } else if (typeof game.user.color === 'number') {
-                // Convert number to hex string
-                playerColorHex = '#' + game.user.color.toString(16).padStart(6, '0');
             }
+            
+            // Ensure it's a valid hex string
+            if (!playerColorHex.startsWith('#')) {
+                playerColorHex = '#000000';
+            }
+            
+            const r = parseInt(playerColorHex.slice(1, 3), 16);
+            const g = parseInt(playerColorHex.slice(3, 5), 16);
+            const b = parseInt(playerColorHex.slice(5, 7), 16);
+            this.state.brushSettings.color = `rgba(${r}, ${g}, ${b}, 1.0)`;
         }
-        
-        // Ensure it's a valid hex string
-        if (!playerColorHex.startsWith('#')) {
-            playerColorHex = '#000000';
-        }
-        
-        const r = parseInt(playerColorHex.slice(1, 3), 16);
-        const g = parseInt(playerColorHex.slice(3, 5), 16);
-        const b = parseInt(playerColorHex.slice(5, 7), 16);
-        this.state.brushSettings.color = `rgba(${r}, ${g}, ${b}, 1.0)`;
         
         // Register settings
         this.registerSettings();
@@ -117,7 +141,7 @@ class DrawingTool {
         // Register hooks
         this.registerHooks();
         
-        // Register toolbar tools
+        // Register toolbar tools (this will update button states based on loaded values)
         this.registerToolbarTools();
         
         console.log(`✅ ${MODULE.NAME}: ${this.displayName} initialized`);
@@ -329,7 +353,7 @@ class DrawingTool {
             };
             
             cartographerToolbar.registerTool(self._lineStyleButtons.solid, {
-                icon: "fa-solid fa-minus",
+                icon: "fa-solid fa-pipe",
                 tooltip: "Solid line style",
                 group: "lineStyle", // Switch group
                 order: 1,
@@ -337,11 +361,13 @@ class DrawingTool {
                 onClick: () => {
                     self.state.lineStyle = 'solid';
                     self.updateLineStyleButtons();
+                    // Save to client-scope setting
+                    game.settings.set(MODULE.ID, 'toolbar.lineStyle', 'solid');
                 }
             });
             
             cartographerToolbar.registerTool(self._lineStyleButtons.dotted, {
-                icon: "fa-solid fa-circle-dot",
+                icon: "fa-solid fa-ellipsis-vertical",
                 tooltip: "Dotted line style",
                 group: "lineStyle", // Switch group
                 order: 2,
@@ -349,11 +375,13 @@ class DrawingTool {
                 onClick: () => {
                     self.state.lineStyle = 'dotted';
                     self.updateLineStyleButtons();
+                    // Save to client-scope setting
+                    game.settings.set(MODULE.ID, 'toolbar.lineStyle', 'dotted');
                 }
             });
             
             cartographerToolbar.registerTool(self._lineStyleButtons.dashed, {
-                icon: "fa-solid fa-grip-lines",
+                icon: "fa-sharp fa-solid fa-ellipsis-vertical",
                 tooltip: "Dashed line style",
                 group: "lineStyle", // Switch group
                 order: 3,
@@ -361,6 +389,8 @@ class DrawingTool {
                 onClick: () => {
                     self.state.lineStyle = 'dashed';
                     self.updateLineStyleButtons();
+                    // Save to client-scope setting
+                    game.settings.set(MODULE.ID, 'toolbar.lineStyle', 'dashed');
                 }
             });
             
@@ -491,6 +521,8 @@ class DrawingTool {
                 onClick: () => {
                     self.setBrushSettings({ size: 3 });
                     self.updateLineWidthButtons();
+                    // Save to client-scope setting
+                    game.settings.set(MODULE.ID, 'toolbar.lineWidth', 3);
                 }
             });
             
@@ -503,6 +535,8 @@ class DrawingTool {
                 onClick: () => {
                     self.setBrushSettings({ size: 6 });
                     self.updateLineWidthButtons();
+                    // Save to client-scope setting
+                    game.settings.set(MODULE.ID, 'toolbar.lineWidth', 6);
                 }
             });
             
@@ -515,6 +549,8 @@ class DrawingTool {
                 onClick: () => {
                     self.setBrushSettings({ size: 12 });
                     self.updateLineWidthButtons();
+                    // Save to client-scope setting
+                    game.settings.set(MODULE.ID, 'toolbar.lineWidth', 12);
                 }
             });
             
@@ -606,6 +642,8 @@ class DrawingTool {
                     onClick: () => {
                         self.setBrushSettings({ color: colorData.rgba });
                         self.updateColorButtons();
+                        // Save to client-scope setting
+                        game.settings.set(MODULE.ID, 'toolbar.color', colorData.rgba);
                     }
                 });
             });
@@ -1894,6 +1932,8 @@ class DrawingTool {
     setDrawingMode(mode) {
         if (['line', 'plus', 'x', 'dot', 'arrow', 'square'].includes(mode)) {
             this.state.drawingMode = mode;
+            // Save to client-scope setting
+            game.settings.set(MODULE.ID, 'toolbar.drawingMode', mode);
         }
     }
     
@@ -1904,6 +1944,8 @@ class DrawingTool {
     setSymbolSize(size) {
         if (['small', 'medium', 'large'].includes(size)) {
             this.state.symbolSize = size;
+            // Save to client-scope setting
+            game.settings.set(MODULE.ID, 'toolbar.symbolSize', size);
         }
     }
     
