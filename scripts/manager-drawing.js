@@ -507,27 +507,35 @@ class DrawingTool {
             self.updateSymbolSizeButtons();
             
             // Register erase group buttons (available to all users)
-            // Clear drawings button - clears all for GM, only own drawings for players
+            // Clear own drawings button - clears only the current user's drawings (for both GM and players)
             cartographerToolbar.registerTool(`${MODULE.ID}-clear`, {
                 icon: "fa-solid fa-eraser",
-                tooltip: game.user.isGM 
-                    ? "Clear all temporary drawings" 
-                    : "Clear your temporary drawings",
+                tooltip: "Clear your temporary drawings",
                 group: "erase", // Erase group
                 order: 1,
                 buttonColor: "rgba(161, 60, 41, 0.2)", // Red tint for destructive action
                 onClick: () => {
-                    if (game.user.isGM) {
-                        // GM clears all drawings
-                        self.clearAllDrawings();
-                        ui.notifications.info(`${MODULE.NAME}: All temporary drawings cleared`);
-                    } else {
-                        // Players clear only their own drawings
-                        self.clearUserDrawings(game.user.id);
-                        ui.notifications.info(`${MODULE.NAME}: Your temporary drawings cleared`);
-                    }
+                    // Always clear only the current user's drawings (for both GM and players)
+                    self.clearUserDrawings(game.user.id);
+                    ui.notifications.info(`${MODULE.NAME}: Your temporary drawings cleared`);
                 }
             });
+            
+            // GM-only: Clear all drawings button
+            if (game.user.isGM) {
+                cartographerToolbar.registerTool(`${MODULE.ID}-clear-all`, {
+                    icon: "fa-solid fa-trash-can",
+                    tooltip: "Clear all temporary drawings (GM only)",
+                    group: "erase", // Erase group
+                    order: 0, // Show before the regular clear button
+                    buttonColor: "rgba(200, 40, 20, 0.3)", // Darker red for more destructive action
+                    onClick: () => {
+                        // GM clears all drawings from all users
+                        self.clearAllDrawings();
+                        ui.notifications.info(`${MODULE.NAME}: All temporary drawings cleared`);
+                    }
+                });
+            }
             
             // Undo button - removes the last drawing created by the current user
             cartographerToolbar.registerTool(`${MODULE.ID}-undo`, {
