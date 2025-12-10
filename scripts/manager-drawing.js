@@ -668,7 +668,7 @@ class DrawingTool {
         const strokeProportion = 0.30;
         const strokeWidth = squareSize * strokeProportion;
         const strokeColor = this.cssToPixiColor(this.state.brushSettings.color);
-        const symbolAlpha = this.extractAlphaFromRgba(this.state.brushSettings.color) * 0.5; // 50% opacity for preview
+        const symbolAlpha = 0.5; // 50% opacity for preview (always fully opaque base)
         
         // Use rounded line joins and caps
         try {
@@ -686,10 +686,32 @@ class DrawingTool {
         // Draw preview symbol (same as actual symbol but semi-transparent)
         const halfSize = squareSize / 2;
         const padding = squareSize * 0.1;
+        const shadowOffset = 2; // Shadow offset in pixels
+        const shadowAlpha = symbolAlpha * 0.3; // Shadow opacity (30% of main alpha)
+        const shadowColor = 0x000000; // Black shadow
         
         switch (this.state.drawingMode) {
             case 'plus':
+                // Draw shadow plus
                 const plusArmLength = halfSize - padding;
+                graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+                graphics.moveTo(worldX - plusArmLength + shadowOffset, worldY + shadowOffset);
+                graphics.lineTo(worldX + plusArmLength + shadowOffset, worldY + shadowOffset);
+                graphics.moveTo(worldX + shadowOffset, worldY - plusArmLength + shadowOffset);
+                graphics.lineTo(worldX + shadowOffset, worldY + plusArmLength + shadowOffset);
+                
+                // Draw main plus
+                try {
+                    graphics.lineStyle({
+                        width: strokeWidth,
+                        color: strokeColor,
+                        alpha: symbolAlpha,
+                        lineJoin: 'round',
+                        lineCap: 'round'
+                    });
+                } catch (e) {
+                    graphics.lineStyle(strokeWidth, strokeColor, symbolAlpha);
+                }
                 graphics.moveTo(worldX - plusArmLength, worldY);
                 graphics.lineTo(worldX + plusArmLength, worldY);
                 graphics.moveTo(worldX, worldY - plusArmLength);
@@ -697,7 +719,26 @@ class DrawingTool {
                 break;
                 
             case 'x':
+                // Draw shadow X
                 const xArmLength = (halfSize - padding) * 0.707;
+                graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+                graphics.moveTo(worldX - xArmLength + shadowOffset, worldY - xArmLength + shadowOffset);
+                graphics.lineTo(worldX + xArmLength + shadowOffset, worldY + xArmLength + shadowOffset);
+                graphics.moveTo(worldX + xArmLength + shadowOffset, worldY - xArmLength + shadowOffset);
+                graphics.lineTo(worldX - xArmLength + shadowOffset, worldY + xArmLength + shadowOffset);
+                
+                // Draw main X
+                try {
+                    graphics.lineStyle({
+                        width: strokeWidth,
+                        color: strokeColor,
+                        alpha: symbolAlpha,
+                        lineJoin: 'round',
+                        lineCap: 'round'
+                    });
+                } catch (e) {
+                    graphics.lineStyle(strokeWidth, strokeColor, symbolAlpha);
+                }
                 graphics.moveTo(worldX - xArmLength, worldY - xArmLength);
                 graphics.lineTo(worldX + xArmLength, worldY + xArmLength);
                 graphics.moveTo(worldX + xArmLength, worldY - xArmLength);
@@ -705,22 +746,47 @@ class DrawingTool {
                 break;
                 
             case 'dot':
+                // Draw shadow circle
                 const dotRadius = halfSize - padding;
+                graphics.beginFill(shadowColor, shadowAlpha);
+                graphics.drawCircle(worldX + shadowOffset, worldY + shadowOffset, dotRadius);
+                graphics.endFill();
+                
+                // Draw main circle
                 graphics.beginFill(strokeColor, symbolAlpha);
                 graphics.drawCircle(worldX, worldY, dotRadius);
                 graphics.endFill();
                 break;
                 
             case 'arrow':
-                const arrowheadSize = (halfSize - padding) * 0.6;
-                graphics.moveTo(worldX - halfSize + padding, worldY);
-                graphics.lineTo(worldX + halfSize - padding - arrowheadSize, worldY);
-                const tipX = worldX + halfSize - padding;
+                // Simple triangle pointing right - using drawPolygon
+                // Must fit within squareSize x squareSize box (like circle)
+                const leftX = worldX - halfSize + padding;
+                const rightX = worldX + halfSize - padding;
+                const centerY = worldY;
+                const topY = centerY - (halfSize - padding);
+                const bottomY = centerY + (halfSize - padding);
+                
+                // Polygon points: top-left, right tip, bottom-left (triangle pointing right)
+                const trianglePoints = [
+                    leftX, topY,      // Top-left corner
+                    rightX, centerY,  // Right tip
+                    leftX, bottomY   // Bottom-left corner
+                ];
+                
+                // Draw shadow triangle
+                graphics.beginFill(shadowColor, shadowAlpha);
+                const shadowPoints = [
+                    leftX + shadowOffset, topY + shadowOffset,
+                    rightX + shadowOffset, centerY + shadowOffset,
+                    leftX + shadowOffset, bottomY + shadowOffset
+                ];
+                graphics.drawPolygon(shadowPoints);
+                graphics.endFill();
+                
+                // Draw main triangle
                 graphics.beginFill(strokeColor, symbolAlpha);
-                graphics.moveTo(tipX, worldY);
-                graphics.lineTo(tipX - arrowheadSize, worldY - arrowheadSize / 2);
-                graphics.lineTo(tipX - arrowheadSize, worldY + arrowheadSize / 2);
-                graphics.lineTo(tipX, worldY);
+                graphics.drawPolygon(trianglePoints);
                 graphics.endFill();
                 break;
         }
@@ -1103,13 +1169,26 @@ class DrawingTool {
         // Create preview graphics for real-time drawing
         // Use absolute coordinates for preview (matches what user sees)
         this._previewGraphics = new PIXI.Graphics();
-        const previewAlpha = this.extractAlphaFromRgba(this.state.brushSettings.color);
+        const previewAlpha = 1.0; // Always fully opaque (no transparency from color)
+        const previewColor = this.cssToPixiColor(this.state.brushSettings.color);
+        const shadowOffset = 2; // Shadow offset in pixels
+        const shadowAlpha = previewAlpha * 0.3; // Shadow opacity (30% of main alpha)
+        const shadowColor = 0x000000; // Black shadow
+        
+        // Draw shadow starting point
         this._previewGraphics.lineStyle(
             this.state.brushSettings.size,
-            this.cssToPixiColor(this.state.brushSettings.color),
+            shadowColor,
+            shadowAlpha
+        );
+        this._previewGraphics.moveTo(worldCoords.x + shadowOffset, worldCoords.y + shadowOffset);
+        
+        // Draw main line starting point
+        this._previewGraphics.lineStyle(
+            this.state.brushSettings.size,
+            previewColor,
             previewAlpha
         );
-        // Start at the absolute position
         this._previewGraphics.moveTo(worldCoords.x, worldCoords.y);
         
         // Add to layer for immediate display
@@ -1137,16 +1216,39 @@ class DrawingTool {
         // Clear and redraw preview graphics to avoid coordinate issues
         // This ensures clean drawing without weird lines
         this._previewGraphics.clear();
-        const previewAlpha = this.extractAlphaFromRgba(this.state.brushSettings.color);
+        const previewAlpha = 1.0; // Always fully opaque (no transparency from color)
+        const previewColor = this.cssToPixiColor(this.state.brushSettings.color);
+        const shadowOffset = 2; // Shadow offset in pixels
+        const shadowAlpha = previewAlpha * 0.3; // Shadow opacity (30% of main alpha)
+        const shadowColor = 0x000000; // Black shadow
+        
+        // Draw shadow first (offset version)
         this._previewGraphics.lineStyle(
             this.state.brushSettings.size,
-            this.cssToPixiColor(this.state.brushSettings.color),
-            previewAlpha
+            shadowColor,
+            shadowAlpha
         );
         
-        // Redraw entire path using absolute coordinates
+        // Redraw entire path using absolute coordinates with shadow offset
         const startX = this.state.drawingStartPoint.x;
         const startY = this.state.drawingStartPoint.y;
+        
+        if (this.state.drawingPoints.length > 0) {
+            const firstPoint = this.state.drawingPoints[0];
+            this._previewGraphics.moveTo(startX + firstPoint[0] + shadowOffset, startY + firstPoint[1] + shadowOffset);
+            
+            for (let i = 1; i < this.state.drawingPoints.length; i++) {
+                const point = this.state.drawingPoints[i];
+                this._previewGraphics.lineTo(startX + point[0] + shadowOffset, startY + point[1] + shadowOffset);
+            }
+        }
+        
+        // Draw main line on top
+        this._previewGraphics.lineStyle(
+            this.state.brushSettings.size,
+            previewColor,
+            previewAlpha
+        );
         
         if (this.state.drawingPoints.length > 0) {
             const firstPoint = this.state.drawingPoints[0];
@@ -1270,9 +1372,28 @@ class DrawingTool {
         
         // Create PIXI Graphics object
         const graphics = new PIXI.Graphics();
-        graphics.lineStyle(strokeWidth, this.cssToPixiColor(strokeColor), 1.0);
+        const drawingAlpha = 1.0; // Always fully opaque (no transparency from color)
+        const drawingColor = this.cssToPixiColor(strokeColor);
+        const shadowOffset = 2; // Shadow offset in pixels
+        const shadowAlpha = drawingAlpha * 0.3; // Shadow opacity (30% of main alpha)
+        const shadowColor = 0x000000; // Black shadow
         
-        // Draw the path
+        // Draw shadow first (offset version)
+        graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+        
+        if (points.length > 0) {
+            const firstPoint = points[0];
+            graphics.moveTo(startX + firstPoint[0] + shadowOffset, startY + firstPoint[1] + shadowOffset);
+            
+            for (let i = 1; i < points.length; i++) {
+                const point = points[i];
+                graphics.lineTo(startX + point[0] + shadowOffset, startY + point[1] + shadowOffset);
+            }
+        }
+        
+        // Draw main line on top
+        graphics.lineStyle(strokeWidth, drawingColor, drawingAlpha);
+        
         if (points.length > 0) {
             const firstPoint = points[0];
             graphics.moveTo(startX + firstPoint[0], startY + firstPoint[1]);
@@ -1685,7 +1806,7 @@ class DrawingTool {
         const strokeProportion = 0.30; // 30% of symbol size as stroke width
         const strokeWidth = squareSize * strokeProportion;
         const strokeColor = this.cssToPixiColor(this.state.brushSettings.color);
-        const symbolAlpha = this.extractAlphaFromRgba(this.state.brushSettings.color);
+        const symbolAlpha = 1.0; // Always fully opaque (no transparency from color)
         
         // Use rounded line joins and caps for smooth corners
         // PIXI Graphics lineStyle - try object syntax first, fallback to traditional
@@ -1716,10 +1837,33 @@ class DrawingTool {
         const halfSize = squareSize / 2;
         const padding = squareSize * 0.1; // 10% padding from edges
         
+        // Shadow properties
+        const shadowOffset = 2; // Shadow offset in pixels
+        const shadowAlpha = symbolAlpha * 0.3; // Shadow opacity (30% of main alpha)
+        const shadowColor = 0x000000; // Black shadow
+        
         switch (symbolType) {
             case 'plus':
-                // Draw a plus sign within the square
+                // Draw shadow plus sign
                 const plusArmLength = halfSize - padding;
+                graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+                graphics.moveTo(x - plusArmLength + shadowOffset, y + shadowOffset);
+                graphics.lineTo(x + plusArmLength + shadowOffset, y + shadowOffset);
+                graphics.moveTo(x + shadowOffset, y - plusArmLength + shadowOffset);
+                graphics.lineTo(x + shadowOffset, y + plusArmLength + shadowOffset);
+                
+                // Draw main plus sign
+                try {
+                    graphics.lineStyle({
+                        width: strokeWidth,
+                        color: strokeColor,
+                        alpha: symbolAlpha,
+                        lineJoin: 'round',
+                        lineCap: 'round'
+                    });
+                } catch (e) {
+                    graphics.lineStyle(strokeWidth, strokeColor, symbolAlpha);
+                }
                 graphics.moveTo(x - plusArmLength, y);
                 graphics.lineTo(x + plusArmLength, y);
                 graphics.moveTo(x, y - plusArmLength);
@@ -1727,8 +1871,26 @@ class DrawingTool {
                 break;
                 
             case 'x':
-                // Draw an X within the square
+                // Draw shadow X
                 const xArmLength = (halfSize - padding) * 0.707; // Diagonal length (cos 45°)
+                graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+                graphics.moveTo(x - xArmLength + shadowOffset, y - xArmLength + shadowOffset);
+                graphics.lineTo(x + xArmLength + shadowOffset, y + xArmLength + shadowOffset);
+                graphics.moveTo(x + xArmLength + shadowOffset, y - xArmLength + shadowOffset);
+                graphics.lineTo(x - xArmLength + shadowOffset, y + xArmLength + shadowOffset);
+                
+                // Draw main X
+                try {
+                    graphics.lineStyle({
+                        width: strokeWidth,
+                        color: strokeColor,
+                        alpha: symbolAlpha,
+                        lineJoin: 'round',
+                        lineCap: 'round'
+                    });
+                } catch (e) {
+                    graphics.lineStyle(strokeWidth, strokeColor, symbolAlpha);
+                }
                 graphics.moveTo(x - xArmLength, y - xArmLength);
                 graphics.lineTo(x + xArmLength, y + xArmLength);
                 graphics.moveTo(x + xArmLength, y - xArmLength);
@@ -1736,29 +1898,47 @@ class DrawingTool {
                 break;
                 
             case 'dot':
-                // Draw a filled circle within the square
+                // Draw shadow circle
                 const dotRadius = halfSize - padding;
+                graphics.beginFill(shadowColor, shadowAlpha);
+                graphics.drawCircle(x + shadowOffset, y + shadowOffset, dotRadius);
+                graphics.endFill();
+                
+                // Draw main circle
                 graphics.beginFill(strokeColor, symbolAlpha);
                 graphics.drawCircle(x, y, dotRadius);
                 graphics.endFill();
                 break;
                 
             case 'arrow':
-                // Draw an arrow pointing right within the square
-                const arrowShaftLength = squareSize - padding * 2;
-                const arrowheadSize = (halfSize - padding) * 0.6;
+                // Simple triangle pointing right - using drawPolygon
+                // Must fit within squareSize x squareSize box (like circle)
+                const leftX = x - halfSize + padding;
+                const rightX = x + halfSize - padding;
+                const centerY = y;
+                const topY = centerY - (halfSize - padding);
+                const bottomY = centerY + (halfSize - padding);
                 
-                // Arrow shaft (horizontal line, centered vertically)
-                graphics.moveTo(x - halfSize + padding, y);
-                graphics.lineTo(x + halfSize - padding - arrowheadSize, y);
+                // Polygon points: top-left, right tip, bottom-left (triangle pointing right)
+                const trianglePoints = [
+                    leftX, topY,      // Top-left corner
+                    rightX, centerY,  // Right tip
+                    leftX, bottomY    // Bottom-left corner
+                ];
                 
-                // Arrowhead (triangle pointing right)
-                const tipX = x + halfSize - padding;
+                // Draw shadow triangle
+                graphics.beginFill(shadowColor, shadowAlpha);
+                const shadowPoints = [
+                    leftX + shadowOffset, topY + shadowOffset,
+                    rightX + shadowOffset, centerY + shadowOffset,
+                    leftX + shadowOffset, bottomY + shadowOffset
+                ];
+                graphics.drawPolygon(shadowPoints);
+                graphics.endFill();
+                
+                // Draw main triangle
                 graphics.beginFill(strokeColor, symbolAlpha);
-                graphics.moveTo(tipX, y);
-                graphics.lineTo(tipX - arrowheadSize, y - arrowheadSize / 2);
-                graphics.lineTo(tipX - arrowheadSize, y + arrowheadSize / 2);
-                graphics.lineTo(tipX, y);
+                graphics.drawPolygon(trianglePoints);
                 graphics.endFill();
                 break;
                 
