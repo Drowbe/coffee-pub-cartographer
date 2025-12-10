@@ -767,8 +767,9 @@ class DrawingTool {
                 const topY = centerY - (halfSize - padding);
                 const bottomY = centerY + (halfSize - padding);
                 
-                // Notch: split left edge, move middle point 20px to the right
-                const notchX = leftX + 20;
+                // Notch: split left edge, move middle point 25% of width to the right
+                const availableWidth = 2 * (halfSize - padding);
+                const notchX = leftX + (availableWidth * 0.25);
                 const notchY = centerY;
                 
                 // Polygon points: top-left, notch (inner), bottom-left, right tip
@@ -1925,8 +1926,9 @@ class DrawingTool {
                 const topY = centerY - (halfSize - padding);
                 const bottomY = centerY + (halfSize - padding);
                 
-                // Notch: split left edge, move middle point 20px to the right
-                const notchX = leftX + 20;
+                // Notch: split left edge, move middle point 25% of width to the right
+                const availableWidth = 2 * (halfSize - padding);
+                const notchX = leftX + (availableWidth * 0.25);
                 const notchY = centerY;
                 
                 // Polygon points: top-left, notch (inner), bottom-left, right tip
