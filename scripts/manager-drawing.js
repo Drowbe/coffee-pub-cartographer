@@ -64,6 +64,9 @@ class DrawingTool {
         // Preview symbol (shown while backslash is held in symbol mode)
         this._previewSymbol = null;
         
+        // Undo history - tracks last drawing for undo functionality
+        this._lastDrawing = null;
+        
         // Key-based activation
         this._keyDown = false;
         this._keyHandlers = {
@@ -88,7 +91,7 @@ class DrawingTool {
         const savedColor = game.settings.get(MODULE.ID, 'toolbar.color');
         
         // Apply saved selections if valid, otherwise use defaults
-        if (['line', 'plus', 'x', 'dot', 'arrow', 'square'].includes(savedDrawingMode)) {
+        if (['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'].includes(savedDrawingMode)) {
             this.state.drawingMode = savedDrawingMode;
         }
         if (['small', 'medium', 'large'].includes(savedSymbolSize)) {
@@ -244,6 +247,9 @@ class DrawingTool {
                 x: `${MODULE.ID}-mode-x`,
                 dot: `${MODULE.ID}-mode-dot`,
                 arrow: `${MODULE.ID}-mode-arrow`,
+                arrowUp: `${MODULE.ID}-mode-arrow-up`,
+                arrowDown: `${MODULE.ID}-mode-arrow-down`,
+                arrowLeft: `${MODULE.ID}-mode-arrow-left`,
                 square: `${MODULE.ID}-mode-square`
             };
             
@@ -311,7 +317,7 @@ class DrawingTool {
             
             cartographerToolbar.registerTool(self._modeButtons.arrow, {
                 icon: "fa-solid fa-arrow-right",
-                tooltip: "Arrow Symbol (click to stamp)",
+                tooltip: "Arrow Right Symbol (click to stamp)",
                 group: "mode", // Switch group
                 order: 5,
                 active: () => self.state.drawingMode === 'arrow',
@@ -325,11 +331,59 @@ class DrawingTool {
                 }
             });
             
+            cartographerToolbar.registerTool(self._modeButtons.arrowUp, {
+                icon: "fa-solid fa-arrow-up",
+                tooltip: "Arrow Up Symbol (click to stamp)",
+                group: "mode", // Switch group
+                order: 6,
+                active: () => self.state.drawingMode === 'arrow-up',
+                onClick: () => {
+                    self.setDrawingMode('arrow-up');
+                    self.updateModeButtons();
+                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
+                    if (!self.state.active) {
+                        self.activate();
+                    }
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._modeButtons.arrowDown, {
+                icon: "fa-solid fa-arrow-down",
+                tooltip: "Arrow Down Symbol (click to stamp)",
+                group: "mode", // Switch group
+                order: 7,
+                active: () => self.state.drawingMode === 'arrow-down',
+                onClick: () => {
+                    self.setDrawingMode('arrow-down');
+                    self.updateModeButtons();
+                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
+                    if (!self.state.active) {
+                        self.activate();
+                    }
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._modeButtons.arrowLeft, {
+                icon: "fa-solid fa-arrow-left",
+                tooltip: "Arrow Left Symbol (click to stamp)",
+                group: "mode", // Switch group
+                order: 8,
+                active: () => self.state.drawingMode === 'arrow-left',
+                onClick: () => {
+                    self.setDrawingMode('arrow-left');
+                    self.updateModeButtons();
+                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
+                    if (!self.state.active) {
+                        self.activate();
+                    }
+                }
+            });
+            
             cartographerToolbar.registerTool(self._modeButtons.square, {
                 icon: "fa-solid fa-square",
                 tooltip: "Rounded Square Symbol (click to stamp)",
                 group: "mode", // Switch group
-                order: 6,
+                order: 9,
                 active: () => self.state.drawingMode === 'square',
                 onClick: () => {
                     self.setDrawingMode('square');
@@ -406,7 +460,7 @@ class DrawingTool {
             };
             
             cartographerToolbar.registerTool(self._symbolSizeButtons.small, {
-                icon: "fa-solid fa-square fa-xs",
+                icon: "fa-solid fa-circle-s",
                 tooltip: "Small symbol size",
                 group: "symbols", // Switch group
                 order: 1,
@@ -418,7 +472,7 @@ class DrawingTool {
             });
             
             cartographerToolbar.registerTool(self._symbolSizeButtons.medium, {
-                icon: "fa-solid fa-square fa-sm",
+                icon: "fa-solid fa-circle-m",
                 tooltip: "Medium symbol size",
                 group: "symbols", // Switch group
                 order: 2,
@@ -430,7 +484,7 @@ class DrawingTool {
             });
             
             cartographerToolbar.registerTool(self._symbolSizeButtons.large, {
-                icon: "fa-solid fa-square fa-lg",
+                icon: "fa-solid fa-circle-l",
                 tooltip: "Large symbol size",
                 group: "symbols", // Switch group
                 order: 3,
@@ -467,6 +521,17 @@ class DrawingTool {
                 }
             });
             
+            // Undo button - removes the last drawing created by the current user
+            cartographerToolbar.registerTool(`${MODULE.ID}-undo`, {
+                icon: "fa-solid fa-undo",
+                tooltip: "Undo last drawing",
+                group: "erase", // Erase group
+                order: 2,
+                onClick: () => {
+                    self.undoLastDrawing();
+                }
+            });
+            
             // Timed erase toggle button - applies to own drawings for players, all for GM
             cartographerToolbar.registerTool(`${MODULE.ID}-timed-erase`, {
                 icon: "fa-solid fa-clock",
@@ -474,7 +539,7 @@ class DrawingTool {
                     ? "Toggle timed erase (all drawings auto-delete after timeout)"
                     : "Toggle timed erase (your drawings auto-delete after timeout)",
                 group: "erase", // Erase group
-                order: 2,
+                order: 3,
                 toggleable: true, // Makes it a toggle button
                 active: () => self.state.timedEraseEnabled,
                 onClick: () => {
@@ -862,45 +927,119 @@ class DrawingTool {
                 break;
                 
             case 'arrow':
-                // Chevron arrow with notched left edge - using drawPolygon
+            case 'arrow-up':
+            case 'arrow-down':
+            case 'arrow-left':
+                // Chevron arrow with notched edge - using drawPolygon
                 // Scale to match circle visual size (circle uses radius = halfSize - padding)
                 // Arrow should be roughly same visual size, so scale down to ~85% of available space
-                const scaleFactor = 0.85;
-                const scaledHalfSize = (halfSize - padding) * scaleFactor;
+                const previewArrowScaleFactor = 0.85;
+                const previewArrowScaledHalfSize = (halfSize - padding) * previewArrowScaleFactor;
                 
-                const leftX = worldX - scaledHalfSize;
-                const rightX = worldX + scaledHalfSize;
-                const centerY = worldY;
-                const topY = centerY - scaledHalfSize;
-                const bottomY = centerY + scaledHalfSize;
+                let previewArrowPoints, previewShadowPoints;
                 
-                // Notch: split left edge, move middle point 25% of width to the right
-                const availableWidth = 2 * scaledHalfSize;
-                const notchX = leftX + (availableWidth * 0.25);
-                const notchY = centerY;
-                
-                // Polygon points: top-left, notch (inner), bottom-left, right tip
-                const arrowPoints = [
-                    leftX, topY,      // Top-left corner
-                    notchX, notchY,   // Notch point (middle of left edge, moved right)
-                    leftX, bottomY,   // Bottom-left corner
-                    rightX, centerY   // Right tip
-                ];
+                if (this.state.drawingMode === 'arrow') {
+                    // Right arrow (original)
+                    const leftX = worldX - previewArrowScaledHalfSize;
+                    const rightX = worldX + previewArrowScaledHalfSize;
+                    const centerY = worldY;
+                    const topY = centerY - previewArrowScaledHalfSize;
+                    const bottomY = centerY + previewArrowScaledHalfSize;
+                    const availableWidth = 2 * previewArrowScaledHalfSize;
+                    const notchX = leftX + (availableWidth * 0.25);
+                    const notchY = centerY;
+                    
+                    previewArrowPoints = [
+                        leftX, topY,
+                        notchX, notchY,
+                        leftX, bottomY,
+                        rightX, centerY
+                    ];
+                    previewShadowPoints = [
+                        leftX + shadowOffset, topY + shadowOffset,
+                        notchX + shadowOffset, notchY + shadowOffset,
+                        leftX + shadowOffset, bottomY + shadowOffset,
+                        rightX + shadowOffset, centerY + shadowOffset
+                    ];
+                } else if (this.state.drawingMode === 'arrow-up') {
+                    // Up arrow
+                    const leftX = worldX - previewArrowScaledHalfSize;
+                    const rightX = worldX + previewArrowScaledHalfSize;
+                    const centerX = worldX;
+                    const topY = worldY - previewArrowScaledHalfSize;
+                    const bottomY = worldY + previewArrowScaledHalfSize;
+                    const availableHeight = 2 * previewArrowScaledHalfSize;
+                    const notchX = centerX;
+                    const notchY = bottomY - (availableHeight * 0.25);
+                    
+                    previewArrowPoints = [
+                        leftX, bottomY,
+                        notchX, notchY,
+                        rightX, bottomY,
+                        centerX, topY
+                    ];
+                    previewShadowPoints = [
+                        leftX + shadowOffset, bottomY + shadowOffset,
+                        notchX + shadowOffset, notchY + shadowOffset,
+                        rightX + shadowOffset, bottomY + shadowOffset,
+                        centerX + shadowOffset, topY + shadowOffset
+                    ];
+                } else if (this.state.drawingMode === 'arrow-down') {
+                    // Down arrow
+                    const leftX = worldX - previewArrowScaledHalfSize;
+                    const rightX = worldX + previewArrowScaledHalfSize;
+                    const centerX = worldX;
+                    const topY = worldY - previewArrowScaledHalfSize;
+                    const bottomY = worldY + previewArrowScaledHalfSize;
+                    const availableHeight = 2 * previewArrowScaledHalfSize;
+                    const notchX = centerX;
+                    const notchY = topY + (availableHeight * 0.25);
+                    
+                    previewArrowPoints = [
+                        leftX, topY,
+                        notchX, notchY,
+                        rightX, topY,
+                        centerX, bottomY
+                    ];
+                    previewShadowPoints = [
+                        leftX + shadowOffset, topY + shadowOffset,
+                        notchX + shadowOffset, notchY + shadowOffset,
+                        rightX + shadowOffset, topY + shadowOffset,
+                        centerX + shadowOffset, bottomY + shadowOffset
+                    ];
+                } else if (this.state.drawingMode === 'arrow-left') {
+                    // Left arrow
+                    const leftX = worldX - previewArrowScaledHalfSize;
+                    const rightX = worldX + previewArrowScaledHalfSize;
+                    const centerY = worldY;
+                    const topY = centerY - previewArrowScaledHalfSize;
+                    const bottomY = centerY + previewArrowScaledHalfSize;
+                    const availableWidth = 2 * previewArrowScaledHalfSize;
+                    const notchX = rightX - (availableWidth * 0.25);
+                    const notchY = centerY;
+                    
+                    previewArrowPoints = [
+                        rightX, topY,
+                        notchX, notchY,
+                        rightX, bottomY,
+                        leftX, centerY
+                    ];
+                    previewShadowPoints = [
+                        rightX + shadowOffset, topY + shadowOffset,
+                        notchX + shadowOffset, notchY + shadowOffset,
+                        rightX + shadowOffset, bottomY + shadowOffset,
+                        leftX + shadowOffset, centerY + shadowOffset
+                    ];
+                }
                 
                 // Draw shadow arrow
                 graphics.beginFill(shadowColor, shadowAlpha);
-                const shadowPoints = [
-                    leftX + shadowOffset, topY + shadowOffset,
-                    notchX + shadowOffset, notchY + shadowOffset,
-                    leftX + shadowOffset, bottomY + shadowOffset,
-                    rightX + shadowOffset, centerY + shadowOffset
-                ];
-                graphics.drawPolygon(shadowPoints);
+                graphics.drawPolygon(previewShadowPoints);
                 graphics.endFill();
                 
                 // Draw main arrow
                 graphics.beginFill(strokeColor, symbolAlpha);
-                graphics.drawPolygon(arrowPoints);
+                graphics.drawPolygon(previewArrowPoints);
                 graphics.endFill();
                 break;
                 
@@ -1083,6 +1222,15 @@ class DrawingTool {
             return true; // Keep in array
         });
         
+        // Clear last drawing if it was removed
+        if (this._lastDrawing && this._lastDrawing.userId === userId) {
+            // Check if it still exists in the array
+            const stillExists = this._pixiDrawings.some(d => d.id === this._lastDrawing.id);
+            if (!stillExists) {
+                this._lastDrawing = null;
+            }
+        }
+        
         // Broadcast deletion to other clients
         if (broadcast) {
             this.broadcastDrawingDeletion(false, userId);
@@ -1090,6 +1238,50 @@ class DrawingTool {
         
         console.log(`${MODULE.NAME}: Cleared ${removedCount} drawing(s) for user ${userId}`);
         return removedCount;
+    }
+    
+    /**
+     * Undo the last drawing created by the current user
+     */
+    undoLastDrawing() {
+        if (!this._lastDrawing || !this.services?.canvasLayer) {
+            ui.notifications.warn(`${MODULE.NAME}: No drawing to undo`);
+            return;
+        }
+        
+        // Only allow undoing own drawings (unless GM)
+        if (!game.user.isGM && this._lastDrawing.userId !== game.user.id) {
+            ui.notifications.warn(`${MODULE.NAME}: Can only undo your own drawings`);
+            return;
+        }
+        
+        const layer = this.services.canvasLayer;
+        const drawingToRemove = this._lastDrawing;
+        
+        // Remove from layer
+        if (drawingToRemove.graphics && drawingToRemove.graphics.parent) {
+            layer.removeChild(drawingToRemove.graphics);
+            drawingToRemove.graphics.destroy();
+        }
+        
+        // Remove from array
+        this._pixiDrawings = this._pixiDrawings.filter(d => d.id !== drawingToRemove.id);
+        
+        // Clear last drawing reference
+        this._lastDrawing = null;
+        
+        // Find the most recent drawing by this user for next undo
+        const userDrawings = this._pixiDrawings.filter(d => d.userId === game.user.id);
+        if (userDrawings.length > 0) {
+            // Sort by creation time (most recent first)
+            userDrawings.sort((a, b) => b.createdAt - a.createdAt);
+            this._lastDrawing = userDrawings[0];
+        }
+        
+        // Broadcast deletion to other clients
+        this.broadcastDrawingDeletion(false, game.user.id);
+        
+        ui.notifications.info(`${MODULE.NAME}: Last drawing undone`);
     }
     
     /**
@@ -1545,7 +1737,7 @@ class DrawingTool {
         }
         
         const drawingId = `drawing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        this._pixiDrawings.push({
+        const drawingData = {
             id: drawingId,
             graphics: graphics,
             createdAt: Date.now(),
@@ -1557,7 +1749,11 @@ class DrawingTool {
             points: points,
             strokeWidth: strokeWidth,
             strokeColor: strokeColor
-        });
+        };
+        this._pixiDrawings.push(drawingData);
+        
+        // Store as last drawing for undo
+        this._lastDrawing = drawingData;
         
         // Broadcast drawing creation to other clients
         this.broadcastDrawingCreation({
@@ -1930,7 +2126,7 @@ class DrawingTool {
      * @param {string} mode - Drawing mode: 'line', 'plus', 'x', 'dot', 'arrow'
      */
     setDrawingMode(mode) {
-        if (['line', 'plus', 'x', 'dot', 'arrow', 'square'].includes(mode)) {
+        if (['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'].includes(mode)) {
             this.state.drawingMode = mode;
             // Save to client-scope setting
             game.settings.set(MODULE.ID, 'toolbar.drawingMode', mode);
@@ -1965,13 +2161,27 @@ class DrawingTool {
             
             // Update active state for each mode button
             if (this._modeButtons) {
-                const modes = ['line', 'plus', 'x', 'dot', 'arrow', 'square'];
+                const modes = ['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'];
+                const modeKeys = {
+                    'line': 'line',
+                    'plus': 'plus',
+                    'x': 'x',
+                    'dot': 'dot',
+                    'arrow': 'arrow',
+                    'arrow-up': 'arrowUp',
+                    'arrow-down': 'arrowDown',
+                    'arrow-left': 'arrowLeft',
+                    'square': 'square'
+                };
                 modes.forEach(mode => {
-                    blacksmithModule.api.updateSecondaryBarItemActive(
-                        barTypeId,
-                        this._modeButtons[mode],
-                        currentMode === mode
-                    );
+                    const buttonKey = modeKeys[mode];
+                    if (buttonKey && this._modeButtons[buttonKey]) {
+                        blacksmithModule.api.updateSecondaryBarItemActive(
+                            barTypeId,
+                            this._modeButtons[buttonKey],
+                            currentMode === mode
+                        );
+                    }
                 });
             }
         } catch (error) {
@@ -2226,45 +2436,119 @@ class DrawingTool {
                 break;
                 
             case 'arrow':
-                // Chevron arrow with notched left edge - using drawPolygon
+            case 'arrow-up':
+            case 'arrow-down':
+            case 'arrow-left':
+                // Chevron arrow with notched edge - using drawPolygon
                 // Scale to match circle visual size (circle uses radius = halfSize - padding)
-                // Arrow should be roughly same visual size, so scale down to ~85% of available space
-                const scaleFactor = 0.70;
-                const scaledHalfSize = (halfSize - padding) * scaleFactor;
+                // Arrow should be roughly same visual size, so scale down to ~70% of available space
+                const createArrowScaleFactor = 0.70;
+                const createArrowScaledHalfSize = (halfSize - padding) * createArrowScaleFactor;
                 
-                const leftX = x - scaledHalfSize;
-                const rightX = x + scaledHalfSize;
-                const centerY = y;
-                const topY = centerY - scaledHalfSize;
-                const bottomY = centerY + scaledHalfSize;
+                let createArrowPoints, createShadowPoints;
                 
-                // Notch: split left edge, move middle point 25% of width to the right
-                const availableWidth = 2 * scaledHalfSize;
-                const notchX = leftX + (availableWidth * 0.25);
-                const notchY = centerY;
-                
-                // Polygon points: top-left, notch (inner), bottom-left, right tip
-                const arrowPoints = [
-                    leftX, topY,      // Top-left corner
-                    notchX, notchY,   // Notch point (middle of left edge, moved right)
-                    leftX, bottomY,   // Bottom-left corner
-                    rightX, centerY   // Right tip
-                ];
+                if (symbolType === 'arrow') {
+                    // Right arrow (original)
+                    const leftX = x - createArrowScaledHalfSize;
+                    const rightX = x + createArrowScaledHalfSize;
+                    const centerY = y;
+                    const topY = centerY - createArrowScaledHalfSize;
+                    const bottomY = centerY + createArrowScaledHalfSize;
+                    const availableWidth = 2 * createArrowScaledHalfSize;
+                    const notchX = leftX + (availableWidth * 0.25);
+                    const notchY = centerY;
+                    
+                    createArrowPoints = [
+                        leftX, topY,
+                        notchX, notchY,
+                        leftX, bottomY,
+                        rightX, centerY
+                    ];
+                    createShadowPoints = [
+                        leftX + shadowOffset, topY + shadowOffset,
+                        notchX + shadowOffset, notchY + shadowOffset,
+                        leftX + shadowOffset, bottomY + shadowOffset,
+                        rightX + shadowOffset, centerY + shadowOffset
+                    ];
+                } else if (symbolType === 'arrow-up') {
+                    // Up arrow
+                    const leftX = x - createArrowScaledHalfSize;
+                    const rightX = x + createArrowScaledHalfSize;
+                    const centerX = x;
+                    const topY = y - createArrowScaledHalfSize;
+                    const bottomY = y + createArrowScaledHalfSize;
+                    const availableHeight = 2 * createArrowScaledHalfSize;
+                    const notchX = centerX;
+                    const notchY = bottomY - (availableHeight * 0.25);
+                    
+                    createArrowPoints = [
+                        leftX, bottomY,
+                        notchX, notchY,
+                        rightX, bottomY,
+                        centerX, topY
+                    ];
+                    createShadowPoints = [
+                        leftX + shadowOffset, bottomY + shadowOffset,
+                        notchX + shadowOffset, notchY + shadowOffset,
+                        rightX + shadowOffset, bottomY + shadowOffset,
+                        centerX + shadowOffset, topY + shadowOffset
+                    ];
+                } else if (symbolType === 'arrow-down') {
+                    // Down arrow
+                    const leftX = x - createArrowScaledHalfSize;
+                    const rightX = x + createArrowScaledHalfSize;
+                    const centerX = x;
+                    const topY = y - createArrowScaledHalfSize;
+                    const bottomY = y + createArrowScaledHalfSize;
+                    const availableHeight = 2 * createArrowScaledHalfSize;
+                    const notchX = centerX;
+                    const notchY = topY + (availableHeight * 0.25);
+                    
+                    createArrowPoints = [
+                        leftX, topY,
+                        notchX, notchY,
+                        rightX, topY,
+                        centerX, bottomY
+                    ];
+                    createShadowPoints = [
+                        leftX + shadowOffset, topY + shadowOffset,
+                        notchX + shadowOffset, notchY + shadowOffset,
+                        rightX + shadowOffset, topY + shadowOffset,
+                        centerX + shadowOffset, bottomY + shadowOffset
+                    ];
+                } else if (symbolType === 'arrow-left') {
+                    // Left arrow
+                    const leftX = x - createArrowScaledHalfSize;
+                    const rightX = x + createArrowScaledHalfSize;
+                    const centerY = y;
+                    const topY = centerY - createArrowScaledHalfSize;
+                    const bottomY = centerY + createArrowScaledHalfSize;
+                    const availableWidth = 2 * createArrowScaledHalfSize;
+                    const notchX = rightX - (availableWidth * 0.25);
+                    const notchY = centerY;
+                    
+                    createArrowPoints = [
+                        rightX, topY,
+                        notchX, notchY,
+                        rightX, bottomY,
+                        leftX, centerY
+                    ];
+                    createShadowPoints = [
+                        rightX + shadowOffset, topY + shadowOffset,
+                        notchX + shadowOffset, notchY + shadowOffset,
+                        rightX + shadowOffset, bottomY + shadowOffset,
+                        leftX + shadowOffset, centerY + shadowOffset
+                    ];
+                }
                 
                 // Draw shadow arrow
                 graphics.beginFill(shadowColor, shadowAlpha);
-                const shadowPoints = [
-                    leftX + shadowOffset, topY + shadowOffset,
-                    notchX + shadowOffset, notchY + shadowOffset,
-                    leftX + shadowOffset, bottomY + shadowOffset,
-                    rightX + shadowOffset, centerY + shadowOffset
-                ];
-                graphics.drawPolygon(shadowPoints);
+                graphics.drawPolygon(createShadowPoints);
                 graphics.endFill();
                 
                 // Draw main arrow
                 graphics.beginFill(strokeColor, symbolAlpha);
-                graphics.drawPolygon(arrowPoints);
+                graphics.drawPolygon(createArrowPoints);
                 graphics.endFill();
                 break;
                 
@@ -2312,7 +2596,7 @@ class DrawingTool {
         if (!this._pixiDrawings) {
             this._pixiDrawings = [];
         }
-        this._pixiDrawings.push({
+        const symbolData = {
             id: drawingId,
             graphics: graphics,
             createdAt: Date.now(),
@@ -2322,7 +2606,11 @@ class DrawingTool {
             symbolType: symbolType,
             x: x,
             y: y
-        });
+        };
+        this._pixiDrawings.push(symbolData);
+        
+        // Store as last drawing for undo
+        this._lastDrawing = symbolData;
         
         // Schedule cleanup if needed
         this.scheduleCleanup();
