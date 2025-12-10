@@ -6,6 +6,7 @@ import { MODULE } from './const.js';
 import { registerSettings } from './settings.js';
 import { drawingTool } from './manager-drawing.js';
 import { cartographerToolbar } from './manager-toolbar.js';
+import { socketManager } from './manager-sockets.js';
 
 // ================================================================== 
 // ===== BLACKSMITH API INTEGRATION =================================
@@ -87,7 +88,15 @@ Hooks.once('canvasReady', async () => {
         if (CartographerServices.canvasLayer) {
             console.log(`✅ ${MODULE.NAME}: Canvas Layer initialized`);
             
-            // Initialize tools after Canvas Layer is available
+            // Initialize socket manager FIRST (before tools)
+            // Tools will register their handlers during initialization
+            try {
+                await socketManager.initialize();
+            } catch (error) {
+                console.error(`❌ ${MODULE.NAME}: Failed to initialize socket manager:`, error);
+            }
+            
+            // Initialize tools after Canvas Layer and Socket Manager are available
             // (Toolbar manager is already initialized in 'ready' hook)
             try {
                 await drawingTool.initialize(CartographerServices);

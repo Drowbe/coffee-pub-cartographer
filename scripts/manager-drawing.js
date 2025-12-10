@@ -3,6 +3,7 @@
 // ================================================================== 
 
 import { MODULE } from './const.js';
+import { socketManager } from './manager-sockets.js';
 
 // ================================================================== 
 // ===== DRAWING TOOL CLASS ========================================
@@ -146,6 +147,13 @@ class DrawingTool {
         
         // Register toolbar tools (this will update button states based on loaded values)
         this.registerToolbarTools();
+        
+        // Register socket handlers for cross-client synchronization
+        // Socket manager will handle initialization timing - can register before or after init
+        socketManager.registerToolHandlers('drawing', {
+            'created': (data) => this.handleRemoteDrawingCreation(data),
+            'deleted': (data) => this.handleRemoteDrawingDeletion(data)
+        });
         
         console.log(`✅ ${MODULE.NAME}: ${this.displayName} initialized`);
     }
@@ -1764,7 +1772,10 @@ class DrawingTool {
             startY: startY,
             points: points,
             strokeWidth: strokeWidth,
-            strokeColor: strokeColor
+            strokeColor: strokeColor,
+            lineStyle: this.state.lineStyle || 'solid',
+            createdAt: drawingData.createdAt,
+            expiresAt: drawingData.expiresAt
         });
         
         // Schedule cleanup if needed
@@ -1923,19 +1934,191 @@ class DrawingTool {
     }
     
     /**
+     * Handle drawing creation from remote client
+     * @param {Object} data - Drawing data from socket
+     */
+    handleRemoteDrawingCreation(data) {
+        // Skip if this is our own drawing (already rendered locally)
+        if (data.userId === game.user.id) {
+            return;
+        }
+        
+        // Validate required data
+        if (!data || !data.drawingId) {
+            console.warn(`${MODULE.NAME}: Invalid drawing data received:`, data);
+            return;
+        }
+        
+        // Check if drawing already exists (prevent duplicates)
+        if (this._pixiDrawings && this._pixiDrawings.some(d => d.id === data.drawingId)) {
+            console.debug(`${MODULE.NAME}: Drawing ${data.drawingId} already exists, skipping`);
+            return;
+        }
+        
+        // Create the remote drawing
+        this.createRemoteDrawing(data);
+    }
+    
+    /**
+     * Handle drawing deletion from remote client
+     * @param {Object} data - Deletion data from socket
+     */
+    handleRemoteDrawingDeletion(data) {
+        // Skip if this is our own deletion (already handled locally)
+        if (data.userId === game.user.id) {
+            return;
+        }
+        
+        if (!data) {
+            console.warn(`${MODULE.NAME}: Invalid deletion data received:`, data);
+            return;
+        }
+        
+        if (data.clearAll) {
+            // Clear all drawings (only if from GM)
+            if (game.users.get(data.userId)?.isGM) {
+                this.clearAllDrawings(false); // false = don't broadcast (already received via socket)
+                console.log(`${MODULE.NAME}: All drawings cleared by GM ${data.userId}`);
+            }
+        } else {
+            // Clear drawings from specific user
+            this.clearUserDrawings(data.userId, false); // false = don't broadcast (already received via socket)
+            console.log(`${MODULE.NAME}: Drawings cleared for user ${data.userId}`);
+        }
+    }
+    
+    /**
+     * Create a drawing from remote data
+     * @param {Object} data - Drawing data from socket
+     */
+    createRemoteDrawing(data) {
+        if (!this.services || !this.services.canvasLayer) {
+            console.warn(`${MODULE.NAME}: Canvas layer not available for remote drawing`);
+            return;
+        }
+        
+        try {
+            // Determine if this is a line drawing or symbol drawing
+            if (data.symbolType) {
+                // Symbol drawing
+                this.createRemoteSymbol(data);
+            } else if (data.startX !== undefined && data.points) {
+                // Line drawing
+                this.createRemoteLine(data);
+            } else {
+                console.warn(`${MODULE.NAME}: Unknown drawing type in remote data:`, data);
+            }
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error creating remote drawing:`, error);
+        }
+    }
+    
+    /**
+     * Create a remote line drawing
+     * @param {Object} data - Line drawing data
+     */
+    createRemoteLine(data) {
+        const layer = this.services.canvasLayer;
+        const graphics = new PIXI.Graphics();
+        
+        const drawingAlpha = 1.0;
+        const drawingColor = this.cssToPixiColor(data.strokeColor);
+        const strokeWidth = data.strokeWidth || 6;
+        const shadowOffset = 2;
+        const shadowAlpha = drawingAlpha * 0.3;
+        const shadowColor = 0x000000;
+        
+        // Draw shadow first
+        graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+        if (data.points.length > 0) {
+            const firstPoint = data.points[0];
+            graphics.moveTo(data.startX + firstPoint[0] + shadowOffset, data.startY + firstPoint[1] + shadowOffset);
+            for (let i = 1; i < data.points.length; i++) {
+                const point = data.points[i];
+                graphics.lineTo(data.startX + point[0] + shadowOffset, data.startY + point[1] + shadowOffset);
+            }
+        }
+        
+        // Draw main line with style
+        const lineStyle = data.lineStyle || 'solid';
+        this._drawLineWithStyle(
+            graphics,
+            data.points,
+            data.startX,
+            data.startY,
+            strokeWidth,
+            drawingColor,
+            drawingAlpha,
+            lineStyle
+        );
+        
+        // Add to layer
+        layer.addChild(graphics);
+        
+        // Store reference
+        if (!this._pixiDrawings) {
+            this._pixiDrawings = [];
+        }
+        
+        this._pixiDrawings.push({
+            id: data.drawingId,
+            graphics: graphics,
+            createdAt: data.createdAt || Date.now(),
+            expiresAt: data.expiresAt || null,
+            userId: data.userId,
+            userName: data.userName || 'Unknown',
+            startX: data.startX,
+            startY: data.startY,
+            points: data.points,
+            strokeWidth: strokeWidth,
+            strokeColor: data.strokeColor
+        });
+        
+        // Schedule cleanup if needed
+        this.scheduleCleanup();
+    }
+    
+    /**
+     * Create a remote symbol drawing
+     * @param {Object} data - Symbol drawing data
+     */
+    createRemoteSymbol(data) {
+        // Use the existing _createSymbolAt method with remote data
+        // We need to extract the symbol size from data or use default
+        const symbolSize = data.symbolSize || 'medium';
+        const originalSymbolSize = this.state.symbolSize;
+        
+        // Temporarily set symbol size if provided
+        if (data.symbolSize) {
+            this.state.symbolSize = symbolSize;
+        }
+        
+        // Create the symbol
+        this._createSymbolAt(data.symbolType, data.x, data.y);
+        
+        // Restore original symbol size
+        this.state.symbolSize = originalSymbolSize;
+        
+        // Update the last created drawing with remote metadata
+        if (this._pixiDrawings && this._pixiDrawings.length > 0) {
+            const lastDrawing = this._pixiDrawings[this._pixiDrawings.length - 1];
+            if (lastDrawing.id.startsWith('symbol-')) {
+                // Update with remote data
+                lastDrawing.id = data.drawingId;
+                lastDrawing.createdAt = data.createdAt || Date.now();
+                lastDrawing.expiresAt = data.expiresAt || null;
+                lastDrawing.userId = data.userId;
+                lastDrawing.userName = data.userName || 'Unknown';
+            }
+        }
+    }
+    
+    /**
      * Broadcast drawing creation to other clients
      * @param {Object} drawingData - Drawing data to broadcast
      */
     broadcastDrawingCreation(drawingData) {
-        if (typeof BlacksmithSocketManager === 'undefined') {
-            return; // Socket manager not available
-        }
-        
-        try {
-            BlacksmithSocketManager.emit(MODULE.ID, 'drawing-created', drawingData);
-        } catch (error) {
-            console.error(`${MODULE.NAME}: Error broadcasting drawing creation:`, error);
-        }
+        socketManager.broadcast('drawing', 'created', drawingData);
     }
     
     /**
@@ -1944,18 +2127,10 @@ class DrawingTool {
      * @param {string} userId - Optional user ID if clearing specific user's drawings
      */
     broadcastDrawingDeletion(clearAll = false, userId = null) {
-        if (typeof BlacksmithSocketManager === 'undefined') {
-            return; // Socket manager not available
-        }
-        
-        try {
-            BlacksmithSocketManager.emit(MODULE.ID, 'drawing-deleted', {
-                userId: userId || game.user.id,
-                clearAll: clearAll
-            });
-        } catch (error) {
-            console.error(`${MODULE.NAME}: Error broadcasting drawing deletion:`, error);
-        }
+        socketManager.broadcast('drawing', 'deleted', {
+            userId: userId || game.user.id,
+            clearAll: clearAll
+        });
     }
     
     /**
@@ -2624,7 +2799,10 @@ class DrawingTool {
             x: x,
             y: y,
             strokeWidth: strokeWidth,
-            strokeColor: this.state.brushSettings.color
+            strokeColor: this.state.brushSettings.color,
+            symbolSize: this.state.symbolSize || 'medium',
+            createdAt: symbolData.createdAt,
+            expiresAt: symbolData.expiresAt
         });
     }
     
