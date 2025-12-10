@@ -21,6 +21,11 @@ class DrawingTool {
     static strColor4 = 'rgba(3, 105, 41, 0.7)';   // Green
     static strColor5 = 'rgba(219, 130, 12, 0.7)'; // Yellow
     
+    // Symbol size constants - defined once, can be moved to settings later
+    static strSmallSymbolSize = 40;   // px square
+    static strMediumSymbolSize = 80;  // px square
+    static strLargeSymbolSize = 140;    // px square
+    
     constructor() {
         this.name = 'drawing';
         this.displayName = 'Drawing Tool';
@@ -31,6 +36,8 @@ class DrawingTool {
         // Drawing state
         this.state = {
             active: false,
+            drawingMode: 'line', // 'line', 'plus', 'x', 'dot', 'arrow'
+            symbolSize: 'medium', // 'small', 'medium', 'large' - controls square bounding box size
             brushSettings: {
                 size: 6, // Default to medium (6px)
                 color: DrawingTool.strColor1, // Default to first color (black)
@@ -201,74 +208,203 @@ class DrawingTool {
             
             const self = this;
             
-            // Register drawing tool toggle button in Cartographer toolbar
-            cartographerToolbar.registerTool(`${MODULE.ID}-draw`, {
+            // Register mode buttons in switch group (radio-button behavior)
+            // Store references for updating active state
+            self._modeButtons = {
+                line: `${MODULE.ID}-mode-line`,
+                plus: `${MODULE.ID}-mode-plus`,
+                x: `${MODULE.ID}-mode-x`,
+                dot: `${MODULE.ID}-mode-dot`,
+                arrow: `${MODULE.ID}-mode-arrow`
+            };
+            
+            // Register line tool button in mode group
+            cartographerToolbar.registerTool(self._modeButtons.line, {
                 icon: "fa-solid fa-pen",
-                    tooltip: "Toggle Drawing Tool (or hold \\ key)",
-                active: () => self.state.active,
-                order: 1, // First button
+                tooltip: "Line Tool (hold \\ key to draw)",
+                group: "mode", // Switch group
+                order: 1,
+                active: () => self.state.drawingMode === 'line',
                 onClick: () => {
-                    if (self.state.active) {
-                        self.deactivate();
-                    } else {
+                    self.setDrawingMode('line');
+                    self.updateModeButtons();
+                }
+            });
+            
+            // Register symbol stamp buttons
+            cartographerToolbar.registerTool(self._modeButtons.plus, {
+                icon: "fa-solid fa-plus",
+                tooltip: "Plus Symbol (click to stamp)",
+                group: "mode", // Switch group
+                order: 2,
+                active: () => self.state.drawingMode === 'plus',
+                onClick: () => {
+                    self.setDrawingMode('plus');
+                    self.updateModeButtons();
+                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
+                    if (!self.state.active) {
                         self.activate();
                     }
                 }
             });
             
-            // Register GM-only erase group buttons
-            if (game.user.isGM) {
-                // Clear all drawings button
-                cartographerToolbar.registerTool(`${MODULE.ID}-clear`, {
-                    icon: "fa-solid fa-eraser",
-                    tooltip: "Clear all temporary drawings (GM only)",
-                    group: "erase", // Erase group
-                    order: 1,
-                    buttonColor: "rgba(161, 60, 41, 0.2)", // Red tint for destructive action
-                    onClick: () => {
-                        if (game.user.isGM) {
-                            self.clearAllDrawings();
-                            ui.notifications.info(`${MODULE.NAME}: All temporary drawings cleared`);
-                        }
+            cartographerToolbar.registerTool(self._modeButtons.x, {
+                icon: "fa-solid fa-xmark",
+                tooltip: "X Symbol (click to stamp)",
+                group: "mode", // Switch group
+                order: 3,
+                active: () => self.state.drawingMode === 'x',
+                onClick: () => {
+                    self.setDrawingMode('x');
+                    self.updateModeButtons();
+                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
+                    if (!self.state.active) {
+                        self.activate();
                     }
-                });
-                
-                // Timed erase toggle button
-                cartographerToolbar.registerTool(`${MODULE.ID}-timed-erase`, {
-                    icon: "fa-solid fa-clock",
-                    tooltip: "Toggle timed erase (drawings auto-delete after timeout)",
-                    group: "erase", // Erase group
-                    order: 2,
-                    toggleable: true, // Makes it a toggle button
-                    active: () => self.state.timedEraseEnabled,
-                    onClick: () => {
-                        if (game.user.isGM) {
-                            self.state.timedEraseEnabled = !self.state.timedEraseEnabled;
-                            self.updateTimedEraseButton();
-                            
-                            // Restart cleanup with new interval based on timed erase state
-                            if (self._cleanupInterval) {
-                                clearInterval(self._cleanupInterval);
-                                self._cleanupInterval = null;
-                            }
-                            // Schedule cleanup with appropriate interval
-                            if (self._pixiDrawings && self._pixiDrawings.length > 0) {
-                                self.scheduleCleanup();
-                            }
-                            
-                            const status = self.state.timedEraseEnabled ? 'enabled' : 'disabled';
-                            const timeout = BlacksmithUtils?.getSettingSafely(
-                                MODULE.ID,
-                                'drawing.timedEraseTimeout',
-                                30
-                            ) || 30;
-                            ui.notifications.info(
-                                `${MODULE.NAME}: Timed erase ${status} (${timeout}s timeout)`
-                            );
-                        }
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._modeButtons.dot, {
+                icon: "fa-solid fa-circle",
+                tooltip: "Dot Symbol (click to stamp)",
+                group: "mode", // Switch group
+                order: 4,
+                active: () => self.state.drawingMode === 'dot',
+                onClick: () => {
+                    self.setDrawingMode('dot');
+                    self.updateModeButtons();
+                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
+                    if (!self.state.active) {
+                        self.activate();
                     }
-                });
-            }
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._modeButtons.arrow, {
+                icon: "fa-solid fa-arrow-right",
+                tooltip: "Arrow Symbol (click to stamp)",
+                group: "mode", // Switch group
+                order: 5,
+                active: () => self.state.drawingMode === 'arrow',
+                onClick: () => {
+                    self.setDrawingMode('arrow');
+                    self.updateModeButtons();
+                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
+                    if (!self.state.active) {
+                        self.activate();
+                    }
+                }
+            });
+            
+            // Update mode buttons to reflect the default mode (line)
+            self.updateModeButtons();
+            
+            // Register symbol size buttons in switch group (radio-button behavior)
+            // Store references for updating active state
+            self._symbolSizeButtons = {
+                small: `${MODULE.ID}-symbol-size-small`,
+                medium: `${MODULE.ID}-symbol-size-medium`,
+                large: `${MODULE.ID}-symbol-size-large`
+            };
+            
+            cartographerToolbar.registerTool(self._symbolSizeButtons.small, {
+                icon: "fa-solid fa-square fa-xs",
+                tooltip: "Small symbol size",
+                group: "symbols", // Switch group
+                order: 1,
+                active: () => self.state.symbolSize === 'small',
+                onClick: () => {
+                    self.setSymbolSize('small');
+                    self.updateSymbolSizeButtons();
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._symbolSizeButtons.medium, {
+                icon: "fa-solid fa-square fa-sm",
+                tooltip: "Medium symbol size",
+                group: "symbols", // Switch group
+                order: 2,
+                active: () => self.state.symbolSize === 'medium',
+                onClick: () => {
+                    self.setSymbolSize('medium');
+                    self.updateSymbolSizeButtons();
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._symbolSizeButtons.large, {
+                icon: "fa-solid fa-square fa-lg",
+                tooltip: "Large symbol size",
+                group: "symbols", // Switch group
+                order: 3,
+                active: () => self.state.symbolSize === 'large',
+                onClick: () => {
+                    self.setSymbolSize('large');
+                    self.updateSymbolSizeButtons();
+                }
+            });
+            
+            // Update symbol size buttons to reflect the default size (medium)
+            self.updateSymbolSizeButtons();
+            
+            // Register erase group buttons (available to all users)
+            // Clear drawings button - clears all for GM, only own drawings for players
+            cartographerToolbar.registerTool(`${MODULE.ID}-clear`, {
+                icon: "fa-solid fa-eraser",
+                tooltip: game.user.isGM 
+                    ? "Clear all temporary drawings" 
+                    : "Clear your temporary drawings",
+                group: "erase", // Erase group
+                order: 1,
+                buttonColor: "rgba(161, 60, 41, 0.2)", // Red tint for destructive action
+                onClick: () => {
+                    if (game.user.isGM) {
+                        // GM clears all drawings
+                        self.clearAllDrawings();
+                        ui.notifications.info(`${MODULE.NAME}: All temporary drawings cleared`);
+                    } else {
+                        // Players clear only their own drawings
+                        self.clearUserDrawings(game.user.id);
+                        ui.notifications.info(`${MODULE.NAME}: Your temporary drawings cleared`);
+                    }
+                }
+            });
+            
+            // Timed erase toggle button - applies to own drawings for players, all for GM
+            cartographerToolbar.registerTool(`${MODULE.ID}-timed-erase`, {
+                icon: "fa-solid fa-clock",
+                tooltip: game.user.isGM
+                    ? "Toggle timed erase (all drawings auto-delete after timeout)"
+                    : "Toggle timed erase (your drawings auto-delete after timeout)",
+                group: "erase", // Erase group
+                order: 2,
+                toggleable: true, // Makes it a toggle button
+                active: () => self.state.timedEraseEnabled,
+                onClick: () => {
+                    self.state.timedEraseEnabled = !self.state.timedEraseEnabled;
+                    self.updateTimedEraseButton();
+                    
+                    // Restart cleanup with new interval based on timed erase state
+                    if (self._cleanupInterval) {
+                        clearInterval(self._cleanupInterval);
+                        self._cleanupInterval = null;
+                    }
+                    // Schedule cleanup with appropriate interval
+                    if (self._pixiDrawings && self._pixiDrawings.length > 0) {
+                        self.scheduleCleanup();
+                    }
+                    
+                    const status = self.state.timedEraseEnabled ? 'enabled' : 'disabled';
+                    const timeout = BlacksmithUtils?.getSettingSafely(
+                        MODULE.ID,
+                        'drawing.timedEraseTimeout',
+                        30
+                    ) || 30;
+                    const scope = game.user.isGM ? 'all drawings' : 'your drawings';
+                    ui.notifications.info(
+                        `${MODULE.NAME}: Timed erase ${status} for ${scope} (${timeout}s timeout)`
+                    );
+                }
+            });
             
             // Register line width buttons in switch group (radio-button behavior)
             // Store references for updating active state
@@ -429,8 +565,10 @@ class DrawingTool {
         this._keyHandlers.keydown = (event) => {
             // Only activate if backslash key is pressed and not already active
             // Ignore if typing in an input field
+            // Only activate with backslash if line mode is selected
             // event.key === '\\' or event.code === 'Backslash' for backslash key
             if ((event.key === '\\' || event.code === 'Backslash') && 
+                this.state.drawingMode === 'line' &&
                 !event.ctrlKey && 
                 !event.altKey && 
                 !event.metaKey &&
@@ -573,6 +711,39 @@ class DrawingTool {
     }
     
     /**
+     * Clear drawings created by the current user
+     * @param {string} userId - User ID to clear drawings for (defaults to current user)
+     * @param {boolean} broadcast - Whether to broadcast the deletion
+     */
+    clearUserDrawings(userId = game.user.id, broadcast = true) {
+        if (!this._pixiDrawings || !this.services?.canvasLayer) return 0;
+        
+        const layer = this.services.canvasLayer;
+        let removedCount = 0;
+        
+        this._pixiDrawings = this._pixiDrawings.filter(drawing => {
+            if (drawing.userId === userId) {
+                // Remove from layer
+                if (drawing.graphics && drawing.graphics.parent) {
+                    layer.removeChild(drawing.graphics);
+                    drawing.graphics.destroy();
+                }
+                removedCount++;
+                return false; // Remove from array
+            }
+            return true; // Keep in array
+        });
+        
+        // Broadcast deletion to other clients
+        if (broadcast) {
+            this.broadcastDrawingDeletion(false, userId);
+        }
+        
+        console.log(`${MODULE.NAME}: Cleared ${removedCount} drawing(s) for user ${userId}`);
+        return removedCount;
+    }
+    
+    /**
      * Clean up drawings from a specific player
      * @param {string} userId - User ID to clean up drawings for
      */
@@ -583,12 +754,12 @@ class DrawingTool {
         let removedCount = 0;
         
         this._pixiDrawings = this._pixiDrawings.filter(drawing => {
-            // If drawing has user info, check if it matches
-            // For now, we'll clear all since we don't track user per drawing yet
-            // This can be enhanced in Phase 6 with multi-player sync
-            if (drawing.graphics && drawing.graphics.parent) {
-                layer.removeChild(drawing.graphics);
-                drawing.graphics.destroy();
+            // Check if drawing belongs to the specified user
+            if (drawing.userId === userId) {
+                if (drawing.graphics && drawing.graphics.parent) {
+                    layer.removeChild(drawing.graphics);
+                    drawing.graphics.destroy();
+                }
                 removedCount++;
                 return false; // Remove from array
             }
@@ -667,8 +838,19 @@ class DrawingTool {
                 return false;
             }
             
-            // Manual activation mode (console): allow mouse clicks
-            if (self.state.active && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
+            // If in symbol mode (not line), stamp the symbol on click
+            if (self.state.active && self.state.drawingMode !== 'line' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                
+                // Stamp the symbol at click position
+                self.stampSymbol(self.state.drawingMode, event);
+                return false;
+            }
+            
+            // Manual activation mode (console) or line mode: allow mouse clicks for drawing
+            if (self.state.active && self.state.drawingMode === 'line' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
                 // Prevent Foundry's default drawing tool from activating
                 event.preventDefault();
                 event.stopPropagation();
@@ -685,12 +867,13 @@ class DrawingTool {
         };
         
         this._handlePointerMove = (event) => {
-            // Update drawing while backslash is held OR while manually drawing
-            if (self.state.active) {
+            // Only handle pointer move for line mode
+            // Symbol modes don't need pointer move (they stamp on click)
+            if (self.state.active && self.state.drawingMode === 'line') {
                 // Key-based mode: if backslash is held, start/continue drawing on mouse move
                 if (self._keyDown) {
                     if (!self.state.isDrawing) {
-                        // Start drawing on first mouse move while "D" is held
+                        // Start drawing on first mouse move while backslash is held
                         self.startDrawing(event);
                     } else {
                         // Continue drawing
@@ -1005,15 +1188,16 @@ class DrawingTool {
     /**
      * Broadcast drawing deletion to other clients
      * @param {boolean} clearAll - Whether all drawings were cleared
+     * @param {string} userId - Optional user ID if clearing specific user's drawings
      */
-    broadcastDrawingDeletion(clearAll = false) {
+    broadcastDrawingDeletion(clearAll = false, userId = null) {
         if (typeof BlacksmithSocketManager === 'undefined') {
             return; // Socket manager not available
         }
         
         try {
             BlacksmithSocketManager.emit(MODULE.ID, 'drawing-deleted', {
-                userId: game.user.id,
+                userId: userId || game.user.id,
                 clearAll: clearAll
             });
         } catch (error) {
@@ -1079,10 +1263,19 @@ class DrawingTool {
         
         const now = Date.now();
         const layer = this.services.canvasLayer;
+        const currentUserId = game.user.id;
+        const isGM = game.user.isGM;
         
         let removedCount = 0;
         this._pixiDrawings = this._pixiDrawings.filter(drawing => {
             if (drawing.expiresAt && now > drawing.expiresAt) {
+                // If timed erase is enabled and user is not GM, only expire own drawings
+                // GMs can expire all drawings when timed erase is enabled
+                if (this.state.timedEraseEnabled && !isGM && drawing.userId !== currentUserId) {
+                    // Don't expire other players' drawings for non-GM users
+                    return true; // Keep in array
+                }
+                
                 // Remove from layer
                 if (drawing.graphics && drawing.graphics.parent) {
                     layer.removeChild(drawing.graphics);
@@ -1096,7 +1289,8 @@ class DrawingTool {
         
         // If we removed drawings and timed erase is enabled, log it
         if (removedCount > 0 && this.state.timedEraseEnabled) {
-            console.log(`${MODULE.NAME}: Cleaned up ${removedCount} expired drawing(s)`);
+            const scope = isGM ? 'all' : 'your';
+            console.log(`${MODULE.NAME}: Cleaned up ${removedCount} expired ${scope} drawing(s)`);
         }
         
         // If no drawings remain and cleanup interval exists, we can keep it running
@@ -1172,6 +1366,260 @@ class DrawingTool {
         } catch (error) {
             console.error(`${MODULE.NAME}: Error updating timed erase button:`, error);
         }
+    }
+    
+    /**
+     * Set the drawing mode
+     * @param {string} mode - Drawing mode: 'line', 'plus', 'x', 'dot', 'arrow'
+     */
+    setDrawingMode(mode) {
+        if (['line', 'plus', 'x', 'dot', 'arrow'].includes(mode)) {
+            this.state.drawingMode = mode;
+        }
+    }
+    
+    /**
+     * Set the symbol size
+     * @param {string} size - Symbol size: 'small', 'medium', 'large'
+     */
+    setSymbolSize(size) {
+        if (['small', 'medium', 'large'].includes(size)) {
+            this.state.symbolSize = size;
+        }
+    }
+    
+    /**
+     * Update active state of mode buttons in secondary bar
+     * Uses Blacksmith's updateSecondaryBarItemActive API
+     */
+    updateModeButtons() {
+        try {
+            const blacksmithModule = game.modules.get('coffee-pub-blacksmith');
+            if (!blacksmithModule?.api?.updateSecondaryBarItemActive) {
+                return;
+            }
+            
+            const barTypeId = MODULE.ID;
+            const currentMode = this.state.drawingMode;
+            
+            // Update active state for each mode button
+            if (this._modeButtons) {
+                const modes = ['line', 'plus', 'x', 'dot', 'arrow'];
+                modes.forEach(mode => {
+                    blacksmithModule.api.updateSecondaryBarItemActive(
+                        barTypeId,
+                        this._modeButtons[mode],
+                        currentMode === mode
+                    );
+                });
+            }
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error updating mode buttons:`, error);
+        }
+    }
+    
+    /**
+     * Update active state of symbol size buttons in secondary bar
+     * Uses Blacksmith's updateSecondaryBarItemActive API
+     */
+    updateSymbolSizeButtons() {
+        try {
+            const blacksmithModule = game.modules.get('coffee-pub-blacksmith');
+            if (!blacksmithModule?.api?.updateSecondaryBarItemActive) {
+                return;
+            }
+            
+            const barTypeId = MODULE.ID;
+            const currentSize = this.state.symbolSize;
+            
+            // Update active state for each symbol size button
+            if (this._symbolSizeButtons) {
+                const sizes = ['small', 'medium', 'large'];
+                sizes.forEach(size => {
+                    blacksmithModule.api.updateSecondaryBarItemActive(
+                        barTypeId,
+                        this._symbolSizeButtons[size],
+                        currentSize === size
+                    );
+                });
+            }
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error updating symbol size buttons:`, error);
+        }
+    }
+    
+    /**
+     * Stamp a symbol on the canvas
+     * If called from button click, will stamp on next canvas click
+     * If called with event, will stamp at event position
+     * @param {string} symbolType - Type of symbol: 'plus', 'x', 'dot', 'arrow'
+     * @param {PointerEvent} event - Optional pointer event with coordinates
+     */
+    stampSymbol(symbolType, event = null) {
+        if (!this.services || !this.services.canvasLayer) {
+            console.warn(`${MODULE.NAME}: Canvas Layer not available for stamping`);
+            return;
+        }
+        
+        if (!canvas || !canvas.scene) {
+            console.warn(`${MODULE.NAME}: Canvas or scene not available for stamping`);
+            return;
+        }
+        
+        let worldX, worldY;
+        
+        if (event) {
+            // Use event coordinates
+            const rect = canvas.app.view.getBoundingClientRect();
+            const screenX = event.clientX - rect.left;
+            const screenY = event.clientY - rect.top;
+            const worldPoint = canvas.app.stage.toLocal(new PIXI.Point(screenX, screenY));
+            worldX = worldPoint.x;
+            worldY = worldPoint.y;
+        } else {
+            // Try to get current mouse position
+            const mousePosition = canvas.app.renderer.plugins.interaction?.mouse?.global;
+            if (mousePosition) {
+                const worldPoint = canvas.app.stage.toLocal(mousePosition);
+                worldX = worldPoint.x;
+                worldY = worldPoint.y;
+            } else {
+                // Fallback: use center of viewport
+                const view = canvas.app.view;
+                const centerX = view.width / 2;
+                const centerY = view.height / 2;
+                const worldPoint = canvas.app.stage.toLocal(new PIXI.Point(centerX, centerY));
+                worldX = worldPoint.x;
+                worldY = worldPoint.y;
+            }
+        }
+        
+        this._createSymbolAt(symbolType, worldX, worldY);
+    }
+    
+    /**
+     * Create a symbol at the specified world coordinates
+     * 
+     * Symbol properties:
+     * - strokeWidth: this.state.brushSettings.size (line width setting) * multiplier
+     * - strokeColor: this.state.brushSettings.color (color setting)
+     * - squareSize: Based on this.state.symbolSize ('small', 'medium', 'large')
+     *   All symbols fit within a square bounding box of this size
+     * 
+     * @param {string} symbolType - Type of symbol: 'plus', 'x', 'dot', 'arrow'
+     * @param {number} x - World X coordinate
+     * @param {number} y - World Y coordinate
+     */
+    _createSymbolAt(symbolType, x, y) {
+        const layer = this.services.canvasLayer;
+        const graphics = new PIXI.Graphics();
+        
+        // Symbol size determines the square bounding box
+        const symbolSizeMap = {
+            small: DrawingTool.strSmallSymbolSize,   // px square
+            medium: DrawingTool.strMediumSymbolSize,  // px square
+            large: DrawingTool.strLargeSymbolSize    // px square
+        };
+        const squareSize = symbolSizeMap[this.state.symbolSize] || symbolSizeMap.medium;
+        
+        // Stroke width is simply a proportion of the symbol size
+        // This ensures the stroke scales appropriately with the symbol size
+        const strokeProportion = 0.30; // 20% of symbol size as stroke width
+        const strokeWidth = squareSize * strokeProportion;
+        const strokeColor = this.cssToPixiColor(this.state.brushSettings.color);
+        
+        graphics.lineStyle(strokeWidth, strokeColor, 1.0);
+        
+        // All symbols are drawn to fit within the squareSize x squareSize bounding box
+        // Center the symbol at (x, y)
+        const halfSize = squareSize / 2;
+        const padding = squareSize * 0.1; // 10% padding from edges
+        
+        switch (symbolType) {
+            case 'plus':
+                // Draw a plus sign within the square
+                const plusArmLength = halfSize - padding;
+                graphics.moveTo(x - plusArmLength, y);
+                graphics.lineTo(x + plusArmLength, y);
+                graphics.moveTo(x, y - plusArmLength);
+                graphics.lineTo(x, y + plusArmLength);
+                break;
+                
+            case 'x':
+                // Draw an X within the square
+                const xArmLength = (halfSize - padding) * 0.707; // Diagonal length (cos 45°)
+                graphics.moveTo(x - xArmLength, y - xArmLength);
+                graphics.lineTo(x + xArmLength, y + xArmLength);
+                graphics.moveTo(x + xArmLength, y - xArmLength);
+                graphics.lineTo(x - xArmLength, y + xArmLength);
+                break;
+                
+            case 'dot':
+                // Draw a filled circle within the square
+                const dotRadius = halfSize - padding;
+                graphics.beginFill(strokeColor, 1.0);
+                graphics.drawCircle(x, y, dotRadius);
+                graphics.endFill();
+                break;
+                
+            case 'arrow':
+                // Draw an arrow pointing right within the square
+                const arrowShaftLength = squareSize - padding * 2;
+                const arrowheadSize = (halfSize - padding) * 0.6;
+                
+                // Arrow shaft (horizontal line, centered vertically)
+                graphics.moveTo(x - halfSize + padding, y);
+                graphics.lineTo(x + halfSize - padding - arrowheadSize, y);
+                
+                // Arrowhead (triangle pointing right)
+                const tipX = x + halfSize - padding;
+                graphics.beginFill(strokeColor, 1.0);
+                graphics.moveTo(tipX, y);
+                graphics.lineTo(tipX - arrowheadSize, y - arrowheadSize / 2);
+                graphics.lineTo(tipX - arrowheadSize, y + arrowheadSize / 2);
+                graphics.lineTo(tipX, y);
+                graphics.endFill();
+                break;
+                
+            default:
+                console.warn(`${MODULE.NAME}: Unknown symbol type: ${symbolType}`);
+                return;
+        }
+        
+        // Add to layer
+        layer.addChild(graphics);
+        
+        // Store in drawings array for cleanup
+        const drawingId = `symbol-${symbolType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        if (!this._pixiDrawings) {
+            this._pixiDrawings = [];
+        }
+        this._pixiDrawings.push({
+            id: drawingId,
+            graphics: graphics,
+            createdAt: Date.now(),
+            expiresAt: this.getExpirationTime(),
+            userId: game.user.id,
+            userName: game.user.name,
+            symbolType: symbolType,
+            x: x,
+            y: y
+        });
+        
+        // Schedule cleanup if needed
+        this.scheduleCleanup();
+        
+        // Broadcast symbol creation to other clients
+        this.broadcastDrawingCreation({
+            drawingId: drawingId,
+            userId: game.user.id,
+            userName: game.user.name,
+            symbolType: symbolType,
+            x: x,
+            y: y,
+            strokeWidth: strokeWidth,
+            strokeColor: this.state.brushSettings.color
+        });
     }
     
     /**

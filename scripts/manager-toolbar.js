@@ -68,6 +68,14 @@ class CartographerToolbar {
                 title: "Cartographer",
                 persistence: "manual", // manual = stays open until closed, auto = closes after delay
                 groups: {
+                    'mode': {
+                        mode: 'switch', // Radio-button behavior: only one active at a time
+                        order: 5 // Order for the group (first group)
+                    },
+                    'symbols': {
+                        mode: 'switch', // Radio-button behavior: only one active at a time
+                        order: 7 // Order for the group (between mode and line-width)
+                    },
                     'line-width': {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 10 // Order for the group
@@ -204,7 +212,7 @@ class CartographerToolbar {
             const toolData = {
                 icon: "fa-solid fa-map",
                 name: "Cartographer",
-                title: "Cartographer Tools",
+                title: "Cartographer",
                 zone: "middle",              // Optional: left, middle, right (default: middle)
                 order: 5,                  // Optional: order within zone
                 moduleId: MODULE.ID,       // Optional: your module ID
