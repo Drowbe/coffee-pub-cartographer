@@ -1938,8 +1938,11 @@ class DrawingTool {
      * @param {Object} data - Drawing data from socket
      */
     handleRemoteDrawingCreation(data) {
+        console.log(`${MODULE.NAME}: handleRemoteDrawingCreation called with data:`, data);
+        
         // Skip if this is our own drawing (already rendered locally)
         if (data.userId === game.user.id) {
+            console.debug(`${MODULE.NAME}: Skipping own drawing from user ${data.userId}`);
             return;
         }
         
@@ -1955,6 +1958,7 @@ class DrawingTool {
             return;
         }
         
+        console.log(`${MODULE.NAME}: Creating remote drawing ${data.drawingId} from user ${data.userId}`);
         // Create the remote drawing
         this.createRemoteDrawing(data);
     }
@@ -2117,8 +2121,8 @@ class DrawingTool {
      * Broadcast drawing creation to other clients
      * @param {Object} drawingData - Drawing data to broadcast
      */
-    broadcastDrawingCreation(drawingData) {
-        socketManager.broadcast('drawing', 'created', drawingData);
+    async broadcastDrawingCreation(drawingData) {
+        await socketManager.broadcast('drawing', 'created', drawingData);
     }
     
     /**
@@ -2126,8 +2130,8 @@ class DrawingTool {
      * @param {boolean} clearAll - Whether all drawings were cleared
      * @param {string} userId - Optional user ID if clearing specific user's drawings
      */
-    broadcastDrawingDeletion(clearAll = false, userId = null) {
-        socketManager.broadcast('drawing', 'deleted', {
+    async broadcastDrawingDeletion(clearAll = false, userId = null) {
+        await socketManager.broadcast('drawing', 'deleted', {
             userId: userId || game.user.id,
             clearAll: clearAll
         });

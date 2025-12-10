@@ -3,6 +3,7 @@
 // ================================================================== 
 
 import { MODULE } from './const.js';
+import { BlacksmithAPI } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
 // ================================================================== 
 // ===== SOCKET MANAGER CLASS =======================================
@@ -22,37 +23,31 @@ class SocketManager {
     }
     
     /**
-     * Get Blacksmith socket API
-     * Tries multiple access patterns to find the socket API
-     * @returns {Object|null} Socket API object or null if not available
+     * Get Blacksmith socket API using the recommended pattern
+     * Uses BlacksmithAPI.getSockets() which handles timing and initialization
+     * @returns {Promise<Object|null>} Socket API object or null if not available
      */
-    _getSocketAPI() {
-        // Try global Blacksmith object first
+    async _getSocketAPI() {
+        try {
+            // Use BlacksmithAPI.getSockets() which handles timing and async initialization
+            const sockets = await BlacksmithAPI.getSockets();
+            if (sockets) {
+                return sockets;
+            }
+        } catch (error) {
+            console.warn(`${MODULE.NAME}: Error getting socket API via BlacksmithAPI.getSockets():`, error);
+        }
+        
+        // Fallback: Try global Blacksmith.socket (now available after Blacksmith fix)
         if (typeof Blacksmith !== 'undefined' && Blacksmith.socket) {
             return Blacksmith.socket;
         }
         
-        // Try accessing via module API
+        // Fallback: Try accessing via module API
         const blacksmithModule = game.modules.get('coffee-pub-blacksmith');
-        if (blacksmithModule?.api?.socket) {
-            return blacksmithModule.api.socket;
+        if (blacksmithModule?.api?.sockets) {
+            return blacksmithModule.api.sockets;
         }
-        
-        // Try accessing via BlacksmithAPI bridge (if available)
-        if (typeof BlacksmithAPI !== 'undefined' && BlacksmithAPI.socket) {
-            return BlacksmithAPI.socket;
-        }
-        
-        // Try global BlacksmithSocketManager (legacy)
-        if (typeof BlacksmithSocketManager !== 'undefined') {
-            return BlacksmithSocketManager;
-        }
-        
-        // Debug: Log what's available
-        console.debug(`${MODULE.NAME}: Socket API check - Blacksmith:`, typeof Blacksmith, 
-                     'blacksmithModule:', blacksmithModule?.api ? 'has api' : 'no api',
-                     'BlacksmithAPI:', typeof BlacksmithAPI,
-                     'BlacksmithSocketManager:', typeof BlacksmithSocketManager);
         
         return null;
     }
@@ -60,25 +55,41 @@ class SocketManager {
     /**
      * Initialize socket manager and register all handlers
      * Called from cartographer.js during canvasReady hook
+     * Uses BlacksmithAPI.getSockets() which handles timing and async initialization
      */
     async initialize() {
-        const socketAPI = this._getSocketAPI();
-        if (!socketAPI) {
-            console.warn(`${MODULE.NAME}: Blacksmith socket API not available, socket manager not initialized`);
-            return;
-        }
-        
-        this.socketAPI = socketAPI; // Store for later use
-        
         try {
+            console.log(`${MODULE.NAME}: Initializing socket manager...`);
+            
+            // Use BlacksmithAPI.getSockets() which handles timing and async initialization
+            const socketAPI = await this._getSocketAPI();
+            if (!socketAPI) {
+                console.warn(`${MODULE.NAME}: Blacksmith socket API not available, socket manager not initialized`);
+                return;
+            }
+            
+            // Debug: Log socket API structure
+            console.log(`${MODULE.NAME}: Socket API obtained:`, {
+                hasWaitForReady: typeof socketAPI.waitForReady === 'function',
+                hasEmit: typeof socketAPI.emit === 'function',
+                hasRegister: typeof socketAPI.register === 'function',
+                methods: Object.keys(socketAPI)
+            });
+            
+            this.socketAPI = socketAPI; // Store for later use
+            
             // Wait for socket system to be ready (if method exists)
             if (typeof socketAPI.waitForReady === 'function') {
+                console.log(`${MODULE.NAME}: Waiting for socket to be ready...`);
                 await socketAPI.waitForReady();
+                console.log(`${MODULE.NAME}: Socket waitForReady() completed`);
+            } else {
+                console.warn(`${MODULE.NAME}: Socket API does not have waitForReady method`);
             }
             this.socketReady = true;
             
             this.initialized = true;
-            console.log(`${MODULE.NAME}: Socket manager initialized`);
+            console.log(`${MODULE.NAME}: ✅ Socket manager initialized (ready: ${this.socketReady}, handlers pending: ${this.handlers.size})`);
             
             // Register any handlers that were registered before initialization
             this._registerPendingHandlers();
@@ -94,8 +105,10 @@ class SocketManager {
      * @param {Object} handlers - Object mapping event names to handler functions
      */
     registerToolHandlers(toolId, handlers) {
+        console.log(`${MODULE.NAME}: registerToolHandlers called for ${toolId} (initialized: ${this.initialized}, socketReady: ${this.socketReady})`);
+        
         if (!this.initialized) {
-            console.warn(`${MODULE.NAME}: Socket manager not initialized, cannot register handlers for ${toolId}`);
+            console.log(`${MODULE.NAME}: Socket manager not initialized yet, storing handlers for ${toolId} to register later`);
             // Store handlers to register later
             if (!this.handlers.has(toolId)) {
                 this.handlers.set(toolId, {});
@@ -104,6 +117,7 @@ class SocketManager {
             Object.entries(handlers).forEach(([eventName, handler]) => {
                 toolHandlers[eventName] = handler;
             });
+            console.log(`${MODULE.NAME}: Stored ${Object.keys(handlers).length} handler(s) for ${toolId} (will register when socket ready)`);
             return;
         }
         
@@ -119,14 +133,21 @@ class SocketManager {
             if (this.initialized && this.socketReady && this.socketAPI) {
                 // Event name format: 'toolId-eventName' (e.g., 'drawing-created')
                 const fullEventName = `${toolId}-${eventName}`;
+                const registeredEventName = `${MODULE.ID}.${fullEventName}`;
                 if (typeof this.socketAPI.register === 'function') {
-                    this.socketAPI.register(`${MODULE.ID}.${fullEventName}`, (data) => {
+                    this.socketAPI.register(registeredEventName, (data) => {
+                        console.debug(`${MODULE.NAME}: Socket event received: ${registeredEventName}`, data);
                         // Skip if this is our own event (already handled locally)
                         if (data && data.userId === game.user.id) {
+                            console.debug(`${MODULE.NAME}: Skipping own event from user ${data.userId}`);
                             return;
                         }
+                        console.debug(`${MODULE.NAME}: Calling handler for ${registeredEventName}`);
                         handler(data);
                     });
+                    console.log(`${MODULE.NAME}: Registered socket handler: ${registeredEventName}`);
+                } else {
+                    console.warn(`${MODULE.NAME}: Socket API register method not available`);
                 }
             }
         });
@@ -155,14 +176,19 @@ class SocketManager {
         this.handlers.forEach((toolHandlers, toolId) => {
             Object.entries(toolHandlers).forEach(([eventName, handler]) => {
                 const fullEventName = `${toolId}-${eventName}`;
+                const registeredEventName = `${MODULE.ID}.${fullEventName}`;
                 if (typeof this.socketAPI.register === 'function') {
-                    this.socketAPI.register(`${MODULE.ID}.${fullEventName}`, (data) => {
+                    this.socketAPI.register(registeredEventName, (data) => {
+                        console.debug(`${MODULE.NAME}: Socket event received: ${registeredEventName}`, data);
                         // Skip if this is our own event (already handled locally)
                         if (data && data.userId === game.user.id) {
+                            console.debug(`${MODULE.NAME}: Skipping own event from user ${data.userId}`);
                             return;
                         }
+                        console.debug(`${MODULE.NAME}: Calling handler for ${registeredEventName}`);
                         handler(data);
                     });
+                    console.log(`${MODULE.NAME}: Registered pending socket handler: ${registeredEventName}`);
                 }
             });
             console.log(`${MODULE.NAME}: Registered ${Object.keys(toolHandlers).length} pending socket handler(s) for tool: ${toolId}`);
@@ -176,34 +202,58 @@ class SocketManager {
      * @param {string} eventName - Event name (e.g., 'drawing-created')
      * @param {Object} data - Event data to broadcast
      */
-    broadcast(toolId, eventName, data) {
-        // Get socket API (will try multiple access patterns)
-        const socketAPI = this.socketAPI || this._getSocketAPI();
+    async broadcast(toolId, eventName, data) {
+        // Use stored socket API if available, otherwise get it
+        let socketAPI = this.socketAPI;
         if (!socketAPI) {
-            console.warn(`${MODULE.NAME}: Blacksmith socket API not available`);
-            return;
+            socketAPI = await this._getSocketAPI();
+            if (!socketAPI) {
+                console.warn(`${MODULE.NAME}: Blacksmith socket API not available`);
+                return;
+            }
+            // Store for future use
+            this.socketAPI = socketAPI;
         }
         
-        // Wait for socket system to be ready, then emit event
-        const waitForReady = socketAPI.waitForReady || (() => Promise.resolve());
-        waitForReady.call(socketAPI).then(() => {
-            try {
-                // Event name format: 'toolId-eventName' (e.g., 'drawing-created')
-                const fullEventName = `${toolId}-${eventName}`;
-                
-                // Try new API format first
-                if (typeof socketAPI.emit === 'function') {
-                    socketAPI.emit(MODULE.ID, fullEventName, data);
-                } else if (typeof socketAPI.emit === 'function' && socketAPI.emit.length === 3) {
-                    // Legacy format: emit(moduleId, eventName, data)
-                    socketAPI.emit(MODULE.ID, fullEventName, data);
-                }
-            } catch (error) {
-                console.error(`${MODULE.NAME}: Error broadcasting ${eventName} for ${toolId}:`, error);
+        try {
+            // Ensure socket is ready
+            if (typeof socketAPI.waitForReady === 'function') {
+                await socketAPI.waitForReady();
             }
-        }).catch(error => {
-            console.error(`${MODULE.NAME}: Error waiting for socket ready:`, error);
-        });
+            
+            // Verify emit method exists before calling
+            if (typeof socketAPI.emit !== 'function') {
+                console.error(`${MODULE.NAME}: Socket API emit method not found. Available methods:`, Object.keys(socketAPI));
+                return;
+            }
+            
+            // Event name format: 'toolId-eventName' (e.g., 'drawing-created')
+            const fullEventName = `${toolId}-${eventName}`;
+            // Full registered event name format: 'moduleId.toolId-eventName'
+            const registeredEventName = `${MODULE.ID}.${fullEventName}`;
+            
+            // Debug: Log what we're about to emit
+            console.log(`${MODULE.NAME}: Broadcasting socket event:`, {
+                registeredEventName: registeredEventName,
+                hasData: !!data,
+                socketReady: this.socketReady,
+                dataKeys: data ? Object.keys(data) : []
+            });
+            
+            // Emit event using Blacksmith socket API
+            // Based on Blacksmith API, emit takes the full event name (moduleId.eventName)
+            // Signature: emit(eventName, data) where eventName is the full registered name
+            socketAPI.emit(registeredEventName, data);
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error broadcasting ${eventName} for ${toolId}:`, error);
+            console.error(`${MODULE.NAME}: Socket API state:`, {
+                hasSocketAPI: !!this.socketAPI,
+                socketReady: this.socketReady,
+                initialized: this.initialized,
+                socketAPIType: typeof this.socketAPI,
+                socketAPIMethods: this.socketAPI ? Object.keys(this.socketAPI) : 'N/A'
+            });
+        }
     }
     
     /**
