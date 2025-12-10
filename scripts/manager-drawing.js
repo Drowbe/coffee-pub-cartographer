@@ -1206,18 +1206,55 @@ class DrawingTool {
     }
     
     /**
+     * Fade out and remove a PIXI graphics object
+     * @param {PIXI.Graphics} graphics - Graphics object to fade out
+     * @param {number} duration - Fade duration in milliseconds (default: 300ms)
+     * @param {Function} onComplete - Optional callback when fade completes
+     */
+    _fadeOutAndRemove(graphics, duration = 300, onComplete = null) {
+        if (!graphics || !graphics.parent) {
+            if (onComplete) onComplete();
+            return;
+        }
+        
+        const startAlpha = graphics.alpha;
+        const startTime = Date.now();
+        
+        const animate = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1.0);
+            
+            // Ease out animation (smooth deceleration)
+            const easedProgress = 1 - Math.pow(1 - progress, 3);
+            graphics.alpha = startAlpha * (1 - easedProgress);
+            
+            if (progress < 1.0) {
+                requestAnimationFrame(animate);
+            } else {
+                // Fade complete - remove and destroy
+                const layer = this.services?.canvasLayer;
+                if (layer && graphics.parent === layer) {
+                    layer.removeChild(graphics);
+                }
+                graphics.destroy();
+                if (onComplete) onComplete();
+            }
+        };
+        
+        requestAnimationFrame(animate);
+    }
+    
+    /**
      * Clear all PIXI drawings
      * @param {boolean} broadcast - Whether to broadcast deletion to other clients
      */
     clearAllDrawings(broadcast = true) {
         if (!this._pixiDrawings || !this.services?.canvasLayer) return;
         
-        const layer = this.services.canvasLayer;
-        
+        // Fade out all drawings
         this._pixiDrawings.forEach(drawing => {
             if (drawing.graphics && drawing.graphics.parent) {
-                layer.removeChild(drawing.graphics);
-                drawing.graphics.destroy();
+                this._fadeOutAndRemove(drawing.graphics, 300);
             }
         });
         
@@ -1245,10 +1282,9 @@ class DrawingTool {
         
         this._pixiDrawings = this._pixiDrawings.filter(drawing => {
             if (drawing.userId === userId) {
-                // Remove from layer
+                // Fade out and remove
                 if (drawing.graphics && drawing.graphics.parent) {
-                    layer.removeChild(drawing.graphics);
-                    drawing.graphics.destroy();
+                    this._fadeOutAndRemove(drawing.graphics, 300);
                 }
                 removedCount++;
                 return false; // Remove from array
@@ -1292,10 +1328,9 @@ class DrawingTool {
         const layer = this.services.canvasLayer;
         const drawingToRemove = this._lastDrawing;
         
-        // Remove from layer
+        // Fade out and remove
         if (drawingToRemove.graphics && drawingToRemove.graphics.parent) {
-            layer.removeChild(drawingToRemove.graphics);
-            drawingToRemove.graphics.destroy();
+            this._fadeOutAndRemove(drawingToRemove.graphics, 300);
         }
         
         // Remove from array
@@ -2013,10 +2048,9 @@ class DrawingTool {
         
         const drawing = this._pixiDrawings[drawingIndex];
         
-        // Remove from canvas
-        const layer = this.services.canvasLayer;
-        if (drawing.graphics && layer.children.includes(drawing.graphics)) {
-            layer.removeChild(drawing.graphics);
+        // Fade out and remove from canvas
+        if (drawing.graphics && drawing.graphics.parent) {
+            this._fadeOutAndRemove(drawing.graphics, 300);
         }
         
         // Remove from array
@@ -2449,10 +2483,9 @@ class DrawingTool {
                     return true; // Keep in array
                 }
                 
-                // Remove from layer
+                // Fade out and remove
                 if (drawing.graphics && drawing.graphics.parent) {
-                    layer.removeChild(drawing.graphics);
-                    drawing.graphics.destroy();
+                    this._fadeOutAndRemove(drawing.graphics, 300);
                 }
                 removedCount++;
                 return false; // Remove from array
