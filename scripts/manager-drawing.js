@@ -60,6 +60,9 @@ class DrawingTool {
         // Preview graphics (shown while drawing)
         this._previewGraphics = null;
         
+        // Preview symbol (shown while backslash is held in symbol mode)
+        this._previewSymbol = null;
+        
         // Key-based activation
         this._keyDown = false;
         this._keyHandlers = {
@@ -561,14 +564,12 @@ class DrawingTool {
         const self = this;
         
         // Handle backslash key down - activate drawing mode
-        // Drawing will start automatically on first mouse move
+        // Works for both line drawing and symbol stamping
         this._keyHandlers.keydown = (event) => {
-            // Only activate if backslash key is pressed and not already active
+            // Activate if backslash key is pressed (works for all modes: line, plus, x, dot, arrow)
             // Ignore if typing in an input field
-            // Only activate with backslash if line mode is selected
             // event.key === '\\' or event.code === 'Backslash' for backslash key
             if ((event.key === '\\' || event.code === 'Backslash') && 
-                this.state.drawingMode === 'line' &&
                 !event.ctrlKey && 
                 !event.altKey && 
                 !event.metaKey &&
@@ -578,7 +579,8 @@ class DrawingTool {
                 
                 this._keyDown = true;
                 this.activate(true); // keyBased = true
-                // Drawing will start on first mouse move (handled in pointermove)
+                // Line drawing will start on first mouse move (handled in pointermove)
+                // Symbols will stamp on click (handled in pointerdown)
             }
         };
         
@@ -604,12 +606,139 @@ class DrawingTool {
                 }
                 
                 this.deactivate(true); // keyBased = true
+                
+                // Remove preview symbol when backslash is released
+                this.removePreviewSymbol();
             }
         };
         
         // Attach to document
         document.addEventListener('keydown', this._keyHandlers.keydown);
         document.addEventListener('keyup', this._keyHandlers.keyup);
+    }
+    
+    /**
+     * Update cursor style based on tool state
+     */
+    updateCursor() {
+        if (!canvas || !canvas.app || !canvas.app.view) return;
+        
+        if (this.state.active) {
+            // Change to crosshair when tool is active
+            canvas.app.view.style.cursor = 'crosshair';
+        } else {
+            // Reset to default when tool is inactive
+            canvas.app.view.style.cursor = '';
+        }
+    }
+    
+    /**
+     * Update preview symbol to follow mouse cursor
+     * @param {PointerEvent} event - Pointer event with coordinates
+     */
+    updatePreviewSymbol(event) {
+        if (!this.services || !this.services.canvasLayer) return;
+        if (this.state.drawingMode === 'line') return; // Only for symbol modes
+        
+        // Get world coordinates from event
+        const rect = canvas.app.view.getBoundingClientRect();
+        const screenX = event.clientX - rect.left;
+        const screenY = event.clientY - rect.top;
+        const worldPoint = canvas.app.stage.toLocal(new PIXI.Point(screenX, screenY));
+        const worldX = worldPoint.x;
+        const worldY = worldPoint.y;
+        
+        // Remove existing preview if it exists
+        this.removePreviewSymbol();
+        
+        // Create new preview symbol at mouse position
+        // Use a semi-transparent version for preview
+        const layer = this.services.canvasLayer;
+        const graphics = new PIXI.Graphics();
+        
+        // Symbol size determines the square bounding box
+        const symbolSizeMap = {
+            small: DrawingTool.strSmallSymbolSize,
+            medium: DrawingTool.strMediumSymbolSize,
+            large: DrawingTool.strLargeSymbolSize
+        };
+        const squareSize = symbolSizeMap[this.state.symbolSize] || symbolSizeMap.medium;
+        
+        // Stroke width is simply a proportion of the symbol size
+        const strokeProportion = 0.30;
+        const strokeWidth = squareSize * strokeProportion;
+        const strokeColor = this.cssToPixiColor(this.state.brushSettings.color);
+        const symbolAlpha = this.extractAlphaFromRgba(this.state.brushSettings.color) * 0.5; // 50% opacity for preview
+        
+        // Use rounded line joins and caps
+        try {
+            graphics.lineStyle({
+                width: strokeWidth,
+                color: strokeColor,
+                alpha: symbolAlpha,
+                lineJoin: 'round',
+                lineCap: 'round'
+            });
+        } catch (e) {
+            graphics.lineStyle(strokeWidth, strokeColor, symbolAlpha);
+        }
+        
+        // Draw preview symbol (same as actual symbol but semi-transparent)
+        const halfSize = squareSize / 2;
+        const padding = squareSize * 0.1;
+        
+        switch (this.state.drawingMode) {
+            case 'plus':
+                const plusArmLength = halfSize - padding;
+                graphics.moveTo(worldX - plusArmLength, worldY);
+                graphics.lineTo(worldX + plusArmLength, worldY);
+                graphics.moveTo(worldX, worldY - plusArmLength);
+                graphics.lineTo(worldX, worldY + plusArmLength);
+                break;
+                
+            case 'x':
+                const xArmLength = (halfSize - padding) * 0.707;
+                graphics.moveTo(worldX - xArmLength, worldY - xArmLength);
+                graphics.lineTo(worldX + xArmLength, worldY + xArmLength);
+                graphics.moveTo(worldX + xArmLength, worldY - xArmLength);
+                graphics.lineTo(worldX - xArmLength, worldY + xArmLength);
+                break;
+                
+            case 'dot':
+                const dotRadius = halfSize - padding;
+                graphics.beginFill(strokeColor, symbolAlpha);
+                graphics.drawCircle(worldX, worldY, dotRadius);
+                graphics.endFill();
+                break;
+                
+            case 'arrow':
+                const arrowheadSize = (halfSize - padding) * 0.6;
+                graphics.moveTo(worldX - halfSize + padding, worldY);
+                graphics.lineTo(worldX + halfSize - padding - arrowheadSize, worldY);
+                const tipX = worldX + halfSize - padding;
+                graphics.beginFill(strokeColor, symbolAlpha);
+                graphics.moveTo(tipX, worldY);
+                graphics.lineTo(tipX - arrowheadSize, worldY - arrowheadSize / 2);
+                graphics.lineTo(tipX - arrowheadSize, worldY + arrowheadSize / 2);
+                graphics.lineTo(tipX, worldY);
+                graphics.endFill();
+                break;
+        }
+        
+        // Add to layer and store reference
+        layer.addChild(graphics);
+        this._previewSymbol = graphics;
+    }
+    
+    /**
+     * Remove preview symbol from canvas
+     */
+    removePreviewSymbol() {
+        if (this._previewSymbol && this._previewSymbol.parent && this.services?.canvasLayer) {
+            this.services.canvasLayer.removeChild(this._previewSymbol);
+            this._previewSymbol.destroy();
+            this._previewSymbol = null;
+        }
     }
     
     /**
@@ -652,6 +781,9 @@ class DrawingTool {
         
         this.attachCanvasHandlers();
         
+        // Change cursor to crosshair when tool is active
+        this.updateCursor();
+        
         if (!keyBased) {
             console.log(`${MODULE.NAME}: ${this.displayName} activated`);
         }
@@ -667,6 +799,12 @@ class DrawingTool {
         
         this.state.active = false;
         this.detachCanvasHandlers();
+        
+        // Remove preview symbol if it exists
+        this.removePreviewSymbol();
+        
+        // Reset cursor to default
+        this.updateCursor();
         
         // Cancel any active drawing
         if (this.state.isDrawing) {
@@ -831,14 +969,13 @@ class DrawingTool {
         
         // Attach pointer event handlers with capture phase to intercept before Foundry
         this._handlePointerDown = (event) => {
-            // If key-based mode is active, ignore mouse clicks (drawing is controlled by backslash key)
-            if (self._keyDown) {
-                event.preventDefault();
-                event.stopPropagation();
+            // Symbols and line drawing both require backslash key to be held
+            // Don't do anything on click if backslash is not held
+            if (!self._keyDown) {
                 return false;
             }
             
-            // If in symbol mode (not line), stamp the symbol on click
+            // If in symbol mode and backslash is held, stamp the symbol on click
             if (self.state.active && self.state.drawingMode !== 'line' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -849,29 +986,22 @@ class DrawingTool {
                 return false;
             }
             
-            // Manual activation mode (console) or line mode: allow mouse clicks for drawing
-            if (self.state.active && self.state.drawingMode === 'line' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
-                // Prevent Foundry's default drawing tool from activating
+            // Line mode: ignore mouse clicks when backslash is held
+            // Line drawing starts on mouse move, not on click
+            if (self.state.active && self.state.drawingMode === 'line' && self._keyDown) {
                 event.preventDefault();
                 event.stopPropagation();
-                event.stopImmediatePropagation();
-                
-                // Ensure we're not on the drawings layer
-                if (canvas.activeLayer && canvas.activeLayer.name === "drawings") {
-                    canvas.tokens.activate();
-                }
-                
-                self.startDrawing(event);
                 return false;
             }
         };
         
         this._handlePointerMove = (event) => {
-            // Only handle pointer move for line mode
-            // Symbol modes don't need pointer move (they stamp on click)
-            if (self.state.active && self.state.drawingMode === 'line') {
-                // Key-based mode: if backslash is held, start/continue drawing on mouse move
-                if (self._keyDown) {
+            // Only handle pointer move when backslash is held
+            // Line mode: continue drawing
+            // Symbol modes: show preview symbol following mouse
+            if (self.state.active && self._keyDown) {
+                if (self.state.drawingMode === 'line') {
+                    // Key-based mode: if backslash is held, start/continue drawing on mouse move
                     if (!self.state.isDrawing) {
                         // Start drawing on first mouse move while backslash is held
                         self.startDrawing(event);
@@ -879,11 +1009,13 @@ class DrawingTool {
                         // Continue drawing
                         self.updateDrawing(event);
                     }
-                } 
-                // Manual mode: only update if already drawing (mouse button was clicked)
-                else if (self.state.isDrawing) {
-                    self.updateDrawing(event);
+                } else {
+                    // Symbol modes: show preview symbol following mouse
+                    self.updatePreviewSymbol(event);
                 }
+            } else if (self.state.active && !self._keyDown) {
+                // Remove preview when backslash is not held
+                self.removePreviewSymbol();
             }
         };
         
@@ -971,10 +1103,11 @@ class DrawingTool {
         // Create preview graphics for real-time drawing
         // Use absolute coordinates for preview (matches what user sees)
         this._previewGraphics = new PIXI.Graphics();
+        const previewAlpha = this.extractAlphaFromRgba(this.state.brushSettings.color);
         this._previewGraphics.lineStyle(
             this.state.brushSettings.size,
             this.cssToPixiColor(this.state.brushSettings.color),
-            1.0
+            previewAlpha
         );
         // Start at the absolute position
         this._previewGraphics.moveTo(worldCoords.x, worldCoords.y);
@@ -1004,10 +1137,11 @@ class DrawingTool {
         // Clear and redraw preview graphics to avoid coordinate issues
         // This ensures clean drawing without weird lines
         this._previewGraphics.clear();
+        const previewAlpha = this.extractAlphaFromRgba(this.state.brushSettings.color);
         this._previewGraphics.lineStyle(
             this.state.brushSettings.size,
             this.cssToPixiColor(this.state.brushSettings.color),
-            1.0
+            previewAlpha
         );
         
         // Redraw entire path using absolute coordinates
@@ -1075,6 +1209,27 @@ class DrawingTool {
      * @param {string|number} cssColor - CSS color string or number
      * @returns {number} PIXI color number (0xRRGGBB)
      */
+    /**
+     * Extract alpha value from rgba color string
+     * @param {string} rgbaColor - RGBA color string, e.g., "rgba(255, 0, 0, 0.7)"
+     * @returns {number} Alpha value (0-1), defaults to 1.0 if not found
+     */
+    extractAlphaFromRgba(rgbaColor) {
+        if (!rgbaColor || typeof rgbaColor !== 'string') {
+            return 1.0;
+        }
+        
+        // Match rgba(r, g, b, a) format
+        const rgbaMatch = rgbaColor.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/i);
+        if (rgbaMatch && rgbaMatch[4] !== undefined) {
+            const alpha = parseFloat(rgbaMatch[4]);
+            return isNaN(alpha) ? 1.0 : Math.max(0, Math.min(1, alpha)); // Clamp between 0 and 1
+        }
+        
+        // Default to 1.0 if no alpha found
+        return 1.0;
+    }
+    
     cssToPixiColor(cssColor) {
         if (typeof cssColor === 'number') return cssColor;
         
@@ -1494,6 +1649,9 @@ class DrawingTool {
             }
         }
         
+        // Remove preview before placing actual symbol
+        this.removePreviewSymbol();
+        
         this._createSymbolAt(symbolType, worldX, worldY);
     }
     
@@ -1524,11 +1682,34 @@ class DrawingTool {
         
         // Stroke width is simply a proportion of the symbol size
         // This ensures the stroke scales appropriately with the symbol size
-        const strokeProportion = 0.30; // 20% of symbol size as stroke width
+        const strokeProportion = 0.30; // 30% of symbol size as stroke width
         const strokeWidth = squareSize * strokeProportion;
         const strokeColor = this.cssToPixiColor(this.state.brushSettings.color);
+        const symbolAlpha = this.extractAlphaFromRgba(this.state.brushSettings.color);
         
-        graphics.lineStyle(strokeWidth, strokeColor, 1.0);
+        // Use rounded line joins and caps for smooth corners
+        // PIXI Graphics lineStyle - try object syntax first, fallback to traditional
+        try {
+            // PIXI v5+ object syntax
+            graphics.lineStyle({
+                width: strokeWidth,
+                color: strokeColor,
+                alpha: symbolAlpha,
+                lineJoin: 'round',
+                lineCap: 'round'
+            });
+        } catch (e) {
+            // Fallback to traditional syntax and set properties if available
+            graphics.lineStyle(strokeWidth, strokeColor, symbolAlpha);
+            // Try to set rounded properties if the graphics object supports it
+            if (graphics.geometry && graphics.geometry.graphicsData) {
+                const lastData = graphics.geometry.graphicsData[graphics.geometry.graphicsData.length - 1];
+                if (lastData && lastData.lineStyle) {
+                    lastData.lineStyle.lineJoin = 'round';
+                    lastData.lineStyle.lineCap = 'round';
+                }
+            }
+        }
         
         // All symbols are drawn to fit within the squareSize x squareSize bounding box
         // Center the symbol at (x, y)
@@ -1557,7 +1738,7 @@ class DrawingTool {
             case 'dot':
                 // Draw a filled circle within the square
                 const dotRadius = halfSize - padding;
-                graphics.beginFill(strokeColor, 1.0);
+                graphics.beginFill(strokeColor, symbolAlpha);
                 graphics.drawCircle(x, y, dotRadius);
                 graphics.endFill();
                 break;
@@ -1573,7 +1754,7 @@ class DrawingTool {
                 
                 // Arrowhead (triangle pointing right)
                 const tipX = x + halfSize - padding;
-                graphics.beginFill(strokeColor, 1.0);
+                graphics.beginFill(strokeColor, symbolAlpha);
                 graphics.moveTo(tipX, y);
                 graphics.lineTo(tipX - arrowheadSize, y - arrowheadSize / 2);
                 graphics.lineTo(tipX - arrowheadSize, y + arrowheadSize / 2);
