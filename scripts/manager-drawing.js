@@ -1616,8 +1616,8 @@ class DrawingTool {
         } else if (style === 'dashed') {
             // Dashed line - draw dashes along the entire path at fixed intervals
             // This avoids issues with variable mouse speed creating too many points
-            const dashLength = strokeWidth * 10; // MUCH larger dash length
-            const gapLength = strokeWidth * 10; // Gap equal to dash length
+            const dashLength = strokeWidth * 6; // MUCH larger dash length
+            const gapLength = strokeWidth * 2; // Gap equal to dash length
             
             // Calculate total path length and get segments
             let totalLength = 0;
