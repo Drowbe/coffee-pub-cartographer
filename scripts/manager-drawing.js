@@ -1565,73 +1565,125 @@ class DrawingTool {
                 graphics.lineTo(startX + point[0], startY + point[1]);
             }
         } else if (style === 'dotted') {
-            // Dotted line - draw small circles along the path
-            const dotSpacing = strokeWidth * 3; // Space between dots
-            const dotRadius = strokeWidth * 0.5; // Dot radius
+            // Dotted line - draw dots along the entire path at fixed intervals
+            // This avoids issues with variable mouse speed creating too many points
+            const dotRadius = strokeWidth * 0.4; // Dot radius
+            const dotSpacing = strokeWidth * 4; // MUCH larger space between dots
+            
+            // Calculate total path length and get points along the path
+            let totalLength = 0;
+            const segments = [];
             
             for (let i = 0; i < points.length - 1; i++) {
                 const p1 = points[i];
                 const p2 = points[i + 1];
-                const x1 = startX + p1[0];
-                const y1 = startY + p1[1];
-                const x2 = startX + p2[0];
-                const y2 = startY + p2[1];
-                
-                const dx = x2 - x1;
-                const dy = y2 - y1;
+                const dx = p2[0] - p1[0];
+                const dy = p2[1] - p1[1];
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                const steps = Math.floor(dist / dotSpacing);
-                
-                for (let j = 0; j <= steps; j++) {
-                    const t = j / Math.max(steps, 1);
-                    const x = x1 + dx * t;
-                    const y = y1 + dy * t;
-                    graphics.beginFill(color, alpha);
-                    graphics.drawCircle(x, y, dotRadius);
-                    graphics.endFill();
+                if (dist > 0) {
+                    segments.push({
+                        x1: startX + p1[0],
+                        y1: startY + p1[1],
+                        x2: startX + p2[0],
+                        y2: startY + p2[1],
+                        dx: dx,
+                        dy: dy,
+                        dist: dist
+                    });
+                    totalLength += dist;
                 }
             }
+            
+            // Draw dots at fixed intervals along the entire path
+            let currentLength = 0;
+            while (currentLength < totalLength) {
+                // Find which segment contains this position
+                let segmentLength = 0;
+                for (const seg of segments) {
+                    if (currentLength >= segmentLength && currentLength < segmentLength + seg.dist) {
+                        const t = (currentLength - segmentLength) / seg.dist;
+                        const x = seg.x1 + seg.dx * t;
+                        const y = seg.y1 + seg.dy * t;
+                        graphics.beginFill(color, alpha);
+                        graphics.drawCircle(x, y, dotRadius);
+                        graphics.endFill();
+                        break;
+                    }
+                    segmentLength += seg.dist;
+                }
+                currentLength += dotSpacing;
+            }
         } else if (style === 'dashed') {
-            // Dashed line - draw line segments with gaps
-            const dashLength = strokeWidth * 4; // Length of each dash
-            const gapLength = strokeWidth * 2; // Length of each gap
+            // Dashed line - draw dashes along the entire path at fixed intervals
+            // This avoids issues with variable mouse speed creating too many points
+            const dashLength = strokeWidth * 10; // MUCH larger dash length
+            const gapLength = strokeWidth * 10; // Gap equal to dash length
+            
+            // Calculate total path length and get segments
+            let totalLength = 0;
+            const segments = [];
             
             for (let i = 0; i < points.length - 1; i++) {
                 const p1 = points[i];
                 const p2 = points[i + 1];
-                const x1 = startX + p1[0];
-                const y1 = startY + p1[1];
-                const x2 = startX + p2[0];
-                const y2 = startY + p2[1];
-                
-                const dx = x2 - x1;
-                const dy = y2 - y1;
+                const dx = p2[0] - p1[0];
+                const dy = p2[1] - p1[1];
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist === 0) continue;
+                if (dist > 0) {
+                    segments.push({
+                        x1: startX + p1[0],
+                        y1: startY + p1[1],
+                        x2: startX + p2[0],
+                        y2: startY + p2[1],
+                        dx: dx,
+                        dy: dy,
+                        dist: dist
+                    });
+                    totalLength += dist;
+                }
+            }
+            
+            // Draw dashes at fixed intervals along the entire path
+            let currentLength = 0;
+            let isDrawing = true;
+            
+            while (currentLength < totalLength) {
+                const segmentLength = isDrawing ? dashLength : gapLength;
+                const nextLength = Math.min(currentLength + segmentLength, totalLength);
                 
-                const unitX = dx / dist;
-                const unitY = dy / dist;
-                
-                let currentDist = 0;
-                let isDrawing = true;
-                
-                while (currentDist < dist) {
-                    const segmentLength = isDrawing ? dashLength : gapLength;
-                    const nextDist = Math.min(currentDist + segmentLength, dist);
+                if (isDrawing) {
+                    // Find start and end positions along the path
+                    let segStartLength = 0;
+                    let segEndLength = 0;
+                    let startX_seg = 0, startY_seg = 0, endX_seg = 0, endY_seg = 0;
+                    let startFound = false, endFound = false;
                     
-                    if (isDrawing) {
-                        const startX_seg = x1 + unitX * currentDist;
-                        const startY_seg = y1 + unitY * currentDist;
-                        const endX_seg = x1 + unitX * nextDist;
-                        const endY_seg = y1 + unitY * nextDist;
-                        
+                    for (const seg of segments) {
+                        if (!startFound && currentLength >= segStartLength && currentLength < segStartLength + seg.dist) {
+                            const t = (currentLength - segStartLength) / seg.dist;
+                            startX_seg = seg.x1 + seg.dx * t;
+                            startY_seg = seg.y1 + seg.dy * t;
+                            startFound = true;
+                        }
+                        if (!endFound && nextLength >= segEndLength && nextLength <= segEndLength + seg.dist) {
+                            const t = (nextLength - segEndLength) / seg.dist;
+                            endX_seg = seg.x1 + seg.dx * t;
+                            endY_seg = seg.y1 + seg.dy * t;
+                            endFound = true;
+                        }
+                        if (startFound && endFound) break;
+                        segStartLength += seg.dist;
+                        segEndLength += seg.dist;
+                    }
+                    
+                    if (startFound && endFound) {
                         graphics.moveTo(startX_seg, startY_seg);
                         graphics.lineTo(endX_seg, endY_seg);
                     }
-                    
-                    currentDist = nextDist;
-                    isDrawing = !isDrawing;
                 }
+                
+                currentLength = nextLength;
+                isDrawing = !isDrawing;
             }
         }
     }
