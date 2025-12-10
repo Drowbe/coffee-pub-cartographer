@@ -1355,26 +1355,6 @@ class DrawingTool {
     }
     
     /**
-     * Check if user can convert temporary drawings to permanent
-     * @returns {boolean}
-     */
-    canUserPersistDrawings() {
-        if (!this.services) return false;
-        
-        // Only GMs can persist drawings
-        if (!game.user.isGM) return false;
-        
-        // Check if persistence is allowed
-        const allowed = BlacksmithUtils?.getSettingSafely(
-            MODULE.ID,
-            'drawing.allowPersistence',
-            true
-        );
-        
-        return allowed;
-    }
-    
-    /**
      * Attach canvas event handlers for drawing
      */
     attachCanvasHandlers() {
@@ -2392,7 +2372,7 @@ class DrawingTool {
      * @returns {number|null} Timestamp when drawing expires, or null if never
      */
     getExpirationTime() {
-        // If timed erase is enabled, use the timed erase timeout
+        // Only use expiration time if timed erase is enabled
         if (this.state.timedEraseEnabled) {
             const timedEraseTimeout = BlacksmithUtils?.getSettingSafely(
                 MODULE.ID,
@@ -2403,14 +2383,8 @@ class DrawingTool {
             return timedEraseTimeout > 0 ? Date.now() + (timedEraseTimeout * 1000) : null;
         }
         
-        // Otherwise use the regular timeout setting
-        const timeout = BlacksmithUtils?.getSettingSafely(
-            MODULE.ID,
-            'drawing.timeout',
-            3600
-        ) || 3600;
-        
-        return timeout > 0 ? Date.now() + (timeout * 1000) : null;
+        // If timed erase is disabled, drawings don't expire automatically
+        return null;
     }
     
     /**
@@ -3160,49 +3134,6 @@ class DrawingTool {
             }
         } catch (error) {
             console.error(`${MODULE.NAME}: Error updating line width buttons:`, error);
-        }
-    }
-    
-    /**
-     * Convert temporary PIXI drawing to permanent Foundry Drawing (GM only)
-     * @param {string} drawingId - ID of the drawing to convert
-     * @returns {Promise<Drawing|null>} Created Foundry Drawing or null if failed
-     */
-    async convertToPermanentDrawing(drawingId) {
-        if (!this.canUserPersistDrawings()) {
-            console.warn(`${MODULE.NAME}: User cannot persist drawings`);
-            return null;
-        }
-        
-        // Find the drawing
-        const drawing = this._pixiDrawings?.find(d => d.id === drawingId);
-        if (!drawing) {
-            console.warn(`${MODULE.NAME}: Drawing not found: ${drawingId}`);
-            return null;
-        }
-        
-        if (!canvas || !canvas.scene) {
-            throw new Error('Canvas or scene not available');
-        }
-        
-        try {
-            // Create Foundry Drawing from PIXI drawing data
-            // Note: This uses Foundry's Drawing API which we had issues with before
-            // For now, we'll just log that persistence is requested
-            // Full implementation can be added later when needed
-            
-            console.log(`${MODULE.NAME}: Converting drawing ${drawingId} to permanent (feature not yet fully implemented)`);
-            
-            // TODO: Implement full conversion to Foundry Drawing API
-            // This would require solving the validation issues we encountered earlier
-            // For now, we'll keep it as a placeholder
-            
-            ui.notifications.info(`${MODULE.NAME}: Drawing persistence feature coming soon`);
-            
-            return null;
-        } catch (error) {
-            console.error(`${MODULE.NAME}: Error converting drawing to permanent:`, error);
-            return null;
         }
     }
     

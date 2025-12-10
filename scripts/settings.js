@@ -124,28 +124,6 @@ export const registerSettings = () => {
 		group: WORKFLOW_GROUPS.COMMON_SETTINGS
 	});
 
-    // -- Drawing Timeout --
-	game.settings.register(MODULE.ID, 'drawing.timeout', {
-        name: MODULE.ID + '.drawing.timeout-Label',
-        hint: MODULE.ID + '.drawing.timeout-Hint',
-        scope: 'world',
-        config: true,
-        default: 3600,
-        type: Number,
-		group: WORKFLOW_GROUPS.COMMON_SETTINGS
-	});
-
-    // -- Allow Drawing Persistence --
-	game.settings.register(MODULE.ID, 'drawing.allowPersistence', {
-        name: MODULE.ID + '.drawing.allowPersistence-Label',
-        hint: MODULE.ID + '.drawing.allowPersistence-Hint',
-        scope: 'world',
-        config: true,
-        default: true,
-        type: Boolean,
-		group: WORKFLOW_GROUPS.COMMON_SETTINGS
-	});
-
     // -- Timed Erase Timeout --
 	game.settings.register(MODULE.ID, 'drawing.timedEraseTimeout', {
         name: MODULE.ID + '.drawing.timedEraseTimeout-Label',
