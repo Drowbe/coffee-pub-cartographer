@@ -800,9 +800,19 @@ class DrawingTool {
     toggleFromHotkey() {
         // If active, turning off
         if (this.state.active) {
-            // Cancel any in-progress drawing (per toggle decision)
+            // Finish any in-progress drawing (equivalent to key-up in hold mode)
             if (this.state.isDrawing) {
-                this.cancelDrawing();
+                const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
+                if (mouse) {
+                    const rect = canvas.app.view.getBoundingClientRect();
+                    const syntheticEvent = {
+                        clientX: mouse.x + rect.left,
+                        clientY: mouse.y + rect.top
+                    };
+                    this.finishDrawing(syntheticEvent);
+                } else {
+                    this.finishDrawing({ clientX: 0, clientY: 0 });
+                }
             }
 
             this.deactivate(true);
