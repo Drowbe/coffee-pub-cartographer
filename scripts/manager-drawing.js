@@ -37,7 +37,7 @@ class DrawingTool {
         // Drawing state
         this.state = {
             active: false,
-            drawingMode: 'line', // 'line', 'plus', 'x', 'dot', 'arrow', 'square'
+            drawingMode: 'line', // 'line', 'plus', 'x', 'dot', 'arrow', 'square', 'box'
             symbolSize: 'medium', // 'small', 'medium', 'large' - controls square bounding box size
             lineStyle: 'solid', // 'solid', 'dotted', 'dashed'
             brushSettings: {
@@ -49,7 +49,8 @@ class DrawingTool {
             currentDrawing: null,
             isDrawing: false,
             drawingPoints: [],
-            drawingStartPoint: null
+            drawingStartPoint: null,
+            boxStartPoint: null // For box mode: upper left corner
         };
         
         // Hook IDs for cleanup
@@ -88,7 +89,7 @@ class DrawingTool {
         const savedColor = game.settings.get(MODULE.ID, 'toolbar.color');
         
         // Apply saved selections if valid, otherwise use defaults
-        if (['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'].includes(savedDrawingMode)) {
+        if (['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square', 'box'].includes(savedDrawingMode)) {
             this.state.drawingMode = savedDrawingMode;
         }
         if (['small', 'medium', 'large'].includes(savedSymbolSize)) {
@@ -254,7 +255,8 @@ class DrawingTool {
                 arrowUp: `${MODULE.ID}-mode-arrow-up`,
                 arrowDown: `${MODULE.ID}-mode-arrow-down`,
                 arrowLeft: `${MODULE.ID}-mode-arrow-left`,
-                square: `${MODULE.ID}-mode-square`
+                square: `${MODULE.ID}-mode-square`,
+                box: `${MODULE.ID}-mode-box`
             };
             
             // Register line tool button in mode group
@@ -393,6 +395,22 @@ class DrawingTool {
                     self.setDrawingMode('square');
                     self.updateModeButtons();
                     // Activate drawing tool if not already active (symbols will stamp on canvas click)
+                    if (!self.state.active) {
+                        self.activate();
+                    }
+                }
+            });
+            
+            cartographerToolbar.registerTool(self._modeButtons.box, {
+                icon: "fa-solid fa-square-full",
+                tooltip: "Box Tool (drag to draw box)",
+                group: "mode", // Switch group
+                order: 10,
+                active: () => self.state.drawingMode === 'box',
+                onClick: () => {
+                    self.setDrawingMode('box');
+                    self.updateModeButtons();
+                    // Activate drawing tool if not already active
                     if (!self.state.active) {
                         self.activate();
                     }
@@ -847,7 +865,7 @@ class DrawingTool {
      */
     updatePreviewSymbol(event) {
         if (!this.services || !this.services.canvasLayer) return;
-        if (this.state.drawingMode === 'line') return; // Only for symbol modes
+        if (this.state.drawingMode === 'line' || this.state.drawingMode === 'box') return; // Only for symbol modes
         
         // Get world coordinates from event
         const rect = canvas.app.view.getBoundingClientRect();
@@ -1440,8 +1458,16 @@ class DrawingTool {
                 return false;
             }
             
+            // Box mode: start box drawing on mouse down (set upper left corner)
+            if (self.state.drawingMode === 'box' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
+                event.preventDefault();
+                event.stopPropagation();
+                self.startBoxDrawing(event);
+                return false;
+            }
+            
             // If in symbol mode, stamp the symbol on click
-            if (self.state.drawingMode !== 'line' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
+            if (self.state.drawingMode !== 'line' && self.state.drawingMode !== 'box' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
                 event.stopPropagation();
                 // Use stopImmediatePropagation only when necessary to prevent conflicts
@@ -1479,6 +1505,14 @@ class DrawingTool {
                         // Continue drawing
                         self.updateDrawing(event);
                     }
+                } else if (self.state.drawingMode === 'box') {
+                    // Box mode: update preview box as mouse moves
+                    if (self.state.isDrawing && self.state.boxStartPoint) {
+                        self.updateBoxPreview(event);
+                    } else if (!self.state.isDrawing) {
+                        // Show preview symbol following mouse when not drawing
+                        self.updatePreviewSymbol(event);
+                    }
                 } else {
                     // Symbol modes: show preview symbol following mouse
                     self.updatePreviewSymbol(event);
@@ -1492,6 +1526,14 @@ class DrawingTool {
         this._handlePointerUp = (event) => {
             // Primary guard: only run when tool is active
             if (!self.state.active) {
+                return false;
+            }
+            
+            // Box mode: finish box on mouse up (set lower right corner)
+            if (self.state.drawingMode === 'box' && self.state.isDrawing) {
+                event.preventDefault();
+                event.stopPropagation();
+                self.finishBoxDrawing(event);
                 return false;
             }
             
@@ -1705,6 +1747,240 @@ class DrawingTool {
             console.log(`${MODULE.NAME}: Drawing created on canvas layer`);
         } catch (error) {
             console.error(`${MODULE.NAME}: Error creating drawing:`, error);
+            this.cancelDrawing();
+        }
+    }
+    
+    /**
+     * Start box drawing (set upper left corner)
+     * @param {PointerEvent} event - Pointer event
+     */
+    startBoxDrawing(event) {
+        if (!canvas || !canvas.scene || !this.services?.canvasLayer) return;
+        
+        // Get world coordinates from pointer event
+        const worldCoords = this.getWorldCoordinates(event);
+        if (!worldCoords) return;
+        
+        this.state.isDrawing = true;
+        this.state.boxStartPoint = { x: worldCoords.x, y: worldCoords.y };
+        
+        // Create preview graphics for real-time box drawing
+        this._previewGraphics = new PIXI.Graphics();
+        this.services.canvasLayer.addChild(this._previewGraphics);
+        
+        console.log(`${MODULE.NAME}: Box drawing started at`, worldCoords);
+    }
+    
+    /**
+     * Update box preview as mouse moves
+     * @param {PointerEvent} event - Pointer event
+     */
+    updateBoxPreview(event) {
+        if (!canvas || !this.state.isDrawing || !this._previewGraphics || !this.services?.canvasLayer || !this.state.boxStartPoint) return;
+        
+        // Get world coordinates from pointer event
+        const worldCoords = this.getWorldCoordinates(event);
+        if (!worldCoords) return;
+        
+        // Calculate box dimensions
+        const startX = this.state.boxStartPoint.x;
+        const startY = this.state.boxStartPoint.y;
+        const endX = worldCoords.x;
+        const endY = worldCoords.y;
+        
+        const width = endX - startX;
+        const height = endY - startY;
+        
+        // Clear and redraw preview box
+        this._previewGraphics.clear();
+        
+        const previewAlpha = 1.0; // Always fully opaque
+        const previewColor = this.cssToPixiColor(this.state.brushSettings.color);
+        const shadowOffset = 2; // Shadow offset in pixels
+        const shadowAlpha = previewAlpha * 0.3; // Shadow opacity (30% of main alpha)
+        const shadowColor = 0x000000; // Black shadow
+        const strokeWidth = this.state.brushSettings.size;
+        const lineStyle = this.state.lineStyle || 'solid';
+        
+        // Draw shadow first (offset version)
+        this._previewGraphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+        this._drawBoxWithStyle(
+            this._previewGraphics,
+            startX + shadowOffset,
+            startY + shadowOffset,
+            width,
+            height,
+            lineStyle
+        );
+        
+        // Draw main box on top
+        this._previewGraphics.lineStyle(strokeWidth, previewColor, previewAlpha);
+        this._drawBoxWithStyle(
+            this._previewGraphics,
+            startX,
+            startY,
+            width,
+            height,
+            lineStyle
+        );
+    }
+    
+    /**
+     * Draw a box with the specified style (solid, dotted, dashed)
+     * @param {PIXI.Graphics} graphics - PIXI Graphics object
+     * @param {number} x - X coordinate of upper left corner
+     * @param {number} y - Y coordinate of upper left corner
+     * @param {number} width - Box width
+     * @param {number} height - Box height
+     * @param {string} style - Line style: 'solid', 'dotted', 'dashed'
+     */
+    _drawBoxWithStyle(graphics, x, y, width, height, style) {
+        if (style === 'solid') {
+            // Solid box - draw rectangle normally
+            graphics.drawRect(x, y, width, height);
+        } else {
+            // For dotted/dashed, draw each side as a line with style
+            // Top edge (left to right)
+            const topPoints = [[0, 0], [width, 0]];
+            this._drawLineWithStyle(graphics, topPoints, x, y, this.state.brushSettings.size, this.cssToPixiColor(this.state.brushSettings.color), 1.0, style);
+            
+            // Right edge (top to bottom)
+            const rightPoints = [[0, 0], [0, height]];
+            this._drawLineWithStyle(graphics, rightPoints, x + width, y, this.state.brushSettings.size, this.cssToPixiColor(this.state.brushSettings.color), 1.0, style);
+            
+            // Bottom edge (right to left)
+            const bottomPoints = [[0, 0], [-width, 0]];
+            this._drawLineWithStyle(graphics, bottomPoints, x + width, y + height, this.state.brushSettings.size, this.cssToPixiColor(this.state.brushSettings.color), 1.0, style);
+            
+            // Left edge (bottom to top)
+            const leftPoints = [[0, 0], [0, -height]];
+            this._drawLineWithStyle(graphics, leftPoints, x, y + height, this.state.brushSettings.size, this.cssToPixiColor(this.state.brushSettings.color), 1.0, style);
+        }
+    }
+    
+    /**
+     * Finish box drawing (set lower right corner and create final box)
+     * @param {PointerEvent} event - Pointer event
+     */
+    async finishBoxDrawing(event) {
+        if (!canvas || !canvas.scene || !this.state.isDrawing || !this.state.boxStartPoint) return;
+        
+        // Get world coordinates from pointer event
+        const worldCoords = this.getWorldCoordinates(event);
+        if (!worldCoords) {
+            this.cancelDrawing();
+            return;
+        }
+        
+        try {
+            // Remove preview graphics
+            if (this._previewGraphics && this._previewGraphics.parent) {
+                this.services.canvasLayer.removeChild(this._previewGraphics);
+                this._previewGraphics.destroy();
+                this._previewGraphics = null;
+            }
+            
+            // Calculate box dimensions
+            const startX = this.state.boxStartPoint.x;
+            const startY = this.state.boxStartPoint.y;
+            const endX = worldCoords.x;
+            const endY = worldCoords.y;
+            
+            const width = endX - startX;
+            const height = endY - startY;
+            
+            // Create final box drawing on BlacksmithLayer using PIXI graphics
+            const layer = this.services.canvasLayer;
+            const graphics = new PIXI.Graphics();
+            const drawingAlpha = 1.0;
+            const drawingColor = this.cssToPixiColor(this.state.brushSettings.color);
+            const shadowOffset = 2;
+            const shadowAlpha = drawingAlpha * 0.3;
+            const shadowColor = 0x000000;
+            const strokeWidth = this.state.brushSettings.size;
+            const lineStyle = this.state.lineStyle || 'solid';
+            
+            // Draw shadow first (offset version)
+            graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+            this._drawBoxWithStyle(
+                graphics,
+                startX + shadowOffset,
+                startY + shadowOffset,
+                width,
+                height,
+                lineStyle
+            );
+            
+            // Draw main box on top
+            graphics.lineStyle(strokeWidth, drawingColor, drawingAlpha);
+            this._drawBoxWithStyle(
+                graphics,
+                startX,
+                startY,
+                width,
+                height,
+                lineStyle
+            );
+            
+            // Add to layer
+            layer.addChild(graphics);
+            
+            // Store reference for cleanup
+            if (!this._pixiDrawings) {
+                this._pixiDrawings = [];
+            }
+            
+            const drawingId = `box-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            const drawingData = {
+                id: drawingId,
+                graphics: graphics,
+                createdAt: Date.now(),
+                expiresAt: this.getExpirationTime(),
+                userId: game.user.id,
+                userName: game.user.name,
+                startX: startX,
+                startY: startY,
+                width: width,
+                height: height,
+                strokeWidth: strokeWidth,
+                strokeColor: this.state.brushSettings.color,
+                lineStyle: lineStyle,
+                type: 'box'
+            };
+            this._pixiDrawings.push(drawingData);
+            
+            // Store as last drawing for undo
+            this._lastDrawing = drawingData;
+            
+            // Broadcast drawing creation to other clients
+            this.broadcastDrawingCreation({
+                drawingId: drawingId,
+                userId: game.user.id,
+                userName: game.user.name,
+                startX: startX,
+                startY: startY,
+                width: width,
+                height: height,
+                strokeWidth: strokeWidth,
+                strokeColor: this.state.brushSettings.color,
+                lineStyle: lineStyle,
+                type: 'box',
+                createdAt: drawingData.createdAt,
+                expiresAt: drawingData.expiresAt
+            });
+            
+            // Schedule cleanup if needed
+            this.scheduleCleanup();
+            
+            // Reset drawing state
+            this.state.isDrawing = false;
+            this.state.boxStartPoint = null;
+            this.state.currentDrawing = null;
+            
+            console.log(`${MODULE.NAME}: Box drawing created on canvas layer`);
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error creating box drawing:`, error);
             this.cancelDrawing();
         }
     }
@@ -2108,8 +2384,11 @@ class DrawingTool {
         }
         
         try {
-            // Determine if this is a line drawing or symbol drawing
-            if (data.symbolType) {
+            // Determine if this is a box, line, or symbol drawing
+            if (data.type === 'box' && data.startX !== undefined && data.width !== undefined && data.height !== undefined) {
+                // Box drawing
+                this.createRemoteBox(data);
+            } else if (data.symbolType) {
                 // Symbol drawing
                 this.createRemoteSymbol(data);
             } else if (data.startX !== undefined && data.points) {
@@ -2183,6 +2462,74 @@ class DrawingTool {
             points: data.points,
             strokeWidth: strokeWidth,
             strokeColor: data.strokeColor
+        });
+        
+        // Schedule cleanup if needed
+        this.scheduleCleanup();
+    }
+    
+    /**
+     * Create a remote box drawing
+     * NOTE: This method does NOT broadcast - it's only for rendering remote drawings
+     * @param {Object} data - Box drawing data
+     */
+    createRemoteBox(data) {
+        const layer = this.services.canvasLayer;
+        const graphics = new PIXI.Graphics();
+        
+        const drawingAlpha = 1.0;
+        const drawingColor = this.cssToPixiColor(data.strokeColor);
+        const strokeWidth = data.strokeWidth || 6;
+        const shadowOffset = 2;
+        const shadowAlpha = drawingAlpha * 0.3;
+        const shadowColor = 0x000000;
+        const lineStyle = data.lineStyle || 'solid';
+        
+        // Draw shadow first (offset version)
+        graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+        this._drawBoxWithStyle(
+            graphics,
+            data.startX + shadowOffset,
+            data.startY + shadowOffset,
+            data.width,
+            data.height,
+            lineStyle
+        );
+        
+        // Draw main box on top
+        graphics.lineStyle(strokeWidth, drawingColor, drawingAlpha);
+        this._drawBoxWithStyle(
+            graphics,
+            data.startX,
+            data.startY,
+            data.width,
+            data.height,
+            lineStyle
+        );
+        
+        // Add to layer
+        layer.addChild(graphics);
+        
+        // Store reference
+        if (!this._pixiDrawings) {
+            this._pixiDrawings = [];
+        }
+        
+        this._pixiDrawings.push({
+            id: data.drawingId,
+            graphics: graphics,
+            createdAt: data.createdAt || Date.now(),
+            expiresAt: data.expiresAt || null,
+            userId: data.userId,
+            userName: data.userName || 'Unknown',
+            startX: data.startX,
+            startY: data.startY,
+            width: data.width,
+            height: data.height,
+            strokeWidth: strokeWidth,
+            strokeColor: data.strokeColor,
+            lineStyle: lineStyle,
+            type: 'box'
         });
         
         // Schedule cleanup if needed
@@ -2539,6 +2886,7 @@ class DrawingTool {
         this.state.isDrawing = false;
         this.state.drawingPoints = [];
         this.state.drawingStartPoint = null;
+        this.state.boxStartPoint = null;
         this.state.currentDrawing = null;
     }
     
@@ -2598,10 +2946,10 @@ class DrawingTool {
     
     /**
      * Set the drawing mode
-     * @param {string} mode - Drawing mode: 'line', 'plus', 'x', 'dot', 'arrow'
+     * @param {string} mode - Drawing mode: 'line', 'plus', 'x', 'dot', 'arrow', 'square', 'box'
      */
     setDrawingMode(mode) {
-        if (['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'].includes(mode)) {
+        if (['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square', 'box'].includes(mode)) {
             this.state.drawingMode = mode;
             // Save to client-scope setting
             game.settings.set(MODULE.ID, 'toolbar.drawingMode', mode);
@@ -2636,7 +2984,7 @@ class DrawingTool {
             
             // Update active state for each mode button
             if (this._modeButtons) {
-                const modes = ['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'];
+                const modes = ['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square', 'box'];
                 const modeKeys = {
                     'line': 'line',
                     'plus': 'plus',
@@ -2646,7 +2994,8 @@ class DrawingTool {
                     'arrow-up': 'arrowUp',
                     'arrow-down': 'arrowDown',
                     'arrow-left': 'arrowLeft',
-                    'square': 'square'
+                    'square': 'square',
+                    'box': 'box'
                 };
                 modes.forEach(mode => {
                     const buttonKey = modeKeys[mode];
