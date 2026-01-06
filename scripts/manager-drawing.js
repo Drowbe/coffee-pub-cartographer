@@ -50,7 +50,8 @@ class DrawingTool {
             isDrawing: false,
             drawingPoints: [],
             drawingStartPoint: null,
-            boxStartPoint: null // For box mode: upper left corner
+            boxStartPoint: null, // For box mode: upper left corner
+            lastMousePosition: null // Last mouse position in world coordinates (for box finishing)
         };
         
         // Hook IDs for cleanup
@@ -248,6 +249,7 @@ class DrawingTool {
             // Store references for updating active state
             self._modeButtons = {
                 line: `${MODULE.ID}-mode-line`,
+                box: `${MODULE.ID}-mode-box`,
                 plus: `${MODULE.ID}-mode-plus`,
                 x: `${MODULE.ID}-mode-x`,
                 dot: `${MODULE.ID}-mode-dot`,
@@ -255,8 +257,7 @@ class DrawingTool {
                 arrowUp: `${MODULE.ID}-mode-arrow-up`,
                 arrowDown: `${MODULE.ID}-mode-arrow-down`,
                 arrowLeft: `${MODULE.ID}-mode-arrow-left`,
-                square: `${MODULE.ID}-mode-square`,
-                box: `${MODULE.ID}-mode-box`
+                square: `${MODULE.ID}-mode-square`
             };
             
             // Register line tool button in mode group
@@ -272,12 +273,28 @@ class DrawingTool {
                 }
             });
             
+            cartographerToolbar.registerTool(self._modeButtons.box, {
+                icon: "fa-solid fa-square-dashed",
+                tooltip: "Box Tool (drag to draw box)",
+                group: "mode", // Switch group
+                order: 2,
+                active: () => self.state.drawingMode === 'box',
+                onClick: () => {
+                    self.setDrawingMode('box');
+                    self.updateModeButtons();
+                    // Activate drawing tool if not already active
+                    if (!self.state.active) {
+                        self.activate();
+                    }
+                }
+            });
+
             // Register symbol stamp buttons
             cartographerToolbar.registerTool(self._modeButtons.plus, {
                 icon: "fa-solid fa-plus",
                 tooltip: "Plus Symbol (click to stamp)",
                 group: "mode", // Switch group
-                order: 2,
+                order: 3,
                 active: () => self.state.drawingMode === 'plus',
                 onClick: () => {
                     self.setDrawingMode('plus');
@@ -293,7 +310,7 @@ class DrawingTool {
                 icon: "fa-solid fa-xmark",
                 tooltip: "X Symbol (click to stamp)",
                 group: "mode", // Switch group
-                order: 3,
+                order: 4,
                 active: () => self.state.drawingMode === 'x',
                 onClick: () => {
                     self.setDrawingMode('x');
@@ -309,7 +326,7 @@ class DrawingTool {
                 icon: "fa-solid fa-circle",
                 tooltip: "Dot Symbol (click to stamp)",
                 group: "mode", // Switch group
-                order: 4,
+                order: 5,
                 active: () => self.state.drawingMode === 'dot',
                 onClick: () => {
                     self.setDrawingMode('dot');
@@ -325,7 +342,7 @@ class DrawingTool {
                 icon: "fa-solid fa-arrow-right",
                 tooltip: "Arrow Right Symbol (click to stamp)",
                 group: "mode", // Switch group
-                order: 5,
+                order: 6,
                 active: () => self.state.drawingMode === 'arrow',
                 onClick: () => {
                     self.setDrawingMode('arrow');
@@ -341,7 +358,7 @@ class DrawingTool {
                 icon: "fa-solid fa-arrow-up",
                 tooltip: "Arrow Up Symbol (click to stamp)",
                 group: "mode", // Switch group
-                order: 6,
+                order: 7,
                 active: () => self.state.drawingMode === 'arrow-up',
                 onClick: () => {
                     self.setDrawingMode('arrow-up');
@@ -357,7 +374,7 @@ class DrawingTool {
                 icon: "fa-solid fa-arrow-down",
                 tooltip: "Arrow Down Symbol (click to stamp)",
                 group: "mode", // Switch group
-                order: 7,
+                order: 8,
                 active: () => self.state.drawingMode === 'arrow-down',
                 onClick: () => {
                     self.setDrawingMode('arrow-down');
@@ -373,7 +390,7 @@ class DrawingTool {
                 icon: "fa-solid fa-arrow-left",
                 tooltip: "Arrow Left Symbol (click to stamp)",
                 group: "mode", // Switch group
-                order: 8,
+                order: 9,
                 active: () => self.state.drawingMode === 'arrow-left',
                 onClick: () => {
                     self.setDrawingMode('arrow-left');
@@ -389,7 +406,7 @@ class DrawingTool {
                 icon: "fa-solid fa-square",
                 tooltip: "Rounded Square Symbol (click to stamp)",
                 group: "mode", // Switch group
-                order: 9,
+                order: 10,
                 active: () => self.state.drawingMode === 'square',
                 onClick: () => {
                     self.setDrawingMode('square');
@@ -401,21 +418,7 @@ class DrawingTool {
                 }
             });
             
-            cartographerToolbar.registerTool(self._modeButtons.box, {
-                icon: "fa-solid fa-square-full",
-                tooltip: "Box Tool (drag to draw box)",
-                group: "mode", // Switch group
-                order: 10,
-                active: () => self.state.drawingMode === 'box',
-                onClick: () => {
-                    self.setDrawingMode('box');
-                    self.updateModeButtons();
-                    // Activate drawing tool if not already active
-                    if (!self.state.active) {
-                        self.activate();
-                    }
-                }
-            });
+
             
             // Update mode buttons to reflect the default mode (line)
             self.updateModeButtons();
@@ -789,18 +792,24 @@ class DrawingTool {
         if (!this._keyDown) return;
         this._keyDown = false;
 
-        // If currently drawing a line, finish it now
+        // If currently drawing, finish it now
         if (this.state.isDrawing) {
-            const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
-            if (mouse) {
-                const rect = canvas.app.view.getBoundingClientRect();
-                const syntheticEvent = {
-                    clientX: mouse.x + rect.left,
-                    clientY: mouse.y + rect.top
-                };
-                this.finishDrawing(syntheticEvent);
+            // For box mode, use stored last mouse position (more reliable)
+            if (this.state.drawingMode === 'box') {
+                this.finishBoxDrawing(null); // Pass null to use stored position
             } else {
-                this.finishDrawing({ clientX: 0, clientY: 0 });
+                // For line mode, get current mouse position
+                const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
+                if (mouse) {
+                    const rect = canvas.app.view.getBoundingClientRect();
+                    const syntheticEvent = {
+                        clientX: mouse.x + rect.left,
+                        clientY: mouse.y + rect.top
+                    };
+                    this.finishDrawing(syntheticEvent);
+                } else {
+                    this.finishDrawing({ clientX: 0, clientY: 0 });
+                }
             }
         }
 
@@ -820,16 +829,22 @@ class DrawingTool {
         if (this.state.active) {
             // Finish any in-progress drawing (equivalent to key-up in hold mode)
             if (this.state.isDrawing) {
-                const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
-                if (mouse) {
-                    const rect = canvas.app.view.getBoundingClientRect();
-                    const syntheticEvent = {
-                        clientX: mouse.x + rect.left,
-                        clientY: mouse.y + rect.top
-                    };
-                    this.finishDrawing(syntheticEvent);
+                // For box mode, use stored last mouse position (more reliable)
+                if (this.state.drawingMode === 'box') {
+                    this.finishBoxDrawing(null); // Pass null to use stored position
                 } else {
-                    this.finishDrawing({ clientX: 0, clientY: 0 });
+                    // For line mode, get current mouse position
+                    const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
+                    if (mouse) {
+                        const rect = canvas.app.view.getBoundingClientRect();
+                        const syntheticEvent = {
+                            clientX: mouse.x + rect.left,
+                            clientY: mouse.y + rect.top
+                        };
+                        this.finishDrawing(syntheticEvent);
+                    } else {
+                        this.finishDrawing({ clientX: 0, clientY: 0 });
+                    }
                 }
             }
 
@@ -1458,16 +1473,15 @@ class DrawingTool {
                 return false;
             }
             
-            // Box mode: start box drawing on mouse down (set upper left corner)
-            if (self.state.drawingMode === 'box' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
+            // Box mode: ignore mouse clicks (box drawing starts on mouse move, not on click)
+            if (self.state.drawingMode === 'box') {
                 event.preventDefault();
                 event.stopPropagation();
-                self.startBoxDrawing(event);
                 return false;
             }
             
             // If in symbol mode, stamp the symbol on click
-            if (self.state.drawingMode !== 'line' && self.state.drawingMode !== 'box' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
+            if (self.state.drawingMode !== 'line' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
                 event.stopPropagation();
                 // Use stopImmediatePropagation only when necessary to prevent conflicts
@@ -1506,12 +1520,13 @@ class DrawingTool {
                         self.updateDrawing(event);
                     }
                 } else if (self.state.drawingMode === 'box') {
-                    // Box mode: update preview box as mouse moves
-                    if (self.state.isDrawing && self.state.boxStartPoint) {
+                    // Box mode: start/update box drawing on mouse move
+                    if (!self.state.isDrawing) {
+                        // Start box drawing on first mouse move (set upper left corner)
+                        self.startBoxDrawing(event);
+                    } else {
+                        // Update box preview as mouse moves
                         self.updateBoxPreview(event);
-                    } else if (!self.state.isDrawing) {
-                        // Show preview symbol following mouse when not drawing
-                        self.updatePreviewSymbol(event);
                     }
                 } else {
                     // Symbol modes: show preview symbol following mouse
@@ -1529,11 +1544,10 @@ class DrawingTool {
                 return false;
             }
             
-            // Box mode: finish box on mouse up (set lower right corner)
-            if (self.state.drawingMode === 'box' && self.state.isDrawing) {
+            // Box mode: ignore mouse up (box drawing finishes when key is released/toggled off)
+            if (self.state.drawingMode === 'box') {
                 event.preventDefault();
                 event.stopPropagation();
-                self.finishBoxDrawing(event);
                 return false;
             }
             
@@ -1783,6 +1797,9 @@ class DrawingTool {
         const worldCoords = this.getWorldCoordinates(event);
         if (!worldCoords) return;
         
+        // Store last mouse position for finishing the box
+        this.state.lastMousePosition = worldCoords;
+        
         // Calculate box dimensions
         const startX = this.state.boxStartPoint.x;
         const startY = this.state.boxStartPoint.y;
@@ -1866,8 +1883,20 @@ class DrawingTool {
     async finishBoxDrawing(event) {
         if (!canvas || !canvas.scene || !this.state.isDrawing || !this.state.boxStartPoint) return;
         
-        // Get world coordinates from pointer event
-        const worldCoords = this.getWorldCoordinates(event);
+        // Get world coordinates - prefer stored last position, fallback to event
+        let worldCoords = this.state.lastMousePosition;
+        if (!worldCoords && event) {
+            worldCoords = this.getWorldCoordinates(event);
+        }
+        
+        // If still no coordinates, try to get current mouse position directly
+        if (!worldCoords) {
+            const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
+            if (mouse) {
+                worldCoords = { x: mouse.x, y: mouse.y };
+            }
+        }
+        
         if (!worldCoords) {
             this.cancelDrawing();
             return;
@@ -1976,6 +2005,7 @@ class DrawingTool {
             // Reset drawing state
             this.state.isDrawing = false;
             this.state.boxStartPoint = null;
+            this.state.lastMousePosition = null;
             this.state.currentDrawing = null;
             
             console.log(`${MODULE.NAME}: Box drawing created on canvas layer`);
@@ -2887,6 +2917,7 @@ class DrawingTool {
         this.state.drawingPoints = [];
         this.state.drawingStartPoint = null;
         this.state.boxStartPoint = null;
+        this.state.lastMousePosition = null;
         this.state.currentDrawing = null;
     }
     
