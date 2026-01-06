@@ -19,7 +19,17 @@
 	"drawing.enablePlayerDrawing-Hint": "Allow players to draw temporarily on the canvas for planning purposes.",
 
 	"drawing.timedEraseTimeout-Label": "Timed Erase Timeout (seconds)",
-	"drawing.timedEraseTimeout-Hint": "Time before drawings auto-delete when timed erase is enabled. Range: 5-120 seconds."
+	"drawing.timedEraseTimeout-Hint": "Time before drawings auto-delete when timed erase is enabled. Range: 5-120 seconds.",
+
+	"drawing.hotkeyEnabled-Label": "Enable Draw Hotkey",
+	"drawing.hotkeyEnabled-Hint": "Allows the configured hotkey to activate the Drawing Tool. The Hotkey is set in the core FoundryVTT settings.",
+
+	"drawing.hotkeyMode-Label": "Draw Hotkey Mode",
+	"drawing.hotkeyMode-Hint": "Hold means active only while pressed. Toggle means press once to enable/disable.",
+
+	"drawing.blockWhenTyping-Label": "Ignore Hotkey While Typing",
+	"drawing.blockWhenTyping-Hint": "Prevents the hotkey from firing when chat or form fields have focus."
+
 	}
 }
 

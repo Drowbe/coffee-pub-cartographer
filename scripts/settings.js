@@ -140,6 +140,47 @@ export const registerSettings = () => {
 		group: WORKFLOW_GROUPS.COMMON_SETTINGS
 	});
     
+
+
+	// -- Draw Hotkey Settings --
+
+	game.settings.register(MODULE.ID, "drawing.hotkeyEnabled", {
+		name: MODULE.ID + ".drawing.hotkeyEnabled-Label",
+		hint: MODULE.ID + ".drawing.hotkeyEnabled-Hint",
+		scope: "client",
+		config: true,
+		type: Boolean,
+		default: true
+	  });
+	
+	  game.settings.register(MODULE.ID, "drawing.hotkeyMode", {
+		name: MODULE.ID + ".drawing.hotkeyMode-Label",
+		hint: MODULE.ID + ".drawing.hotkeyMode-Hint",
+		scope: "client",
+		config: true,
+		type: String,
+		choices: {
+		  hold: "Hold",
+		  toggle: "Toggle"
+		},
+		default: "hold"
+	  });
+	
+	  game.settings.register(MODULE.ID, "drawing.blockWhenTyping", {
+		name: MODULE.ID + ".drawing.blockWhenTyping-Label",
+		hint: MODULE.ID + ".drawing.blockWhenTyping-Hint",
+		scope: "client",
+		config: true,
+		type: Boolean,
+		default: true
+	  });
+
+
+
+
+
+
+
     // --------------------------------------
 	// -- HIDDEN CLIENT-SCOPE SETTINGS (Toolbar State)
 	// --------------------------------------
