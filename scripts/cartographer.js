@@ -16,6 +16,38 @@ import { socketManager } from './manager-sockets.js';
 import { BlacksmithAPI } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
 // ================================================================== 
+// ===== KEYBINDING REGISTRATION ====================================
+// ================================================================== 
+
+/**
+ * Register Foundry keybinding for hold-to-draw functionality
+ * This must happen during 'init' hook, not 'ready'
+ */
+Hooks.once('init', () => {
+    game.keybindings.register(MODULE.ID, 'holdToDraw', {
+        name: 'Hold to Draw',
+        hint: 'Hold this key to temporarily enable the Drawing Tool and draw/stamp on the canvas.',
+        editable: [
+            { key: 'Backslash' } // default, user can change in Settings → Controls
+        ],
+        onDown: () => {
+            // Don't fire while typing in inputs, chat, sheets, etc.
+            if (game.keyboard.hasFocus) return false;
+
+            // Canvas must exist
+            if (!canvas?.ready) return false;
+
+            drawingTool.onHoldKeyDown?.();
+            return true;
+        },
+        onUp: () => {
+            drawingTool.onHoldKeyUp?.();
+            return true;
+        }
+    });
+});
+
+// ================================================================== 
 // ===== MODULE INITIALIZATION ======================================
 // ================================================================== 
 

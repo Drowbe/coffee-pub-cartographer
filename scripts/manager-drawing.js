@@ -70,10 +70,6 @@ class DrawingTool {
         
         // Key-based activation
         this._keyDown = false;
-        this._keyHandlers = {
-            keydown: null,
-            keyup: null
-        };
     }
     
     /**
@@ -181,14 +177,6 @@ class DrawingTool {
         // Detach canvas handlers
         this.detachCanvasHandlers();
         
-        // Remove keyboard handlers
-        if (this._keyHandlers.keydown) {
-            document.removeEventListener('keydown', this._keyHandlers.keydown);
-        }
-        if (this._keyHandlers.keyup) {
-            document.removeEventListener('keyup', this._keyHandlers.keyup);
-        }
-        
         // Hooks are automatically cleaned up by BlacksmithHookManager via context
         this.hookIds = [];
         
@@ -217,9 +205,6 @@ class DrawingTool {
             console.warn(`${MODULE.NAME}: BlacksmithHookManager not available`);
             return;
         }
-        
-        // Register keyboard handlers for backslash (\) key activation
-        this.registerKeyboardHandlers();
         
         // Register scene change cleanup hook
         const sceneChangeHookId = BlacksmithHookManager.registerHook({
@@ -762,61 +747,38 @@ class DrawingTool {
     /**
      * Register keyboard handlers for backslash (\) key activation
      */
-    registerKeyboardHandlers() {
-        const self = this;
-        
-        // Handle backslash key down - activate drawing mode
-        // Works for both line drawing and symbol stamping
-        this._keyHandlers.keydown = (event) => {
-            // Activate if backslash key is pressed (works for all modes: line, plus, x, dot, arrow)
-            // Ignore if typing in an input field
-            // event.key === '\\' or event.code === 'Backslash' for backslash key
-            if ((event.key === '\\' || event.code === 'Backslash') && 
-                !event.ctrlKey && 
-                !event.altKey && 
-                !event.metaKey &&
-                event.target.tagName !== 'INPUT' &&
-                event.target.tagName !== 'TEXTAREA' &&
-                !this._keyDown) {
-                
-                this._keyDown = true;
-                this.activate(true); // keyBased = true
-                // Line drawing will start on first mouse move (handled in pointermove)
-                // Symbols will stamp on click (handled in pointerdown)
+    /**
+     * Handle hold key down event (called by Foundry keybinding system)
+     */
+    onHoldKeyDown() {
+        if (this._keyDown) return;
+        this._keyDown = true;
+        this.activate(true); // keyBased = true
+    }
+    
+    /**
+     * Handle hold key up event (called by Foundry keybinding system)
+     */
+    onHoldKeyUp() {
+        if (!this._keyDown) return;
+        this._keyDown = false;
+
+        // Finish any active drawing before shutting off
+        if (this.state.isDrawing) {
+            const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
+            if (mouse) {
+                const rect = canvas.app.view.getBoundingClientRect();
+                this.finishDrawing({
+                    clientX: mouse.x + rect.left,
+                    clientY: mouse.y + rect.top
+                });
+            } else {
+                this.finishDrawing({ clientX: 0, clientY: 0 });
             }
-        };
-        
-        // Handle backslash key up - stop drawing and deactivate
-        this._keyHandlers.keyup = (event) => {
-            if ((event.key === '\\' || event.code === 'Backslash') && this._keyDown) {
-                this._keyDown = false;
-                
-                // Finish any active drawing first
-                if (this.state.isDrawing) {
-                    // Get current mouse position for final point
-                    const mousePosition = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
-                    if (mousePosition) {
-                        const syntheticEvent = {
-                            clientX: mousePosition.x + canvas.app.view.getBoundingClientRect().left,
-                            clientY: mousePosition.y + canvas.app.view.getBoundingClientRect().top
-                        };
-                        this.finishDrawing(syntheticEvent);
-                    } else {
-                        // Fallback: finish with empty event
-                        this.finishDrawing({ clientX: 0, clientY: 0 });
-                    }
-                }
-                
-                this.deactivate(true); // keyBased = true
-                
-                // Remove preview symbol when backslash is released
-                this.removePreviewSymbol();
-            }
-        };
-        
-        // Attach to document
-        document.addEventListener('keydown', this._keyHandlers.keydown);
-        document.addEventListener('keyup', this._keyHandlers.keyup);
+        }
+
+        this.deactivate(true);
+        this.removePreviewSymbol();
     }
     
     /**
@@ -1431,6 +1393,8 @@ class DrawingTool {
             if (self.state.active && self.state.drawingMode !== 'line' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
                 event.stopPropagation();
+                // Use stopImmediatePropagation only when necessary to prevent conflicts
+                // This prevents other modules from interfering with symbol stamping
                 event.stopImmediatePropagation();
                 
                 // Stamp the symbol at click position
@@ -1491,20 +1455,19 @@ class DrawingTool {
      * Detach canvas event handlers
      */
     detachCanvasHandlers() {
-        if (!canvas || !canvas.app) return;
-        
+        const view = canvas?.app?.view;
+        if (!view) return;
+
         if (this._handlePointerDown) {
-            canvas.app.view.removeEventListener('pointerdown', this._handlePointerDown);
+            view.removeEventListener('pointerdown', this._handlePointerDown, true);
             this._handlePointerDown = null;
         }
-        
         if (this._handlePointerMove) {
-            canvas.app.view.removeEventListener('pointermove', this._handlePointerMove);
+            view.removeEventListener('pointermove', this._handlePointerMove, true);
             this._handlePointerMove = null;
         }
-        
         if (this._handlePointerUp) {
-            canvas.app.view.removeEventListener('pointerup', this._handlePointerUp);
+            view.removeEventListener('pointerup', this._handlePointerUp, true);
             this._handlePointerUp = null;
         }
     }
