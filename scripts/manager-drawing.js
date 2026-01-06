@@ -1820,7 +1820,7 @@ class DrawingTool {
         const strokeWidth = this.state.brushSettings.size;
         const lineStyle = this.state.lineStyle || 'solid';
         
-        // Draw shadow first (offset version)
+        // Draw shadow first (offset version) - always solid for shadow
         this._previewGraphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
         this._drawBoxWithStyle(
             this._previewGraphics,
@@ -1828,10 +1828,10 @@ class DrawingTool {
             startY + shadowOffset,
             width,
             height,
-            lineStyle
+            'solid' // Shadow is always solid, regardless of line style
         );
         
-        // Draw main box on top
+        // Draw main box on top with actual line style
         this._previewGraphics.lineStyle(strokeWidth, previewColor, previewAlpha);
         this._drawBoxWithStyle(
             this._previewGraphics,
@@ -1930,7 +1930,7 @@ class DrawingTool {
             const strokeWidth = this.state.brushSettings.size;
             const lineStyle = this.state.lineStyle || 'solid';
             
-            // Draw shadow first (offset version)
+            // Draw shadow first (offset version) - always solid for shadow
             graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
             this._drawBoxWithStyle(
                 graphics,
@@ -1938,10 +1938,10 @@ class DrawingTool {
                 startY + shadowOffset,
                 width,
                 height,
-                lineStyle
+                'solid' // Shadow is always solid, regardless of line style
             );
             
-            // Draw main box on top
+            // Draw main box on top with actual line style
             graphics.lineStyle(strokeWidth, drawingColor, drawingAlpha);
             this._drawBoxWithStyle(
                 graphics,
@@ -2515,7 +2515,7 @@ class DrawingTool {
         const shadowColor = 0x000000;
         const lineStyle = data.lineStyle || 'solid';
         
-        // Draw shadow first (offset version)
+        // Draw shadow first (offset version) - always solid for shadow
         graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
         this._drawBoxWithStyle(
             graphics,
@@ -2523,10 +2523,10 @@ class DrawingTool {
             data.startY + shadowOffset,
             data.width,
             data.height,
-            lineStyle
+            'solid' // Shadow is always solid, regardless of line style
         );
         
-        // Draw main box on top
+        // Draw main box on top with actual line style
         graphics.lineStyle(strokeWidth, drawingColor, drawingAlpha);
         this._drawBoxWithStyle(
             graphics,
