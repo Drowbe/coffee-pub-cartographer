@@ -749,36 +749,71 @@ class DrawingTool {
      */
     /**
      * Handle hold key down event (called by Foundry keybinding system)
+     * For "hold" mode: activates tool when key is pressed
      */
     onHoldKeyDown() {
-        if (this._keyDown) return;
+        if (this._keyDown) return; // already down
         this._keyDown = true;
-        this.activate(true); // keyBased = true
+
+        // Activate tool in "keyBased" mode (no spam logging)
+        this.activate(true);
+
+        // Do NOT start drawing here.
+        // Current behavior starts drawing on first pointermove.
+        // Symbol modes will stamp on click.
     }
     
     /**
      * Handle hold key up event (called by Foundry keybinding system)
+     * For "hold" mode: finishes drawing and deactivates tool when key is released
      */
     onHoldKeyUp() {
         if (!this._keyDown) return;
         this._keyDown = false;
 
-        // Finish any active drawing before shutting off
+        // If currently drawing a line, finish it now
         if (this.state.isDrawing) {
             const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
             if (mouse) {
                 const rect = canvas.app.view.getBoundingClientRect();
-                this.finishDrawing({
+                const syntheticEvent = {
                     clientX: mouse.x + rect.left,
                     clientY: mouse.y + rect.top
-                });
+                };
+                this.finishDrawing(syntheticEvent);
             } else {
                 this.finishDrawing({ clientX: 0, clientY: 0 });
             }
         }
 
+        // Deactivate tool (keyBased)
         this.deactivate(true);
+
+        // Remove symbol preview
         this.removePreviewSymbol();
+    }
+    
+    /**
+     * Handle toggle key press (called by Foundry keybinding system)
+     * For "toggle" mode: toggles tool on/off with each key press
+     */
+    toggleFromHotkey() {
+        // If active, turning off
+        if (this.state.active) {
+            // Cancel any in-progress drawing (per toggle decision)
+            if (this.state.isDrawing) {
+                this.cancelDrawing();
+            }
+
+            this.deactivate(true);
+            this.removePreviewSymbol();
+            this._keyDown = false;
+            return;
+        }
+
+        // Turning on
+        this._keyDown = true; // keep current pointer handlers behavior consistent
+        this.activate(true);
     }
     
     /**
@@ -1382,15 +1417,21 @@ class DrawingTool {
         const self = this;
         
         // Attach pointer event handlers with capture phase to intercept before Foundry
+        // Handlers work for both "hold" and "toggle" modes
         this._handlePointerDown = (event) => {
-            // Symbols and line drawing both require backslash key to be held
-            // Don't do anything on click if backslash is not held
+            // Primary guard: only run when tool is active
+            if (!self.state.active) {
+                return false;
+            }
+            
+            // For hold mode: require _keyDown to be true
+            // For toggle mode: _keyDown remains true while active, so this check still works
             if (!self._keyDown) {
                 return false;
             }
             
-            // If in symbol mode and backslash is held, stamp the symbol on click
-            if (self.state.active && self.state.drawingMode !== 'line' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
+            // If in symbol mode, stamp the symbol on click
+            if (self.state.drawingMode !== 'line' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
                 event.stopPropagation();
                 // Use stopImmediatePropagation only when necessary to prevent conflicts
@@ -1402,9 +1443,8 @@ class DrawingTool {
                 return false;
             }
             
-            // Line mode: ignore mouse clicks when backslash is held
-            // Line drawing starts on mouse move, not on click
-            if (self.state.active && self.state.drawingMode === 'line' && self._keyDown) {
+            // Line mode: ignore mouse clicks (line drawing starts on mouse move, not on click)
+            if (self.state.drawingMode === 'line') {
                 event.preventDefault();
                 event.stopPropagation();
                 return false;
@@ -1412,14 +1452,18 @@ class DrawingTool {
         };
         
         this._handlePointerMove = (event) => {
-            // Only handle pointer move when backslash is held
-            // Line mode: continue drawing
-            // Symbol modes: show preview symbol following mouse
-            if (self.state.active && self._keyDown) {
+            // Primary guard: only run when tool is active
+            if (!self.state.active) {
+                return false;
+            }
+            
+            // For hold mode: require _keyDown to be true
+            // For toggle mode: _keyDown remains true while active, so this check still works
+            if (self._keyDown) {
                 if (self.state.drawingMode === 'line') {
-                    // Key-based mode: if backslash is held, start/continue drawing on mouse move
+                    // Line mode: start/continue drawing on mouse move
                     if (!self.state.isDrawing) {
-                        // Start drawing on first mouse move while backslash is held
+                        // Start drawing on first mouse move
                         self.startDrawing(event);
                     } else {
                         // Continue drawing
@@ -1429,16 +1473,21 @@ class DrawingTool {
                     // Symbol modes: show preview symbol following mouse
                     self.updatePreviewSymbol(event);
                 }
-            } else if (self.state.active && !self._keyDown) {
-                // Remove preview when backslash is not held
+            } else {
+                // Remove preview when key is not held (hold mode only)
                 self.removePreviewSymbol();
             }
         };
         
         this._handlePointerUp = (event) => {
-            // Only finish on mouse up if NOT using key-based activation
-            // Key-based mode finishes when backslash is released, not on mouse up
-            if (self.state.active && self.state.isDrawing && !self._keyDown) {
+            // Primary guard: only run when tool is active
+            if (!self.state.active) {
+                return false;
+            }
+            
+            // Only finish on mouse up if NOT using key-based activation (hold/toggle mode)
+            // Key-based modes finish when key is released/toggled off, not on mouse up
+            if (self.state.isDrawing && !self._keyDown) {
                 self.finishDrawing(event);
             }
         };

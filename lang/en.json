@@ -22,7 +22,7 @@
 	"drawing.timedEraseTimeout-Hint": "Time before drawings auto-delete when timed erase is enabled. Range: 5-120 seconds.",
 
 	"drawing.hotkeyEnabled-Label": "Enable Draw Hotkey",
-	"drawing.hotkeyEnabled-Hint": "Allows the configured hotkey to activate the Drawing Tool. The Hotkey is set in the core FoundryVTT settings.",
+	"drawing.hotkeyEnabled-Hint": "Allows the configured hotkey to activate the Drawing Tool. The Hotkey is set in the core FoundryVTT settings. (Defualt: L)",
 
 	"drawing.hotkeyMode-Label": "Draw Hotkey Mode",
 	"drawing.hotkeyMode-Hint": "Hold means active only while pressed. Toggle means press once to enable/disable.",

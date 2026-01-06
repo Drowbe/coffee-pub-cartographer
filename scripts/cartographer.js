@@ -20,28 +20,40 @@ import { BlacksmithAPI } from '/modules/coffee-pub-blacksmith/api/blacksmith-api
 // ================================================================== 
 
 /**
- * Register Foundry keybinding for hold-to-draw functionality
+ * Register Foundry keybinding for draw hotkey functionality
  * This must happen during 'init' hook, not 'ready'
  */
 Hooks.once('init', () => {
-    game.keybindings.register(MODULE.ID, 'holdToDraw', {
-        name: 'Hold to Draw',
-        hint: 'Hold this key to temporarily enable the Drawing Tool and draw/stamp on the canvas.',
+    game.keybindings.register(MODULE.ID, 'drawHotkey', {
+        name: 'Cartographer: Draw Hotkey',
+        hint: 'Activates the drawing tool. Configure key in Configure Controls.',
         editable: [
-            { key: 'Backslash' } // default, user can change in Settings → Controls
+            { key: 'KeyL' } // default, user can change in Settings → Controls
         ],
         onDown: () => {
-            // Don't fire while typing in inputs, chat, sheets, etc.
-            if (game.keyboard.hasFocus) return false;
-
+            // Check if hotkey is enabled
+            if (!game.settings.get(MODULE.ID, 'drawing.hotkeyEnabled')) return false;
+            
+            // Check if we should block when typing
+            if (game.settings.get(MODULE.ID, 'drawing.blockWhenTyping') && game.keyboard.hasFocus) return false;
+            
             // Canvas must exist
             if (!canvas?.ready) return false;
 
-            drawingTool.onHoldKeyDown?.();
-            return true;
+            const mode = game.settings.get(MODULE.ID, 'drawing.hotkeyMode');
+            if (mode === 'toggle') {
+                drawingTool.toggleFromHotkey();
+            } else {
+                drawingTool.onHoldKeyDown();
+            }
+
+            return true; // consume
         },
         onUp: () => {
-            drawingTool.onHoldKeyUp?.();
+            const mode = game.settings.get(MODULE.ID, 'drawing.hotkeyMode');
+            if (mode !== 'hold') return false;
+
+            drawingTool.onHoldKeyUp();
             return true;
         }
     });
