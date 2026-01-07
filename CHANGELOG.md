@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [13.0.1]
+
+### Added
+- **Box Drawing Tool**: New drawing mode for creating rectangular boxes
+  - Key-based activation (no mouse clicks required)
+  - Real-time preview as mouse moves
+  - Works with both hold and toggle hotkey modes
+  - Supports all line styles (solid, dotted, dashed)
+  - Full multi-player synchronization
+- **Configurable Hotkey System**: Enhanced keybinding configuration
+  - Hotkey enable/disable setting
+  - Hold vs. toggle mode selection
+  - Option to ignore hotkey while typing in chat/forms
+  - Hotkey appears in Foundry's Configure Controls for easy rebinding
+
+### Changed
+- **Keybinding System**: Migrated to Foundry's native keybinding API
+  - Replaced manual `document.addEventListener` with `game.keybindings.register`
+  - Better integration with Foundry's keyboard routing (v13+ compatible)
+  - Users can now rebind the hotkey in Settings → Configure Controls
+  - Improved focus handling (respects `game.keyboard.hasFocus`)
+- **Box Tool Position**: Moved box button to order 2 in toolbar (after line tool)
+
+### Fixed
+- **Shadow Rendering**: Fixed "second set of dots" issue for filled symbols
+  - Circle/dot shadows now render correctly (cleared lineStyle before fill)
+  - Arrow shadows now render correctly (cleared lineStyle before fill)
+  - Rounded square shadows now render correctly (cleared lineStyle before fill)
+  - Box shadows always use solid style (not affected by line style setting)
+- **Event Handler Leaks**: Fixed `detachCanvasHandlers()` to match capture flag
+  - Prevents accumulation of event handlers across activations
+  - Eliminates potential double-drawing and janky behavior
+- **Box Drawing Completion**: Fixed box finishing at correct mouse position
+  - Now uses stored last mouse position instead of synthetic event
+  - Prevents boxes from finishing at (0,0) or incorrect coordinates
+
+### Technical
+- Added `lastMousePosition` state tracking for box drawing
+- Improved mouse position retrieval for key-based drawing completion
+- Enhanced `finishBoxDrawing()` with multiple fallback methods for coordinate retrieval
+- Added `createRemoteBox()` method for remote box synchronization
+
 ## [13.0.0]
 
 ### Added
