@@ -175,6 +175,22 @@ export const registerSettings = () => {
 		default: true
 	  });
 
+	  // -- Toolbar Height --
+	  game.settings.register(MODULE.ID, "toolbar.height", {
+		name: MODULE.ID + ".toolbar.height-Label",
+		hint: MODULE.ID + ".toolbar.height-Hint",
+		scope: "client",
+		config: true,
+		type: Number,
+		default: 38,
+		range: {
+			min: 15,
+			max: 100,
+			step: 1
+		},
+		group: WORKFLOW_GROUPS.COMMON_SETTINGS
+	  });
+
 
 
 

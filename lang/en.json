@@ -28,7 +28,10 @@
 	"drawing.hotkeyMode-Hint": "Hold means active only while pressed. Toggle means press once to enable/disable.",
 
 	"drawing.blockWhenTyping-Label": "Ignore Hotkey While Typing",
-	"drawing.blockWhenTyping-Hint": "Prevents the hotkey from firing when chat or form fields have focus."
+	"drawing.blockWhenTyping-Hint": "Prevents the hotkey from firing when chat or form fields have focus.",
+
+	"toolbar.height-Label": "Toolbar Height (pixels)",
+	"toolbar.height-Hint": "Height of the Cartographer toolbar in pixels. Range: 15-100 pixels."
 
 	}
 }

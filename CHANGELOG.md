@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Hold vs. toggle mode selection
   - Option to ignore hotkey while typing in chat/forms
   - Hotkey appears in Foundry's Configure Controls for easy rebinding
+- **Toolbar Height Setting**: Configurable toolbar height slider
+  - Client-scope setting (per-user preference)
+  - Range: 15-100 pixels
+  - Default: 38 pixels
+  - Adjustable in Module Settings → Common Settings
 
 ### Changed
 - **Keybinding System**: Migrated to Foundry's native keybinding API
