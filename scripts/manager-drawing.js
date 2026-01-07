@@ -2679,15 +2679,17 @@ class DrawingTool {
                 break;
                 
             case 'dot':
-                // Circle
+                // Circle - clear lineStyle for filled shapes
                 const dotRadius = (halfSize - padding) * 0.7;
                 
                 // Shadow
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(shadowColor, shadowAlpha);
                 graphics.drawCircle(centerX + shadowOffset, centerY + shadowOffset, dotRadius);
                 graphics.endFill();
                 
                 // Main
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(strokeColor, alpha);
                 graphics.drawCircle(centerX, centerY, dotRadius);
                 graphics.endFill();
@@ -2746,7 +2748,8 @@ class DrawingTool {
                     rotatedPoints.push(rotatedX + centerX, rotatedY + centerY);
                 }
                 
-                // Shadow
+                // Shadow - clear lineStyle for filled shapes
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(shadowColor, shadowAlpha);
                 const shadowArrowPoints = [];
                 for (let i = 0; i < rotatedPoints.length; i += 2) {
@@ -2756,6 +2759,7 @@ class DrawingTool {
                 graphics.endFill();
                 
                 // Main
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(strokeColor, alpha);
                 graphics.drawPolygon(rotatedPoints);
                 graphics.endFill();
@@ -2770,7 +2774,8 @@ class DrawingTool {
                 const squareX = centerX - squareScaledHalfSize;
                 const squareY = centerY - squareScaledHalfSize;
                 
-                // Shadow
+                // Shadow - clear lineStyle for filled shapes
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(shadowColor, shadowAlpha);
                 graphics.drawRoundedRect(
                     squareX + shadowOffset,
@@ -2782,6 +2787,7 @@ class DrawingTool {
                 graphics.endFill();
                 
                 // Main
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(strokeColor, alpha);
                 graphics.drawRoundedRect(
                     squareX,
@@ -3278,13 +3284,15 @@ class DrawingTool {
                 break;
                 
             case 'dot':
-                // Draw shadow circle
+                // Draw shadow circle - clear lineStyle for filled shapes
                 const dotRadius = halfSize - padding;
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(shadowColor, shadowAlpha);
                 graphics.drawCircle(x + shadowOffset, y + shadowOffset, dotRadius);
                 graphics.endFill();
                 
                 // Draw main circle
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(strokeColor, symbolAlpha);
                 graphics.drawCircle(x, y, dotRadius);
                 graphics.endFill();
@@ -3396,12 +3404,14 @@ class DrawingTool {
                     ];
                 }
                 
-                // Draw shadow arrow
+                // Draw shadow arrow - clear lineStyle for filled shapes
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(shadowColor, shadowAlpha);
                 graphics.drawPolygon(createShadowPoints);
                 graphics.endFill();
                 
                 // Draw main arrow
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(strokeColor, symbolAlpha);
                 graphics.drawPolygon(createArrowPoints);
                 graphics.endFill();
@@ -3415,7 +3425,8 @@ class DrawingTool {
                 const squareSize = squareScaledHalfSize * 2;
                 const cornerRadius = squareSize * 0.08; // 8% corner radius for rounded corners
                 
-                // Draw shadow rounded square
+                // Draw shadow rounded square - clear lineStyle for filled shapes
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(shadowColor, shadowAlpha);
                 graphics.drawRoundedRect(
                     x - squareScaledHalfSize + shadowOffset,
@@ -3427,6 +3438,7 @@ class DrawingTool {
                 graphics.endFill();
                 
                 // Draw main rounded square
+                graphics.lineStyle(0); // Clear line style for filled shapes
                 graphics.beginFill(strokeColor, symbolAlpha);
                 graphics.drawRoundedRect(
                     x - squareScaledHalfSize,
