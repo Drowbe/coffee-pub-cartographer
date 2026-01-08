@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [13.0.2]
+
+### Changed
+- **Menubar API Integration**: Updated to support Blacksmith's updated Menubar API
+  - Migrated from nested `Menubar` object pattern to direct API methods
+  - Changed from `blacksmith.Menubar.registerTool()` to `api.registerMenubarTool()`
+  - Updated API access pattern to use `game.modules.get('coffee-pub-blacksmith')?.api` directly
+  - Improved error handling and API availability checks
+  - Enhanced compatibility with latest Blacksmith module version
+
 ## [13.0.1]
 
 ### Added

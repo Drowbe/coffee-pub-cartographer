@@ -220,15 +220,23 @@ class CartographerToolbar {
                 icon: "fa-solid fa-map",
                 name: "Cartographer",
                 title: "Cartographer",
-                zone: "middle",              // Optional: left, middle, right (default: middle)
-                order: 5,                  // Optional: order within zone
-                moduleId: MODULE.ID,       // Optional: your module ID
-                gmOnly: false,             // Optional: whether tool is GM-only
-                leaderOnly: false,         // Optional: whether tool is leader-only
-                visible: true,             // Optional: whether tool is visible
+                tooltip: "Whiteboard with the party directly on the canvas",
                 onClick: () => {
                     self.toggleSecondaryBar();
-                }
+                },
+                zone: "middle",
+                group: "party",
+                groupOrder: null,
+                order: 1,
+                moduleId: MODULE.ID,       // Optional: your module ID
+                gmOnly: false,
+                leaderOnly: false,
+                visible: true,
+                toggleable: true,
+                active: false,
+                iconColor: null,
+                buttonNormalTint: null,
+                buttonSelectedTint: null
             };
             
             if (typeof BlacksmithUtils !== 'undefined') {
