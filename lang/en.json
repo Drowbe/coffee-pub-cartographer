@@ -1,6 +1,6 @@
 {
 	"coffee-pub-cartographer": {
-
+		
 		"headingH1GettingStarted-Label": "Getting Started",
 		"headingH1GettingStarted-Hint": "This is the getting started section of the module.",
 		"headingH4Introduction-Label": "Introduction",
@@ -32,7 +32,7 @@
 
 	"toolbar.height-Label": "Toolbar Height (pixels)",
 	"toolbar.height-Hint": "Height of the Cartographer toolbar in pixels. Range: 15-100 pixels."
-
+		
 	}
 }
 

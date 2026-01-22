@@ -96,7 +96,9 @@ class CartographerToolbar {
                         order: 20 // Order for the group
                     }
                     // 'default' group is automatically created for items without a group
-                }
+                },
+                groupBannerEnabled: true, // Enable group banners (uses group keys as labels)
+                groupBannerColor: 'rgba(62, 62, 163, 0.9)' // Banner background color (optional)
             };
             
             if (typeof BlacksmithUtils !== 'undefined') {

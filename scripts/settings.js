@@ -147,7 +147,7 @@ export const registerSettings = () => {
 	game.settings.register(MODULE.ID, "drawing.hotkeyEnabled", {
 		name: MODULE.ID + ".drawing.hotkeyEnabled-Label",
 		hint: MODULE.ID + ".drawing.hotkeyEnabled-Hint",
-		scope: "client",
+		scope: "user",
 		config: true,
 		type: Boolean,
 		default: true
@@ -156,7 +156,7 @@ export const registerSettings = () => {
 	  game.settings.register(MODULE.ID, "drawing.hotkeyMode", {
 		name: MODULE.ID + ".drawing.hotkeyMode-Label",
 		hint: MODULE.ID + ".drawing.hotkeyMode-Hint",
-		scope: "client",
+		scope: "user",
 		config: true,
 		type: String,
 		choices: {
@@ -169,7 +169,7 @@ export const registerSettings = () => {
 	  game.settings.register(MODULE.ID, "drawing.blockWhenTyping", {
 		name: MODULE.ID + ".drawing.blockWhenTyping-Label",
 		hint: MODULE.ID + ".drawing.blockWhenTyping-Hint",
-		scope: "client",
+		scope: "user",
 		config: true,
 		type: Boolean,
 		default: true
@@ -198,15 +198,16 @@ export const registerSettings = () => {
 
 
     // --------------------------------------
-	// -- HIDDEN CLIENT-SCOPE SETTINGS (Toolbar State)
+	// -- HIDDEN USER-SCOPE SETTINGS (Toolbar State)
 	// --------------------------------------
 	// These settings persist the user's toolbar selections but are hidden from the settings UI
+	// Using "user" scope so preferences follow the user across devices
 	
 	// Drawing mode selection (mode group)
 	game.settings.register(MODULE.ID, 'toolbar.drawingMode', {
 		name: '', // Hidden setting
 		hint: '',
-		scope: 'client',
+		scope: 'user',
 		config: false, // Hidden from settings UI
 		default: 'line',
 		type: String
@@ -216,7 +217,7 @@ export const registerSettings = () => {
 	game.settings.register(MODULE.ID, 'toolbar.symbolSize', {
 		name: '', // Hidden setting
 		hint: '',
-		scope: 'client',
+		scope: 'user',
 		config: false, // Hidden from settings UI
 		default: 'medium',
 		type: String
@@ -226,7 +227,7 @@ export const registerSettings = () => {
 	game.settings.register(MODULE.ID, 'toolbar.lineWidth', {
 		name: '', // Hidden setting
 		hint: '',
-		scope: 'client',
+		scope: 'user',
 		config: false, // Hidden from settings UI
 		default: 6, // Medium (6px)
 		type: Number
@@ -236,7 +237,7 @@ export const registerSettings = () => {
 	game.settings.register(MODULE.ID, 'toolbar.lineStyle', {
 		name: '', // Hidden setting
 		hint: '',
-		scope: 'client',
+		scope: 'user',
 		config: false, // Hidden from settings UI
 		default: 'solid',
 		type: String
@@ -246,7 +247,7 @@ export const registerSettings = () => {
 	game.settings.register(MODULE.ID, 'toolbar.color', {
 		name: '', // Hidden setting
 		hint: '',
-		scope: 'client',
+		scope: 'user',
 		config: false, // Hidden from settings UI
 		default: 'rgba(0, 0, 0, 1.0)', // Default to black
 		type: String
@@ -256,7 +257,7 @@ export const registerSettings = () => {
 	game.settings.register(MODULE.ID, 'toolbar.timedEraseEnabled', {
 		name: '', // Hidden setting
 		hint: '',
-		scope: 'client',
+		scope: 'user',
 		config: false, // Hidden from settings UI
 		default: false,
 		type: Boolean
