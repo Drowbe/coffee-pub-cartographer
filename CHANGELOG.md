@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [13.0.3]
 
+### Added
+- **Group Banners**: Added visual banners above toolbar button groups
+  - Enabled group banners in secondary bar configuration
+  - Custom banner background color (green theme: `rgba(33, 77, 16, 0.9)`)
+  - Banners automatically display group names for better organization
+
+### Changed
+- **Settings Scope Migration**: Migrated 9 settings from `client` scope to `user` scope for Foundry v13 compatibility
+  - Personal preferences now persist across devices per user
+  - Migrated settings: `drawing.hotkeyEnabled`, `drawing.hotkeyMode`, `drawing.blockWhenTyping`
+  - Migrated toolbar state settings: `toolbar.drawingMode`, `toolbar.symbolSize`, `toolbar.lineWidth`, `toolbar.lineStyle`, `toolbar.color`, `toolbar.timedEraseEnabled`
+  - `toolbar.height` remains `client` scope (screen-resolution dependent)
+- **Group Names**: Updated all toolbar group names to user-friendly labels
+  - `mode` → `Drawing Mode`
+  - `symbols` → `Stamp Size`
+  - `line-width` → `Line Weight`
+  - `lineStyle` → `Line Style`
+  - `color` → `Color`
+  - `erase` → `Utilities`
+  - Group names now support spaces and proper capitalization for better readability
+
+### Technical
+- Updated group definitions to use descriptive names with spaces
+- All group references updated throughout codebase (24 tool registrations)
+- Settings now use Foundry v13's new `user` scope for cross-device persistence
+- Group banners leverage Blacksmith API's `groupBannerEnabled` feature
+
 
 ## [13.0.2]
 

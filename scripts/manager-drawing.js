@@ -264,7 +264,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._modeButtons.line, {
                 icon: "fa-solid fa-pen",
                 tooltip: "Line Tool (hold \\ key to draw)",
-                group: "mode", // Switch group
+                group: "Drawing Mode", // Switch group
                 order: 1,
                 active: () => self.state.drawingMode === 'line',
                 onClick: () => {
@@ -276,7 +276,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._modeButtons.box, {
                 icon: "fa-solid fa-square-dashed",
                 tooltip: "Box Tool (drag to draw box)",
-                group: "mode", // Switch group
+                group: "Drawing Mode", // Switch group
                 order: 2,
                 active: () => self.state.drawingMode === 'box',
                 onClick: () => {
@@ -293,7 +293,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._modeButtons.plus, {
                 icon: "fa-solid fa-plus",
                 tooltip: "Plus Symbol (click to stamp)",
-                group: "mode", // Switch group
+                group: "Drawing Mode", // Switch group
                 order: 3,
                 active: () => self.state.drawingMode === 'plus',
                 onClick: () => {
@@ -309,7 +309,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._modeButtons.x, {
                 icon: "fa-solid fa-xmark",
                 tooltip: "X Symbol (click to stamp)",
-                group: "mode", // Switch group
+                group: "Drawing Mode", // Switch group
                 order: 4,
                 active: () => self.state.drawingMode === 'x',
                 onClick: () => {
@@ -325,7 +325,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._modeButtons.dot, {
                 icon: "fa-solid fa-circle",
                 tooltip: "Dot Symbol (click to stamp)",
-                group: "mode", // Switch group
+                group: "Drawing Mode", // Switch group
                 order: 5,
                 active: () => self.state.drawingMode === 'dot',
                 onClick: () => {
@@ -341,7 +341,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._modeButtons.arrow, {
                 icon: "fa-solid fa-arrow-right",
                 tooltip: "Arrow Right Symbol (click to stamp)",
-                group: "mode", // Switch group
+                group: "Drawing Mode", // Switch group
                 order: 6,
                 active: () => self.state.drawingMode === 'arrow',
                 onClick: () => {
@@ -357,7 +357,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._modeButtons.arrowUp, {
                 icon: "fa-solid fa-arrow-up",
                 tooltip: "Arrow Up Symbol (click to stamp)",
-                group: "mode", // Switch group
+                group: "Drawing Mode", // Switch group
                 order: 7,
                 active: () => self.state.drawingMode === 'arrow-up',
                 onClick: () => {
@@ -373,7 +373,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._modeButtons.arrowDown, {
                 icon: "fa-solid fa-arrow-down",
                 tooltip: "Arrow Down Symbol (click to stamp)",
-                group: "mode", // Switch group
+                group: "Drawing Mode", // Switch group
                 order: 8,
                 active: () => self.state.drawingMode === 'arrow-down',
                 onClick: () => {
@@ -389,7 +389,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._modeButtons.arrowLeft, {
                 icon: "fa-solid fa-arrow-left",
                 tooltip: "Arrow Left Symbol (click to stamp)",
-                group: "mode", // Switch group
+                group: "Drawing Mode", // Switch group
                 order: 9,
                 active: () => self.state.drawingMode === 'arrow-left',
                 onClick: () => {
@@ -405,7 +405,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._modeButtons.square, {
                 icon: "fa-solid fa-square",
                 tooltip: "Rounded Square Symbol (click to stamp)",
-                group: "mode", // Switch group
+                group: "Drawing Mode", // Switch group
                 order: 10,
                 active: () => self.state.drawingMode === 'square',
                 onClick: () => {
@@ -434,7 +434,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._lineStyleButtons.solid, {
                 icon: "fa-solid fa-pipe",
                 tooltip: "Solid line style",
-                group: "lineStyle", // Switch group
+                group: "Line Style", // Switch group
                 order: 1,
                 active: () => self.state.lineStyle === 'solid',
                 onClick: () => {
@@ -448,7 +448,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._lineStyleButtons.dotted, {
                 icon: "fa-solid fa-ellipsis-vertical",
                 tooltip: "Dotted line style",
-                group: "lineStyle", // Switch group
+                group: "Line Style", // Switch group
                 order: 2,
                 active: () => self.state.lineStyle === 'dotted',
                 onClick: () => {
@@ -462,7 +462,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._lineStyleButtons.dashed, {
                 icon: "fa-sharp fa-solid fa-ellipsis-vertical",
                 tooltip: "Dashed line style",
-                group: "lineStyle", // Switch group
+                group: "Line Style", // Switch group
                 order: 3,
                 active: () => self.state.lineStyle === 'dashed',
                 onClick: () => {
@@ -487,7 +487,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._symbolSizeButtons.small, {
                 icon: "fa-solid fa-circle-s",
                 tooltip: "Small symbol size",
-                group: "symbols", // Switch group
+                group: "Stamp Size", // Switch group
                 order: 1,
                 active: () => self.state.symbolSize === 'small',
                 onClick: () => {
@@ -499,7 +499,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._symbolSizeButtons.medium, {
                 icon: "fa-solid fa-circle-m",
                 tooltip: "Medium symbol size",
-                group: "symbols", // Switch group
+                group: "Stamp Size", // Switch group
                 order: 2,
                 active: () => self.state.symbolSize === 'medium',
                 onClick: () => {
@@ -511,7 +511,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._symbolSizeButtons.large, {
                 icon: "fa-solid fa-circle-l",
                 tooltip: "Large symbol size",
-                group: "symbols", // Switch group
+                group: "Stamp Size", // Switch group
                 order: 3,
                 active: () => self.state.symbolSize === 'large',
                 onClick: () => {
@@ -528,7 +528,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(`${MODULE.ID}-clear`, {
                 icon: "fa-solid fa-eraser",
                 tooltip: "Clear your temporary drawings",
-                group: "erase", // Erase group
+                group: "Utilities", // Utilities group
                 order: 1,
                 buttonColor: "rgba(161, 60, 41, 0.2)", // Red tint for destructive action
                 onClick: () => {
@@ -543,7 +543,7 @@ class DrawingTool {
                 cartographerToolbar.registerTool(`${MODULE.ID}-clear-all`, {
                     icon: "fa-solid fa-trash-can",
                     tooltip: "Clear all temporary drawings (GM only)",
-                    group: "erase", // Erase group
+                    group: "Utilities", // Utilities group
                     order: 0, // Show before the regular clear button
                     buttonColor: "rgba(200, 40, 20, 0.3)", // Darker red for more destructive action
                     onClick: () => {
@@ -558,7 +558,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(`${MODULE.ID}-undo`, {
                 icon: "fa-solid fa-undo",
                 tooltip: "Undo last drawing",
-                group: "erase", // Erase group
+                group: "Utilities", // Utilities group
                 order: 2,
                 onClick: () => {
                     self.undoLastDrawing();
@@ -571,7 +571,7 @@ class DrawingTool {
                 tooltip: game.user.isGM
                     ? "Toggle timed erase (all drawings auto-delete after timeout)"
                     : "Toggle timed erase (your drawings auto-delete after timeout)",
-                group: "erase", // Erase group
+                group: "Utilities", // Utilities group
                 order: 3,
                 toggleable: true, // Makes it a toggle button
                 active: () => self.state.timedEraseEnabled,
@@ -617,7 +617,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._lineWidthButtons.thin, {
                 icon: "fa-solid fa-minus",
                 tooltip: "Thin line (3px)",
-                group: "line-width", // Switch group
+                group: "Line Weight", // Switch group
                 order: 1,
                 active: () => self.state.brushSettings.size === 3,
                 onClick: () => {
@@ -631,7 +631,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._lineWidthButtons.medium, {
                 icon: "fa-solid fa-grip-lines",
                 tooltip: "Medium line (6px)",
-                group: "line-width", // Switch group
+                group: "Line Weight", // Switch group
                 order: 2,
                 active: () => self.state.brushSettings.size === 6,
                 onClick: () => {
@@ -645,7 +645,7 @@ class DrawingTool {
             cartographerToolbar.registerTool(self._lineWidthButtons.thick, {
                 icon: "fa-solid fa-bars",
                 tooltip: "Thick line (12px)",
-                group: "line-width", // Switch group
+                group: "Line Weight", // Switch group
                 order: 3,
                 active: () => self.state.brushSettings.size === 12,
                 onClick: () => {
@@ -737,7 +737,7 @@ class DrawingTool {
                 cartographerToolbar.registerTool(self._colorButtons[colorKey], {
                     icon: colorData.icon,
                     tooltip: `${colorData.name} color`,
-                    group: "color", // Switch group
+                    group: "Color", // Switch group
                     order: index + 1, // Player color is first (order: 1)
                     iconColor: iconColorHex, // Icon color using color variable (converted to hex)
                     active: () => self.state.brushSettings.color === colorData.rgba,

@@ -71,34 +71,34 @@ class CartographerToolbar {
                 height: toolbarHeight, // Height of the secondary bar in pixels (from settings)
                 persistence: "manual", // manual = stays open until closed, auto = closes after delay
                 groups: {
-                    'mode': {
+                    'Drawing Mode': {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 5 // Order for the group (first group)
                     },
-                    'symbols': {
+                    'Stamp Size': {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 7 // Order for the group (between mode and line-width)
                     },
-                    'line-width': {
+                    'Line Weight': {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 10 // Order for the group
                     },
-                    'lineStyle': {
+                    'Line Style': {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 12 // Order for the group (between line-width and color)
                     },
-                    'color': {
+                    'Color': {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 15 // Order for the group
                     },
-                    'erase': {
+                    'Utilities': {
                         mode: 'default', // Independent buttons (supports toggleable)
                         order: 20 // Order for the group
                     }
                     // 'default' group is automatically created for items without a group
                 },
                 groupBannerEnabled: true, // Enable group banners (uses group keys as labels)
-                groupBannerColor: 'rgba(62, 62, 163, 0.9)' // Banner background color (optional)
+                groupBannerColor: 'rgba(33, 77, 16, 0.9)' // Banner background color (optional)
             };
             
             if (typeof BlacksmithUtils !== 'undefined') {
