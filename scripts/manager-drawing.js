@@ -37,7 +37,7 @@ class DrawingTool {
         // Drawing state
         this.state = {
             active: false,
-            drawingMode: 'line', // 'line', 'box', 'stamp'
+            drawingMode: 'sketch', // 'sketch' (freehand), 'line' (straight segment), 'box', 'ellipse', 'stamp'
             stampStyle: 'plus', // 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square' - used when mode is stamp
             symbolSize: 'medium', // 'small', 'medium', 'large' - controls square bounding box size
             lineStyle: 'solid', // 'solid', 'dotted', 'dashed'
@@ -53,7 +53,8 @@ class DrawingTool {
             drawingStartPoint: null,
             boxStartPoint: null, // For box mode: upper left corner
             ellipseStartPoint: null, // For ellipse mode: upper left of bounding box
-            lastMousePosition: null // Last mouse position in world coordinates (for box/ellipse finishing)
+            lineStartPoint: null, // For line tool: start of straight segment
+            lastMousePosition: null // Last mouse position (for box/ellipse/line finishing)
         };
         
         // Hook IDs for cleanup
@@ -92,9 +93,13 @@ class DrawingTool {
         const savedLineStyle = game.settings.get(MODULE.ID, 'toolbar.lineStyle');
         const savedColor = game.settings.get(MODULE.ID, 'toolbar.color');
         
-        // Apply saved selections if valid; migrate legacy symbol modes to stamp + stampStyle
+        // Apply saved selections if valid; migrate legacy 'line' (freehand) to 'sketch'
         const symbolTypes = ['plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'];
-        if (['line', 'box', 'ellipse', 'stamp'].includes(savedDrawingMode)) {
+        if (savedDrawingMode === 'line') {
+            // Legacy: 'line' was freehand – treat as sketch
+            this.state.drawingMode = 'sketch';
+            game.settings.set(MODULE.ID, 'toolbar.drawingMode', 'sketch');
+        } else if (['sketch', 'line', 'box', 'ellipse', 'stamp'].includes(savedDrawingMode)) {
             this.state.drawingMode = savedDrawingMode;
         } else if (symbolTypes.includes(savedDrawingMode)) {
             this.state.drawingMode = 'stamp';
@@ -258,23 +263,37 @@ class DrawingTool {
             
             const self = this;
             
-            // Register Drawing Mode buttons (Line, Box, Ellipse, Stamp)
+            // Register Drawing Mode buttons (Sketch, Line, Box, Ellipse, Stamp)
             self._modeButtons = {
+                sketch: `${MODULE.ID}-mode-sketch`,
                 line: `${MODULE.ID}-mode-line`,
                 box: `${MODULE.ID}-mode-box`,
                 ellipse: `${MODULE.ID}-mode-ellipse`,
                 stamp: `${MODULE.ID}-mode-stamp`
             };
             
-            cartographerToolbar.registerTool(self._modeButtons.line, {
+            cartographerToolbar.registerTool(self._modeButtons.sketch, {
                 icon: "fa-solid fa-pen",
-                tooltip: "Line Tool",
+                tooltip: "Sketch",
                 group: "Drawing Mode",
                 order: 1,
+                active: () => self.state.drawingMode === 'sketch',
+                onClick: () => {
+                    self.setDrawingMode('sketch');
+                    self.updateModeButtons();
+                }
+            });
+
+            cartographerToolbar.registerTool(self._modeButtons.line, {
+                icon: "fa-solid fa-slash-forward",
+                tooltip: "Line Tool",
+                group: "Drawing Mode",
+                order: 2,
                 active: () => self.state.drawingMode === 'line',
                 onClick: () => {
                     self.setDrawingMode('line');
                     self.updateModeButtons();
+                    if (!self.state.active) self.activate();
                 }
             });
             
@@ -282,7 +301,7 @@ class DrawingTool {
                 icon: "fa-regular fa-square",
                 tooltip: "Box Tool",
                 group: "Drawing Mode",
-                order: 2,
+                order: 3,
                 active: () => self.state.drawingMode === 'box',
                 onClick: () => {
                     self.setDrawingMode('box');
@@ -295,7 +314,7 @@ class DrawingTool {
                 icon: "fa-regular fa-circle",
                 tooltip: "Ellipse Tool",
                 group: "Drawing Mode",
-                order: 3,
+                order: 4,
                 active: () => self.state.drawingMode === 'ellipse',
                 onClick: () => {
                     self.setDrawingMode('ellipse');
@@ -308,7 +327,7 @@ class DrawingTool {
                 icon: "fa-solid fa-stamp",
                 tooltip: "Stamp Tool",
                 group: "Drawing Mode",
-                order: 4,
+                order: 5,
                 active: () => self.state.drawingMode === 'stamp',
                 onClick: () => {
                     self.setDrawingMode('stamp');
@@ -734,8 +753,10 @@ class DrawingTool {
                 this.finishBoxDrawing(null);
             } else if (this.state.drawingMode === 'ellipse') {
                 this.finishEllipseDrawing(null);
+            } else if (this.state.drawingMode === 'line') {
+                this.finishLineDrawing(null);
             } else {
-                // For line mode, get current mouse position
+                // Sketch: get current mouse position
                 const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
                 if (mouse) {
                     const rect = canvas.app.view.getBoundingClientRect();
@@ -770,8 +791,10 @@ class DrawingTool {
                     this.finishBoxDrawing(null);
                 } else if (this.state.drawingMode === 'ellipse') {
                     this.finishEllipseDrawing(null);
+                } else if (this.state.drawingMode === 'line') {
+                    this.finishLineDrawing(null);
                 } else {
-                    // For line mode, get current mouse position
+                    // Sketch: get current mouse position
                     const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
                     if (mouse) {
                         const rect = canvas.app.view.getBoundingClientRect();
@@ -1430,8 +1453,8 @@ class DrawingTool {
                 return false;
             }
             
-            // Line mode: ignore mouse clicks (line drawing starts on mouse move, not on click)
-            if (self.state.drawingMode === 'line') {
+            // Sketch/line/box/ellipse: ignore mouse clicks (start on first move; line/box/ellipse finish on key release)
+            if (['sketch', 'line', 'box', 'ellipse'].includes(self.state.drawingMode)) {
                 event.preventDefault();
                 event.stopPropagation();
                 return false;
@@ -1447,14 +1470,19 @@ class DrawingTool {
             // For hold mode: require _keyDown to be true
             // For toggle mode: _keyDown remains true while active, so this check still works
             if (self._keyDown) {
-                if (self.state.drawingMode === 'line') {
-                    // Line mode: start/continue drawing on mouse move
+                if (self.state.drawingMode === 'sketch') {
+                    // Sketch: start/continue freehand on mouse move
                     if (!self.state.isDrawing) {
-                        // Start drawing on first mouse move
                         self.startDrawing(event);
                     } else {
-                        // Continue drawing
                         self.updateDrawing(event);
+                    }
+                } else if (self.state.drawingMode === 'line') {
+                    // Line tool: start/update straight segment on mouse move
+                    if (!self.state.isDrawing) {
+                        self.startLineDrawing(event);
+                    } else {
+                        self.updateLinePreview(event);
                     }
                 } else if (self.state.drawingMode === 'box') {
                     // Box mode: start/update box drawing on mouse move
@@ -1486,15 +1514,14 @@ class DrawingTool {
                 return false;
             }
             
-            // Box/ellipse mode: ignore mouse up (drawing finishes when key is released/toggled off)
-            if (self.state.drawingMode === 'box' || self.state.drawingMode === 'ellipse') {
+            // Line/box/ellipse: ignore mouse up (drawing finishes when key is released/toggled off)
+            if (self.state.drawingMode === 'line' || self.state.drawingMode === 'box' || self.state.drawingMode === 'ellipse') {
                 event.preventDefault();
                 event.stopPropagation();
                 return false;
             }
             
-            // Only finish on mouse up if NOT using key-based activation (hold/toggle mode)
-            // Key-based modes finish when key is released/toggled off, not on mouse up
+            // Sketch: finish on mouse up when not using key-based activation
             if (self.state.isDrawing && !self._keyDown) {
                 self.finishDrawing(event);
             }
@@ -1729,6 +1756,47 @@ class DrawingTool {
     }
     
     /**
+     * Start line drawing (set start point of straight segment)
+     * @param {PointerEvent} event - Pointer event
+     */
+    startLineDrawing(event) {
+        if (!canvas || !canvas.scene || !this.services?.canvasLayer) return;
+        const worldCoords = this.getWorldCoordinates(event);
+        if (!worldCoords) return;
+        this.state.isDrawing = true;
+        this.state.lineStartPoint = { x: worldCoords.x, y: worldCoords.y };
+        this._previewGraphics = new PIXI.Graphics();
+        this.services.canvasLayer.addChild(this._previewGraphics);
+        console.log(`${MODULE.NAME}: Line drawing started at`, worldCoords);
+    }
+    
+    /**
+     * Update line preview as mouse moves (straight segment from start to current)
+     * @param {PointerEvent} event - Pointer event
+     */
+    updateLinePreview(event) {
+        if (!canvas || !this.state.isDrawing || !this._previewGraphics || !this.services?.canvasLayer || !this.state.lineStartPoint) return;
+        const worldCoords = this.getWorldCoordinates(event);
+        if (!worldCoords) return;
+        this.state.lastMousePosition = worldCoords;
+        const startX = this.state.lineStartPoint.x;
+        const startY = this.state.lineStartPoint.y;
+        const endX = worldCoords.x;
+        const endY = worldCoords.y;
+        this._previewGraphics.clear();
+        const strokeWidth = this.state.brushSettings.size;
+        const previewColor = this.cssToPixiColor(this.state.brushSettings.color);
+        const shadowOffset = 2;
+        const shadowAlpha = 0.3;
+        const shadowColor = 0x000000;
+        const lineStyle = this.state.lineStyle || 'solid';
+        this._previewGraphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+        this._drawLineWithStyle(this._previewGraphics, [[0, 0], [endX - startX, endY - startY]], startX + shadowOffset, startY + shadowOffset, strokeWidth, shadowColor, shadowAlpha, 'solid');
+        this._previewGraphics.lineStyle(strokeWidth, previewColor, 1.0);
+        this._drawLineWithStyle(this._previewGraphics, [[0, 0], [endX - startX, endY - startY]], startX, startY, strokeWidth, previewColor, 1.0, lineStyle);
+    }
+    
+    /**
      * Update box preview as mouse moves
      * @param {PointerEvent} event - Pointer event
      */
@@ -1953,6 +2021,90 @@ class DrawingTool {
             console.log(`${MODULE.NAME}: Box drawing created on canvas layer`);
         } catch (error) {
             console.error(`${MODULE.NAME}: Error creating box drawing:`, error);
+            this.cancelDrawing();
+        }
+    }
+    
+    /**
+     * Finish line drawing and create final straight segment
+     * @param {PointerEvent} event - Pointer event (null to use stored last position)
+     */
+    async finishLineDrawing(event) {
+        if (!canvas || !canvas.scene || !this.state.isDrawing || !this.state.lineStartPoint) return;
+        let worldCoords = this.state.lastMousePosition;
+        if (!worldCoords && event) worldCoords = this.getWorldCoordinates(event);
+        if (!worldCoords) {
+            const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
+            if (mouse) worldCoords = { x: mouse.x, y: mouse.y };
+        }
+        if (!worldCoords) {
+            this.cancelDrawing();
+            return;
+        }
+        try {
+            if (this._previewGraphics && this._previewGraphics.parent) {
+                this.services.canvasLayer.removeChild(this._previewGraphics);
+                this._previewGraphics.destroy();
+                this._previewGraphics = null;
+            }
+            const startX = this.state.lineStartPoint.x;
+            const startY = this.state.lineStartPoint.y;
+            const endX = worldCoords.x;
+            const endY = worldCoords.y;
+            const points = [[0, 0], [endX - startX, endY - startY]];
+            const layer = this.services.canvasLayer;
+            const graphics = new PIXI.Graphics();
+            const drawingAlpha = 1.0;
+            const drawingColor = this.cssToPixiColor(this.state.brushSettings.color);
+            const strokeWidth = this.state.brushSettings.size;
+            const shadowOffset = 2;
+            const shadowAlpha = drawingAlpha * 0.3;
+            const shadowColor = 0x000000;
+            const lineStyle = this.state.lineStyle || 'solid';
+            graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+            this._drawLineWithStyle(graphics, points, startX + shadowOffset, startY + shadowOffset, strokeWidth, shadowColor, shadowAlpha, 'solid');
+            graphics.lineStyle(strokeWidth, drawingColor, drawingAlpha);
+            this._drawLineWithStyle(graphics, points, startX, startY, strokeWidth, drawingColor, drawingAlpha, lineStyle);
+            layer.addChild(graphics);
+            if (!this._pixiDrawings) this._pixiDrawings = [];
+            const drawingId = `line-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            const drawingData = {
+                id: drawingId,
+                graphics,
+                createdAt: Date.now(),
+                expiresAt: this.getExpirationTime(),
+                userId: game.user.id,
+                userName: game.user.name,
+                startX,
+                startY,
+                points,
+                strokeWidth,
+                strokeColor: this.state.brushSettings.color,
+                lineStyle
+            };
+            this._pixiDrawings.push(drawingData);
+            this._lastDrawing = drawingData;
+            this.broadcastDrawingCreation({
+                drawingId,
+                userId: game.user.id,
+                userName: game.user.name,
+                startX,
+                startY,
+                points,
+                strokeWidth,
+                strokeColor: this.state.brushSettings.color,
+                lineStyle,
+                createdAt: drawingData.createdAt,
+                expiresAt: drawingData.expiresAt
+            });
+            this.scheduleCleanup();
+            this.state.isDrawing = false;
+            this.state.lineStartPoint = null;
+            this.state.lastMousePosition = null;
+            this.state.currentDrawing = null;
+            console.log(`${MODULE.NAME}: Line drawing created on canvas layer`);
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error creating line drawing:`, error);
             this.cancelDrawing();
         }
     }
@@ -3078,6 +3230,7 @@ class DrawingTool {
         this.state.drawingStartPoint = null;
         this.state.boxStartPoint = null;
         this.state.ellipseStartPoint = null;
+        this.state.lineStartPoint = null;
         this.state.lastMousePosition = null;
         this.state.currentDrawing = null;
     }
@@ -3141,7 +3294,7 @@ class DrawingTool {
      * @param {string} mode - Drawing mode: 'line', 'box', 'stamp'
      */
     setDrawingMode(mode) {
-        if (['line', 'box', 'ellipse', 'stamp'].includes(mode)) {
+        if (['sketch', 'line', 'box', 'ellipse', 'stamp'].includes(mode)) {
             this.state.drawingMode = mode;
             game.settings.set(MODULE.ID, 'toolbar.drawingMode', mode);
         }
@@ -3180,7 +3333,7 @@ class DrawingTool {
             if (!blacksmithModule?.api?.updateSecondaryBarItemActive || !this._modeButtons) return;
             const barTypeId = MODULE.ID;
             const currentMode = this.state.drawingMode;
-            ['line', 'box', 'ellipse', 'stamp'].forEach(mode => {
+            ['sketch', 'line', 'box', 'ellipse', 'stamp'].forEach(mode => {
                 if (this._modeButtons[mode]) {
                     blacksmithModule.api.updateSecondaryBarItemActive(
                         barTypeId,

@@ -8,30 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [13.0.4]
 
 ### Added
-- **Stamp Style group**: New toolbar group separating “which stamp shape” from “stamp mode”
-  - **Drawing Mode** (Line, Box, **Stamp**): Chooses tool — Line, Box, or Stamp
-  - **Stamp Style** (Plus, X, Dot, Arrow Right/Up/Down/Left, Rounded Square): Chooses stamp shape when Stamp is selected; behaves like Color, Line Style, and Line Weight (click to set option only, does not change mode or activate tool)
-  - **Stamp** button in Drawing Mode: When selected, uses the currently selected Stamp Style for stamping on click
-- **toolbar.stampStyle** setting (user scope, hidden): Persists selected stamp shape; legacy symbol modes (e.g. Plus, X) are migrated to `drawingMode: stamp` + `stampStyle: <shape>`
+- **Sketch**: Freehand drawing mode (renamed from the former “Line Tool”). First button in Drawing Mode.
+- **Line Tool**: New straight-line mode. Draws a single segment from start point to end point (same interaction as Box/Ellipse: start on first move, finish on key release). Uses `fa-solid fa-slash-forward` icon.
+- **Ellipse Tool**: New shape mode. Draws ellipses in a bounding box (start → end), with solid/dotted/dashed styles and sync. Uses `fa-regular fa-circle` icon.
+- **Stamp Style group**: Toolbar group for “which stamp shape” when Stamp is selected
+  - **Drawing Mode** (Sketch, Line, Box, Ellipse, Stamp): Chooses tool
+  - **Stamp Style** (Plus, X, Dot, Arrow Right/Up/Down/Left, Rounded Square): Chooses stamp shape; behaves like Color / Line Style / Line Weight (option only, does not change mode)
+  - **Stamp** button: When selected, uses the current Stamp Style for stamping on click
+- **toolbar.stampStyle** setting (user scope, hidden): Persists selected stamp shape; legacy symbol modes are migrated to `drawingMode: stamp` + `stampStyle: <shape>`
 
 ### Changed
-- **Drawing Mode**: Now only Line, Box, and Stamp (symbol types moved into Stamp Style)
-  - Line Tool, Box Tool, Stamp Tool in Drawing Mode
-  - Stamp Style group contains Plus, X, Dot, Arrow Right/Up/Down/Left, Rounded Square
-- **Tooltips**: Removed hotkey references from tooltips (e.g. “hold \\ key”) so text stays correct when the hotkey is reconfigured in Foundry
-- **Early-Exit When No Drawings**: Cartographer now skips work when there is nothing to clear or broadcast
+- **Drawing Mode** order and tools: **Sketch** (1), **Line Tool** (2), **Box** (3), **Ellipse** (4), **Stamp** (5)
+  - Legacy freehand “Line” is now **Sketch**; saved `'line'` is migrated to `'sketch'`
+  - **Box** icon: `fa-regular fa-square`
+  - **Ellipse** icon: `fa-regular fa-circle`
+- **Tooltips**: Removed hotkey text from tooltips so they stay correct when the hotkey is reconfigured in Foundry
+- **Early-Exit When No Drawings**: Cartographer skips work when there is nothing to clear or broadcast
   - **updateScene hook**: Clears and broadcasts only when the canvas has Cartographer drawings; no-op when empty
-  - **clearAllDrawings()**: Returns immediately when the drawing list is empty (no broadcast, no console log)
-  - **clearUserDrawings()**: Returns when empty; broadcasts and logs only when something was actually removed
-  - **cleanupExpiredDrawings()**: Skips the expiry pass when there are no drawings
-  - **cleanupPlayerDrawings()**: Skips cleanup when there are no drawings (e.g. on player disconnect)
-- Reduces console and socket traffic when another module fires scene-update hooks frequently and the canvas has no Cartographer drawings
+  - **clearAllDrawings()**, **clearUserDrawings()**, **cleanupExpiredDrawings()**, **cleanupPlayerDrawings()**: Early return when there are no drawings (no broadcast, no log where applicable)
+- Reduces console and socket traffic when another module fires scene-update hooks often and the canvas has no Cartographer drawings
+- **toolbar.drawingMode** default set to `'sketch'`
 
 ### Technical
-- Drawing mode state: `drawingMode` is `'line' | 'box' | 'stamp'`; `stampStyle` holds the stamp shape when in stamp mode
-- Added `setStampStyle()`, `updateStampStyleButtons()`, and Stamp Style group (order 6) in secondary bar config
-- Added `_pixiDrawings.length === 0` / `?.length` guards before clear, broadcast, and log paths in drawing manager
-- Helps avoid contribution to log spam (e.g. 49k+ messages) when updateScene is fired repeatedly by other modules
+- Drawing mode: `drawingMode` is `'sketch' | 'line' | 'box' | 'ellipse' | 'stamp'`; `stampStyle` is used when mode is `'stamp'`
+- Added `setStampStyle()`, `updateStampStyleButtons()`, Stamp Style group (order 6)
+- Line tool: `startLineDrawing`, `updateLinePreview`, `finishLineDrawing`, `lineStartPoint`; reuses line broadcast/`createRemoteLine`
+- Ellipse: `startEllipseDrawing`, `updateEllipsePreview`, `finishEllipseDrawing`, `_drawEllipseWithStyle`, `createRemoteEllipse`
+- `_pixiDrawings.length === 0` / `?.length` guards to avoid log spam when updateScene is fired repeatedly
 
 ## [13.0.3]
 

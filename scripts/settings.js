@@ -203,13 +203,13 @@ export const registerSettings = () => {
 	// These settings persist the user's toolbar selections but are hidden from the settings UI
 	// Using "user" scope so preferences follow the user across devices
 	
-	// Drawing mode selection (Drawing Mode group: line, box, stamp)
+	// Drawing mode selection (Drawing Mode group: sketch, line, box, ellipse, stamp)
 	game.settings.register(MODULE.ID, 'toolbar.drawingMode', {
 		name: '', // Hidden setting
 		hint: '',
 		scope: 'user',
 		config: false, // Hidden from settings UI
-		default: 'line',
+		default: 'sketch',
 		type: String
 	});
 
