@@ -188,9 +188,9 @@ class DrawingTool {
      * Cleanup when module unloads
      */
     cleanup() {
-        // Deactivate if active
+        // Deactivate if active (keyBased=true for teardown: no extra log, full handler/preview teardown)
         if (this.state.active) {
-            this.deactivate();
+            this.deactivate(true);
         }
         
         // Detach canvas handlers

@@ -23,6 +23,11 @@ import { BlacksmithAPI } from '/modules/coffee-pub-blacksmith/api/blacksmith-api
  * Register Foundry keybinding for draw hotkey functionality
  * This must happen during 'init' hook, not 'ready'
  */
+// Run drawing tool cleanup when canvas is torn down (e.g. module disabled, world reload)
+Hooks.on('canvasTearDown', () => {
+    drawingTool.cleanup();
+});
+
 Hooks.once('init', () => {
     game.keybindings.register(MODULE.ID, 'drawHotkey', {
         name: 'Cartographer: Draw Hotkey',
