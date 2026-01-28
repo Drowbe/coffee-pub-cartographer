@@ -75,6 +75,10 @@ class CartographerToolbar {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 5 // Order for the group (first group)
                     },
+                    'Stamp Style': {
+                        mode: 'switch', // Radio-button behavior: which stamp shape when Stamp tool is selected
+                        order: 6 // Order for the group (between Drawing Mode and Stamp Size)
+                    },
                     'Stamp Size': {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 7 // Order for the group (between mode and line-width)

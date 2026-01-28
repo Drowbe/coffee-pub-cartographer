@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [13.0.4]
+
+### Added
+- **Stamp Style group**: New toolbar group separating “which stamp shape” from “stamp mode”
+  - **Drawing Mode** (Line, Box, **Stamp**): Chooses tool — Line, Box, or Stamp
+  - **Stamp Style** (Plus, X, Dot, Arrow Right/Up/Down/Left, Rounded Square): Chooses stamp shape when Stamp is selected; behaves like Color, Line Style, and Line Weight (click to set option only, does not change mode or activate tool)
+  - **Stamp** button in Drawing Mode: When selected, uses the currently selected Stamp Style for stamping on click
+- **toolbar.stampStyle** setting (user scope, hidden): Persists selected stamp shape; legacy symbol modes (e.g. Plus, X) are migrated to `drawingMode: stamp` + `stampStyle: <shape>`
+
+### Changed
+- **Drawing Mode**: Now only Line, Box, and Stamp (symbol types moved into Stamp Style)
+  - Line Tool, Box Tool, Stamp Tool in Drawing Mode
+  - Stamp Style group contains Plus, X, Dot, Arrow Right/Up/Down/Left, Rounded Square
+- **Tooltips**: Removed hotkey references from tooltips (e.g. “hold \\ key”) so text stays correct when the hotkey is reconfigured in Foundry
+- **Early-Exit When No Drawings**: Cartographer now skips work when there is nothing to clear or broadcast
+  - **updateScene hook**: Clears and broadcasts only when the canvas has Cartographer drawings; no-op when empty
+  - **clearAllDrawings()**: Returns immediately when the drawing list is empty (no broadcast, no console log)
+  - **clearUserDrawings()**: Returns when empty; broadcasts and logs only when something was actually removed
+  - **cleanupExpiredDrawings()**: Skips the expiry pass when there are no drawings
+  - **cleanupPlayerDrawings()**: Skips cleanup when there are no drawings (e.g. on player disconnect)
+- Reduces console and socket traffic when another module fires scene-update hooks frequently and the canvas has no Cartographer drawings
+
+### Technical
+- Drawing mode state: `drawingMode` is `'line' | 'box' | 'stamp'`; `stampStyle` holds the stamp shape when in stamp mode
+- Added `setStampStyle()`, `updateStampStyleButtons()`, and Stamp Style group (order 6) in secondary bar config
+- Added `_pixiDrawings.length === 0` / `?.length` guards before clear, broadcast, and log paths in drawing manager
+- Helps avoid contribution to log spam (e.g. 49k+ messages) when updateScene is fired repeatedly by other modules
+
 ## [13.0.3]
 
 ### Added

@@ -203,13 +203,23 @@ export const registerSettings = () => {
 	// These settings persist the user's toolbar selections but are hidden from the settings UI
 	// Using "user" scope so preferences follow the user across devices
 	
-	// Drawing mode selection (mode group)
+	// Drawing mode selection (Drawing Mode group: line, box, stamp)
 	game.settings.register(MODULE.ID, 'toolbar.drawingMode', {
 		name: '', // Hidden setting
 		hint: '',
 		scope: 'user',
 		config: false, // Hidden from settings UI
 		default: 'line',
+		type: String
+	});
+
+	// Stamp style selection (Stamp Style group: plus, x, dot, arrow, etc.)
+	game.settings.register(MODULE.ID, 'toolbar.stampStyle', {
+		name: '', // Hidden setting
+		hint: '',
+		scope: 'user',
+		config: false, // Hidden from settings UI
+		default: 'plus',
 		type: String
 	});
 	

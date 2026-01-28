@@ -37,7 +37,8 @@ class DrawingTool {
         // Drawing state
         this.state = {
             active: false,
-            drawingMode: 'line', // 'line', 'plus', 'x', 'dot', 'arrow', 'square', 'box'
+            drawingMode: 'line', // 'line', 'box', 'stamp'
+            stampStyle: 'plus', // 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square' - used when mode is stamp
             symbolSize: 'medium', // 'small', 'medium', 'large' - controls square bounding box size
             lineStyle: 'solid', // 'solid', 'dotted', 'dashed'
             brushSettings: {
@@ -82,16 +83,26 @@ class DrawingTool {
     async initialize(services) {
         this.services = services;
         
-        // Load saved toolbar selections from client-scope settings
+        // Load saved toolbar selections from user-scope settings
         const savedDrawingMode = game.settings.get(MODULE.ID, 'toolbar.drawingMode');
+        const savedStampStyle = game.settings.get(MODULE.ID, 'toolbar.stampStyle');
         const savedSymbolSize = game.settings.get(MODULE.ID, 'toolbar.symbolSize');
         const savedLineWidth = game.settings.get(MODULE.ID, 'toolbar.lineWidth');
         const savedLineStyle = game.settings.get(MODULE.ID, 'toolbar.lineStyle');
         const savedColor = game.settings.get(MODULE.ID, 'toolbar.color');
         
-        // Apply saved selections if valid, otherwise use defaults
-        if (['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square', 'box'].includes(savedDrawingMode)) {
+        // Apply saved selections if valid; migrate legacy symbol modes to stamp + stampStyle
+        const symbolTypes = ['plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'];
+        if (['line', 'box', 'stamp'].includes(savedDrawingMode)) {
             this.state.drawingMode = savedDrawingMode;
+        } else if (symbolTypes.includes(savedDrawingMode)) {
+            this.state.drawingMode = 'stamp';
+            this.state.stampStyle = savedDrawingMode;
+            game.settings.set(MODULE.ID, 'toolbar.drawingMode', 'stamp');
+            game.settings.set(MODULE.ID, 'toolbar.stampStyle', savedDrawingMode);
+        }
+        if (symbolTypes.includes(savedStampStyle)) {
+            this.state.stampStyle = savedStampStyle;
         }
         if (['small', 'medium', 'large'].includes(savedSymbolSize)) {
             this.state.symbolSize = savedSymbolSize;
@@ -215,7 +226,8 @@ class DrawingTool {
             context: `${MODULE.ID}.drawing`,
             priority: 10,
             callback: () => {
-                this.clearAllDrawings();
+                // Only clear and broadcast when we actually have drawings
+                if (this._pixiDrawings?.length) this.clearAllDrawings();
             }
         });
         this.hookIds.push(sceneChangeHookId);
@@ -245,26 +257,17 @@ class DrawingTool {
             
             const self = this;
             
-            // Register mode buttons in switch group (radio-button behavior)
-            // Store references for updating active state
+            // Register Drawing Mode buttons (Line, Box, Stamp)
             self._modeButtons = {
                 line: `${MODULE.ID}-mode-line`,
                 box: `${MODULE.ID}-mode-box`,
-                plus: `${MODULE.ID}-mode-plus`,
-                x: `${MODULE.ID}-mode-x`,
-                dot: `${MODULE.ID}-mode-dot`,
-                arrow: `${MODULE.ID}-mode-arrow`,
-                arrowUp: `${MODULE.ID}-mode-arrow-up`,
-                arrowDown: `${MODULE.ID}-mode-arrow-down`,
-                arrowLeft: `${MODULE.ID}-mode-arrow-left`,
-                square: `${MODULE.ID}-mode-square`
+                stamp: `${MODULE.ID}-mode-stamp`
             };
             
-            // Register line tool button in mode group
             cartographerToolbar.registerTool(self._modeButtons.line, {
                 icon: "fa-solid fa-pen",
-                tooltip: "Line Tool (hold \\ key to draw)",
-                group: "Drawing Mode", // Switch group
+                tooltip: "Line Tool",
+                group: "Drawing Mode",
                 order: 1,
                 active: () => self.state.drawingMode === 'line',
                 onClick: () => {
@@ -275,153 +278,71 @@ class DrawingTool {
             
             cartographerToolbar.registerTool(self._modeButtons.box, {
                 icon: "fa-solid fa-square-dashed",
-                tooltip: "Box Tool (drag to draw box)",
-                group: "Drawing Mode", // Switch group
+                tooltip: "Box Tool",
+                group: "Drawing Mode",
                 order: 2,
                 active: () => self.state.drawingMode === 'box',
                 onClick: () => {
                     self.setDrawingMode('box');
                     self.updateModeButtons();
-                    // Activate drawing tool if not already active
-                    if (!self.state.active) {
-                        self.activate();
-                    }
+                    if (!self.state.active) self.activate();
                 }
             });
 
-            // Register symbol stamp buttons
-            cartographerToolbar.registerTool(self._modeButtons.plus, {
-                icon: "fa-solid fa-plus",
-                tooltip: "Plus Symbol (click to stamp)",
-                group: "Drawing Mode", // Switch group
+            cartographerToolbar.registerTool(self._modeButtons.stamp, {
+                icon: "fa-solid fa-stamp",
+                tooltip: "Stamp Tool",
+                group: "Drawing Mode",
                 order: 3,
-                active: () => self.state.drawingMode === 'plus',
+                active: () => self.state.drawingMode === 'stamp',
                 onClick: () => {
-                    self.setDrawingMode('plus');
+                    self.setDrawingMode('stamp');
                     self.updateModeButtons();
-                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
-                    if (!self.state.active) {
-                        self.activate();
-                    }
+                    self.updateStampStyleButtons();
+                    if (!self.state.active) self.activate();
                 }
             });
-            
-            cartographerToolbar.registerTool(self._modeButtons.x, {
-                icon: "fa-solid fa-xmark",
-                tooltip: "X Symbol (click to stamp)",
-                group: "Drawing Mode", // Switch group
-                order: 4,
-                active: () => self.state.drawingMode === 'x',
-                onClick: () => {
-                    self.setDrawingMode('x');
-                    self.updateModeButtons();
-                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
-                    if (!self.state.active) {
-                        self.activate();
-                    }
-                }
-            });
-            
-            cartographerToolbar.registerTool(self._modeButtons.dot, {
-                icon: "fa-solid fa-circle",
-                tooltip: "Dot Symbol (click to stamp)",
-                group: "Drawing Mode", // Switch group
-                order: 5,
-                active: () => self.state.drawingMode === 'dot',
-                onClick: () => {
-                    self.setDrawingMode('dot');
-                    self.updateModeButtons();
-                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
-                    if (!self.state.active) {
-                        self.activate();
-                    }
-                }
-            });
-            
-            cartographerToolbar.registerTool(self._modeButtons.arrow, {
-                icon: "fa-solid fa-arrow-right",
-                tooltip: "Arrow Right Symbol (click to stamp)",
-                group: "Drawing Mode", // Switch group
-                order: 6,
-                active: () => self.state.drawingMode === 'arrow',
-                onClick: () => {
-                    self.setDrawingMode('arrow');
-                    self.updateModeButtons();
-                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
-                    if (!self.state.active) {
-                        self.activate();
-                    }
-                }
-            });
-            
-            cartographerToolbar.registerTool(self._modeButtons.arrowUp, {
-                icon: "fa-solid fa-arrow-up",
-                tooltip: "Arrow Up Symbol (click to stamp)",
-                group: "Drawing Mode", // Switch group
-                order: 7,
-                active: () => self.state.drawingMode === 'arrow-up',
-                onClick: () => {
-                    self.setDrawingMode('arrow-up');
-                    self.updateModeButtons();
-                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
-                    if (!self.state.active) {
-                        self.activate();
-                    }
-                }
-            });
-            
-            cartographerToolbar.registerTool(self._modeButtons.arrowDown, {
-                icon: "fa-solid fa-arrow-down",
-                tooltip: "Arrow Down Symbol (click to stamp)",
-                group: "Drawing Mode", // Switch group
-                order: 8,
-                active: () => self.state.drawingMode === 'arrow-down',
-                onClick: () => {
-                    self.setDrawingMode('arrow-down');
-                    self.updateModeButtons();
-                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
-                    if (!self.state.active) {
-                        self.activate();
-                    }
-                }
-            });
-            
-            cartographerToolbar.registerTool(self._modeButtons.arrowLeft, {
-                icon: "fa-solid fa-arrow-left",
-                tooltip: "Arrow Left Symbol (click to stamp)",
-                group: "Drawing Mode", // Switch group
-                order: 9,
-                active: () => self.state.drawingMode === 'arrow-left',
-                onClick: () => {
-                    self.setDrawingMode('arrow-left');
-                    self.updateModeButtons();
-                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
-                    if (!self.state.active) {
-                        self.activate();
-                    }
-                }
-            });
-            
-            cartographerToolbar.registerTool(self._modeButtons.square, {
-                icon: "fa-solid fa-square",
-                tooltip: "Rounded Square Symbol (click to stamp)",
-                group: "Drawing Mode", // Switch group
-                order: 10,
-                active: () => self.state.drawingMode === 'square',
-                onClick: () => {
-                    self.setDrawingMode('square');
-                    self.updateModeButtons();
-                    // Activate drawing tool if not already active (symbols will stamp on canvas click)
-                    if (!self.state.active) {
-                        self.activate();
-                    }
-                }
-            });
-            
 
+            // Register Stamp Style buttons (which shape to use when Stamp tool is selected)
+            self._stampStyleButtons = {
+                plus: `${MODULE.ID}-stamp-style-plus`,
+                x: `${MODULE.ID}-stamp-style-x`,
+                dot: `${MODULE.ID}-stamp-style-dot`,
+                arrow: `${MODULE.ID}-stamp-style-arrow`,
+                arrowUp: `${MODULE.ID}-stamp-style-arrow-up`,
+                arrowDown: `${MODULE.ID}-stamp-style-arrow-down`,
+                arrowLeft: `${MODULE.ID}-stamp-style-arrow-left`,
+                square: `${MODULE.ID}-stamp-style-square`
+            };
+
+            const stampStyleConfig = [
+                { key: 'plus', icon: 'fa-solid fa-plus', tooltip: 'Plus', order: 1 },
+                { key: 'x', icon: 'fa-solid fa-xmark', tooltip: 'X', order: 2 },
+                { key: 'dot', icon: 'fa-solid fa-circle', tooltip: 'Dot', order: 3 },
+                { key: 'arrow', icon: 'fa-solid fa-arrow-right', tooltip: 'Arrow Right', order: 4 },
+                { key: 'arrowUp', icon: 'fa-solid fa-arrow-up', tooltip: 'Arrow Up', order: 5 },
+                { key: 'arrowDown', icon: 'fa-solid fa-arrow-down', tooltip: 'Arrow Down', order: 6 },
+                { key: 'arrowLeft', icon: 'fa-solid fa-arrow-left', tooltip: 'Arrow Left', order: 7 },
+                { key: 'square', icon: 'fa-solid fa-square', tooltip: 'Rounded Square', order: 8 }
+            ];
+            stampStyleConfig.forEach(({ key, icon, tooltip, order }) => {
+                const styleKey = key === 'arrowUp' ? 'arrow-up' : key === 'arrowDown' ? 'arrow-down' : key === 'arrowLeft' ? 'arrow-left' : key;
+                cartographerToolbar.registerTool(self._stampStyleButtons[key], {
+                    icon,
+                    tooltip,
+                    group: "Stamp Style",
+                    order,
+                    active: () => self.state.stampStyle === styleKey,
+                    onClick: () => {
+                        self.setStampStyle(styleKey);
+                        self.updateStampStyleButtons();
+                    }
+                });
+            });
             
-            // Update mode buttons to reflect the default mode (line)
+            // Update mode and stamp-style buttons to reflect current state
             self.updateModeButtons();
+            self.updateStampStyleButtons();
             
             // Register line style buttons in switch group (radio-button behavior)
             // Store references for updating active state
@@ -880,7 +801,7 @@ class DrawingTool {
      */
     updatePreviewSymbol(event) {
         if (!this.services || !this.services.canvasLayer) return;
-        if (this.state.drawingMode === 'line' || this.state.drawingMode === 'box') return; // Only for symbol modes
+        if (this.state.drawingMode !== 'stamp') return; // Only for stamp mode
         
         // Get world coordinates from event
         const rect = canvas.app.view.getBoundingClientRect();
@@ -932,7 +853,8 @@ class DrawingTool {
         const shadowAlpha = symbolAlpha * 0.3; // Shadow opacity (30% of main alpha)
         const shadowColor = 0x000000; // Black shadow
         
-        switch (this.state.drawingMode) {
+        const style = this.state.stampStyle;
+        switch (style) {
             case 'plus':
                 // Draw shadow plus
                 const plusArmLength = halfSize - padding;
@@ -1012,7 +934,7 @@ class DrawingTool {
                 
                 let previewArrowPoints, previewShadowPoints;
                 
-                if (this.state.drawingMode === 'arrow') {
+                if (style === 'arrow') {
                     // Right arrow (original)
                     const leftX = worldX - previewArrowScaledHalfSize;
                     const rightX = worldX + previewArrowScaledHalfSize;
@@ -1035,7 +957,7 @@ class DrawingTool {
                         leftX + shadowOffset, bottomY + shadowOffset,
                         rightX + shadowOffset, centerY + shadowOffset
                     ];
-                } else if (this.state.drawingMode === 'arrow-up') {
+                } else if (style === 'arrow-up') {
                     // Up arrow
                     const leftX = worldX - previewArrowScaledHalfSize;
                     const rightX = worldX + previewArrowScaledHalfSize;
@@ -1058,7 +980,7 @@ class DrawingTool {
                         rightX + shadowOffset, bottomY + shadowOffset,
                         centerX + shadowOffset, topY + shadowOffset
                     ];
-                } else if (this.state.drawingMode === 'arrow-down') {
+                } else if (style === 'arrow-down') {
                     // Down arrow
                     const leftX = worldX - previewArrowScaledHalfSize;
                     const rightX = worldX + previewArrowScaledHalfSize;
@@ -1081,7 +1003,7 @@ class DrawingTool {
                         rightX + shadowOffset, topY + shadowOffset,
                         centerX + shadowOffset, bottomY + shadowOffset
                     ];
-                } else if (this.state.drawingMode === 'arrow-left') {
+                } else if (style === 'arrow-left') {
                     // Left arrow
                     const leftX = worldX - previewArrowScaledHalfSize;
                     const rightX = worldX + previewArrowScaledHalfSize;
@@ -1290,6 +1212,7 @@ class DrawingTool {
      */
     clearAllDrawings(broadcast = true) {
         if (!this._pixiDrawings || !this.services?.canvasLayer) return;
+        if (this._pixiDrawings.length === 0) return; // nothing to clear, skip broadcast and log
         
         // Fade out all drawings
         this._pixiDrawings.forEach(drawing => {
@@ -1316,6 +1239,7 @@ class DrawingTool {
      */
     clearUserDrawings(userId = game.user.id, broadcast = true) {
         if (!this._pixiDrawings || !this.services?.canvasLayer) return 0;
+        if (this._pixiDrawings.length === 0) return 0; // nothing to clear
         
         const layer = this.services.canvasLayer;
         let removedCount = 0;
@@ -1341,12 +1265,11 @@ class DrawingTool {
             }
         }
         
-        // Broadcast deletion to other clients
-        if (broadcast) {
-            this.broadcastDrawingDeletion(false, userId);
+        // Broadcast and log only when we actually removed something
+        if (removedCount > 0) {
+            if (broadcast) this.broadcastDrawingDeletion(false, userId);
+            console.log(`${MODULE.NAME}: Cleared ${removedCount} drawing(s) for user ${userId}`);
         }
-        
-        console.log(`${MODULE.NAME}: Cleared ${removedCount} drawing(s) for user ${userId}`);
         return removedCount;
     }
     
@@ -1399,6 +1322,7 @@ class DrawingTool {
      */
     cleanupPlayerDrawings(userId) {
         if (!this._pixiDrawings || !this.services?.canvasLayer) return;
+        if (this._pixiDrawings.length === 0) return; // nothing to clean up
         
         const layer = this.services.canvasLayer;
         let removedCount = 0;
@@ -1480,16 +1404,12 @@ class DrawingTool {
                 return false;
             }
             
-            // If in symbol mode, stamp the symbol on click
-            if (self.state.drawingMode !== 'line' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
+            // If in stamp mode, stamp the selected style on click
+            if (self.state.drawingMode === 'stamp' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
                 event.stopPropagation();
-                // Use stopImmediatePropagation only when necessary to prevent conflicts
-                // This prevents other modules from interfering with symbol stamping
                 event.stopImmediatePropagation();
-                
-                // Stamp the symbol at click position
-                self.stampSymbol(self.state.drawingMode, event);
+                self.stampSymbol(self.state.stampStyle, event);
                 return false;
             }
             
@@ -1528,8 +1448,8 @@ class DrawingTool {
                         // Update box preview as mouse moves
                         self.updateBoxPreview(event);
                     }
-                } else {
-                    // Symbol modes: show preview symbol following mouse
+                } else if (self.state.drawingMode === 'stamp') {
+                    // Stamp mode: show preview symbol following mouse
                     self.updatePreviewSymbol(event);
                 }
             } else {
@@ -2872,6 +2792,7 @@ class DrawingTool {
      */
     cleanupExpiredDrawings() {
         if (!this._pixiDrawings || !this.services?.canvasLayer) return;
+        if (this._pixiDrawings.length === 0) return; // nothing to check
         
         const now = Date.now();
         const layer = this.services.canvasLayer;
@@ -2983,13 +2904,24 @@ class DrawingTool {
     
     /**
      * Set the drawing mode
-     * @param {string} mode - Drawing mode: 'line', 'plus', 'x', 'dot', 'arrow', 'square', 'box'
+     * @param {string} mode - Drawing mode: 'line', 'box', 'stamp'
      */
     setDrawingMode(mode) {
-        if (['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square', 'box'].includes(mode)) {
+        if (['line', 'box', 'stamp'].includes(mode)) {
             this.state.drawingMode = mode;
-            // Save to client-scope setting
             game.settings.set(MODULE.ID, 'toolbar.drawingMode', mode);
+        }
+    }
+
+    /**
+     * Set the stamp style (shape used when Stamp tool is selected)
+     * @param {string} style - Stamp style: 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'
+     */
+    setStampStyle(style) {
+        const valid = ['plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'];
+        if (valid.includes(style)) {
+            this.state.stampStyle = style;
+            game.settings.set(MODULE.ID, 'toolbar.stampStyle', style);
         }
     }
     
@@ -3006,47 +2938,49 @@ class DrawingTool {
     }
     
     /**
-     * Update active state of mode buttons in secondary bar
-     * Uses Blacksmith's updateSecondaryBarItemActive API
+     * Update active state of Drawing Mode buttons in secondary bar
      */
     updateModeButtons() {
         try {
             const blacksmithModule = game.modules.get('coffee-pub-blacksmith');
-            if (!blacksmithModule?.api?.updateSecondaryBarItemActive) {
-                return;
-            }
-            
+            if (!blacksmithModule?.api?.updateSecondaryBarItemActive || !this._modeButtons) return;
             const barTypeId = MODULE.ID;
             const currentMode = this.state.drawingMode;
-            
-            // Update active state for each mode button
-            if (this._modeButtons) {
-                const modes = ['line', 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square', 'box'];
-                const modeKeys = {
-                    'line': 'line',
-                    'plus': 'plus',
-                    'x': 'x',
-                    'dot': 'dot',
-                    'arrow': 'arrow',
-                    'arrow-up': 'arrowUp',
-                    'arrow-down': 'arrowDown',
-                    'arrow-left': 'arrowLeft',
-                    'square': 'square',
-                    'box': 'box'
-                };
-                modes.forEach(mode => {
-                    const buttonKey = modeKeys[mode];
-                    if (buttonKey && this._modeButtons[buttonKey]) {
-                        blacksmithModule.api.updateSecondaryBarItemActive(
-                            barTypeId,
-                            this._modeButtons[buttonKey],
-                            currentMode === mode
-                        );
-                    }
-                });
-            }
+            ['line', 'box', 'stamp'].forEach(mode => {
+                if (this._modeButtons[mode]) {
+                    blacksmithModule.api.updateSecondaryBarItemActive(
+                        barTypeId,
+                        this._modeButtons[mode],
+                        currentMode === mode
+                    );
+                }
+            });
         } catch (error) {
             console.error(`${MODULE.NAME}: Error updating mode buttons:`, error);
+        }
+    }
+
+    /**
+     * Update active state of Stamp Style buttons in secondary bar
+     */
+    updateStampStyleButtons() {
+        try {
+            const blacksmithModule = game.modules.get('coffee-pub-blacksmith');
+            if (!blacksmithModule?.api?.updateSecondaryBarItemActive || !this._stampStyleButtons) return;
+            const barTypeId = MODULE.ID;
+            const currentStyle = this.state.stampStyle;
+            const styleForButton = { plus: 'plus', x: 'x', dot: 'dot', arrow: 'arrow', arrowUp: 'arrow-up', arrowDown: 'arrow-down', arrowLeft: 'arrow-left', square: 'square' };
+            Object.keys(styleForButton).forEach(btnKey => {
+                if (this._stampStyleButtons[btnKey]) {
+                    blacksmithModule.api.updateSecondaryBarItemActive(
+                        barTypeId,
+                        this._stampStyleButtons[btnKey],
+                        currentStyle === styleForButton[btnKey]
+                    );
+                }
+            });
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error updating stamp style buttons:`, error);
         }
     }
     
