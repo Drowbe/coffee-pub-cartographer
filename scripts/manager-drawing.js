@@ -52,7 +52,8 @@ class DrawingTool {
             drawingPoints: [],
             drawingStartPoint: null,
             boxStartPoint: null, // For box mode: upper left corner
-            lastMousePosition: null // Last mouse position in world coordinates (for box finishing)
+            ellipseStartPoint: null, // For ellipse mode: upper left of bounding box
+            lastMousePosition: null // Last mouse position in world coordinates (for box/ellipse finishing)
         };
         
         // Hook IDs for cleanup
@@ -93,7 +94,7 @@ class DrawingTool {
         
         // Apply saved selections if valid; migrate legacy symbol modes to stamp + stampStyle
         const symbolTypes = ['plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'];
-        if (['line', 'box', 'stamp'].includes(savedDrawingMode)) {
+        if (['line', 'box', 'ellipse', 'stamp'].includes(savedDrawingMode)) {
             this.state.drawingMode = savedDrawingMode;
         } else if (symbolTypes.includes(savedDrawingMode)) {
             this.state.drawingMode = 'stamp';
@@ -257,10 +258,11 @@ class DrawingTool {
             
             const self = this;
             
-            // Register Drawing Mode buttons (Line, Box, Stamp)
+            // Register Drawing Mode buttons (Line, Box, Ellipse, Stamp)
             self._modeButtons = {
                 line: `${MODULE.ID}-mode-line`,
                 box: `${MODULE.ID}-mode-box`,
+                ellipse: `${MODULE.ID}-mode-ellipse`,
                 stamp: `${MODULE.ID}-mode-stamp`
             };
             
@@ -277,7 +279,7 @@ class DrawingTool {
             });
             
             cartographerToolbar.registerTool(self._modeButtons.box, {
-                icon: "fa-solid fa-square-dashed",
+                icon: "fa-regular fa-square",
                 tooltip: "Box Tool",
                 group: "Drawing Mode",
                 order: 2,
@@ -289,11 +291,24 @@ class DrawingTool {
                 }
             });
 
+            cartographerToolbar.registerTool(self._modeButtons.ellipse, {
+                icon: "fa-regular fa-circle",
+                tooltip: "Ellipse Tool",
+                group: "Drawing Mode",
+                order: 3,
+                active: () => self.state.drawingMode === 'ellipse',
+                onClick: () => {
+                    self.setDrawingMode('ellipse');
+                    self.updateModeButtons();
+                    if (!self.state.active) self.activate();
+                }
+            });
+
             cartographerToolbar.registerTool(self._modeButtons.stamp, {
                 icon: "fa-solid fa-stamp",
                 tooltip: "Stamp Tool",
                 group: "Drawing Mode",
-                order: 3,
+                order: 4,
                 active: () => self.state.drawingMode === 'stamp',
                 onClick: () => {
                     self.setDrawingMode('stamp');
@@ -715,9 +730,10 @@ class DrawingTool {
 
         // If currently drawing, finish it now
         if (this.state.isDrawing) {
-            // For box mode, use stored last mouse position (more reliable)
             if (this.state.drawingMode === 'box') {
-                this.finishBoxDrawing(null); // Pass null to use stored position
+                this.finishBoxDrawing(null);
+            } else if (this.state.drawingMode === 'ellipse') {
+                this.finishEllipseDrawing(null);
             } else {
                 // For line mode, get current mouse position
                 const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
@@ -750,9 +766,10 @@ class DrawingTool {
         if (this.state.active) {
             // Finish any in-progress drawing (equivalent to key-up in hold mode)
             if (this.state.isDrawing) {
-                // For box mode, use stored last mouse position (more reliable)
                 if (this.state.drawingMode === 'box') {
-                    this.finishBoxDrawing(null); // Pass null to use stored position
+                    this.finishBoxDrawing(null);
+                } else if (this.state.drawingMode === 'ellipse') {
+                    this.finishEllipseDrawing(null);
                 } else {
                     // For line mode, get current mouse position
                     const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
@@ -1397,8 +1414,8 @@ class DrawingTool {
                 return false;
             }
             
-            // Box mode: ignore mouse clicks (box drawing starts on mouse move, not on click)
-            if (self.state.drawingMode === 'box') {
+            // Box/ellipse mode: ignore mouse clicks (drawing starts on mouse move, not on click)
+            if (self.state.drawingMode === 'box' || self.state.drawingMode === 'ellipse') {
                 event.preventDefault();
                 event.stopPropagation();
                 return false;
@@ -1442,11 +1459,16 @@ class DrawingTool {
                 } else if (self.state.drawingMode === 'box') {
                     // Box mode: start/update box drawing on mouse move
                     if (!self.state.isDrawing) {
-                        // Start box drawing on first mouse move (set upper left corner)
                         self.startBoxDrawing(event);
                     } else {
-                        // Update box preview as mouse moves
                         self.updateBoxPreview(event);
+                    }
+                } else if (self.state.drawingMode === 'ellipse') {
+                    // Ellipse mode: start/update ellipse drawing on mouse move
+                    if (!self.state.isDrawing) {
+                        self.startEllipseDrawing(event);
+                    } else {
+                        self.updateEllipsePreview(event);
                     }
                 } else if (self.state.drawingMode === 'stamp') {
                     // Stamp mode: show preview symbol following mouse
@@ -1464,8 +1486,8 @@ class DrawingTool {
                 return false;
             }
             
-            // Box mode: ignore mouse up (box drawing finishes when key is released/toggled off)
-            if (self.state.drawingMode === 'box') {
+            // Box/ellipse mode: ignore mouse up (drawing finishes when key is released/toggled off)
+            if (self.state.drawingMode === 'box' || self.state.drawingMode === 'ellipse') {
                 event.preventDefault();
                 event.stopPropagation();
                 return false;
@@ -1936,6 +1958,175 @@ class DrawingTool {
     }
     
     /**
+     * Start ellipse drawing (set upper left of bounding box)
+     * @param {PointerEvent} event - Pointer event
+     */
+    startEllipseDrawing(event) {
+        if (!canvas || !canvas.scene || !this.services?.canvasLayer) return;
+        const worldCoords = this.getWorldCoordinates(event);
+        if (!worldCoords) return;
+        this.state.isDrawing = true;
+        this.state.ellipseStartPoint = { x: worldCoords.x, y: worldCoords.y };
+        this._previewGraphics = new PIXI.Graphics();
+        this.services.canvasLayer.addChild(this._previewGraphics);
+        console.log(`${MODULE.NAME}: Ellipse drawing started at`, worldCoords);
+    }
+    
+    /**
+     * Update ellipse preview as mouse moves
+     * @param {PointerEvent} event - Pointer event
+     */
+    updateEllipsePreview(event) {
+        if (!canvas || !this.state.isDrawing || !this._previewGraphics || !this.services?.canvasLayer || !this.state.ellipseStartPoint) return;
+        const worldCoords = this.getWorldCoordinates(event);
+        if (!worldCoords) return;
+        this.state.lastMousePosition = worldCoords;
+        const startX = this.state.ellipseStartPoint.x;
+        const startY = this.state.ellipseStartPoint.y;
+        const endX = worldCoords.x;
+        const endY = worldCoords.y;
+        const width = endX - startX;
+        const height = endY - startY;
+        this._previewGraphics.clear();
+        const previewAlpha = 1.0;
+        const previewColor = this.cssToPixiColor(this.state.brushSettings.color);
+        const shadowOffset = 2;
+        const shadowAlpha = previewAlpha * 0.3;
+        const shadowColor = 0x000000;
+        const strokeWidth = this.state.brushSettings.size;
+        const lineStyle = this.state.lineStyle || 'solid';
+        this._previewGraphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+        this._drawEllipseWithStyle(this._previewGraphics, startX + shadowOffset, startY + shadowOffset, width, height, 'solid');
+        this._previewGraphics.lineStyle(strokeWidth, previewColor, previewAlpha);
+        this._drawEllipseWithStyle(this._previewGraphics, startX, startY, width, height, lineStyle);
+    }
+    
+    /**
+     * Draw an ellipse with the specified style (solid, dotted, dashed).
+     * Uses bounding box (x, y, width, height) like box; ellipse is inscribed in that rectangle.
+     * @param {PIXI.Graphics} graphics - PIXI Graphics object
+     * @param {number} x - X of upper left of bounding box
+     * @param {number} y - Y of upper left of bounding box
+     * @param {number} width - Bounding box width
+     * @param {number} height - Bounding box height
+     * @param {string} style - Line style: 'solid', 'dotted', 'dashed'
+     */
+    _drawEllipseWithStyle(graphics, x, y, width, height, style, opts = {}) {
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
+        const halfW = Math.abs(width) / 2;
+        const halfH = Math.abs(height) / 2;
+        const strokeWidth = opts.strokeWidth ?? this.state.brushSettings.size;
+        const color = opts.strokeColor != null ? this.cssToPixiColor(opts.strokeColor) : this.cssToPixiColor(this.state.brushSettings.color);
+        const alpha = opts.alpha ?? 1.0;
+        if (style === 'solid') {
+            graphics.drawEllipse(centerX, centerY, halfW, halfH);
+        } else {
+            const segments = 48;
+            const pts = [];
+            for (let i = 0; i <= segments; i++) {
+                const t = (Math.PI * 2 * i) / segments;
+                pts.push([centerX + halfW * Math.cos(t), centerY + halfH * Math.sin(t)]);
+            }
+            for (let i = 0; i < segments; i++) {
+                const [x0, y0] = pts[i];
+                const [x1, y1] = pts[i + 1];
+                const segPoints = [[0, 0], [x1 - x0, y1 - y0]];
+                this._drawLineWithStyle(graphics, segPoints, x0, y0, strokeWidth, color, alpha, style);
+            }
+        }
+    }
+    
+    /**
+     * Finish ellipse drawing and create final ellipse
+     * @param {PointerEvent} event - Pointer event (null to use stored last position)
+     */
+    async finishEllipseDrawing(event) {
+        if (!canvas || !canvas.scene || !this.state.isDrawing || !this.state.ellipseStartPoint) return;
+        let worldCoords = this.state.lastMousePosition;
+        if (!worldCoords && event) worldCoords = this.getWorldCoordinates(event);
+        if (!worldCoords) {
+            const mouse = canvas?.app?.renderer?.plugins?.interaction?.mouse?.global;
+            if (mouse) worldCoords = { x: mouse.x, y: mouse.y };
+        }
+        if (!worldCoords) {
+            this.cancelDrawing();
+            return;
+        }
+        try {
+            if (this._previewGraphics && this._previewGraphics.parent) {
+                this.services.canvasLayer.removeChild(this._previewGraphics);
+                this._previewGraphics.destroy();
+                this._previewGraphics = null;
+            }
+            const startX = this.state.ellipseStartPoint.x;
+            const startY = this.state.ellipseStartPoint.y;
+            const endX = worldCoords.x;
+            const endY = worldCoords.y;
+            const width = endX - startX;
+            const height = endY - startY;
+            const layer = this.services.canvasLayer;
+            const graphics = new PIXI.Graphics();
+            const drawingAlpha = 1.0;
+            const drawingColor = this.cssToPixiColor(this.state.brushSettings.color);
+            const shadowOffset = 2;
+            const shadowAlpha = drawingAlpha * 0.3;
+            const shadowColor = 0x000000;
+            const strokeWidth = this.state.brushSettings.size;
+            const lineStyle = this.state.lineStyle || 'solid';
+            graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+            this._drawEllipseWithStyle(graphics, startX + shadowOffset, startY + shadowOffset, width, height, 'solid');
+            graphics.lineStyle(strokeWidth, drawingColor, drawingAlpha);
+            this._drawEllipseWithStyle(graphics, startX, startY, width, height, lineStyle);
+            layer.addChild(graphics);
+            if (!this._pixiDrawings) this._pixiDrawings = [];
+            const drawingId = `ellipse-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            const drawingData = {
+                id: drawingId,
+                graphics,
+                createdAt: Date.now(),
+                expiresAt: this.getExpirationTime(),
+                userId: game.user.id,
+                userName: game.user.name,
+                startX,
+                startY,
+                width,
+                height,
+                strokeWidth,
+                strokeColor: this.state.brushSettings.color,
+                lineStyle,
+                type: 'ellipse'
+            };
+            this._pixiDrawings.push(drawingData);
+            this._lastDrawing = drawingData;
+            this.broadcastDrawingCreation({
+                drawingId,
+                userId: game.user.id,
+                userName: game.user.name,
+                startX,
+                startY,
+                width,
+                height,
+                strokeWidth,
+                strokeColor: this.state.brushSettings.color,
+                lineStyle,
+                type: 'ellipse',
+                createdAt: drawingData.createdAt,
+                expiresAt: drawingData.expiresAt
+            });
+            this.scheduleCleanup();
+            this.state.isDrawing = false;
+            this.state.ellipseStartPoint = null;
+            this.state.lastMousePosition = null;
+            this.state.currentDrawing = null;
+            console.log(`${MODULE.NAME}: Ellipse drawing created on canvas layer`);
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Error creating ellipse drawing:`, error);
+            this.cancelDrawing();
+        }
+    }
+    
+    /**
      * Convert CSS color to PIXI color (number)
      * Supports hex (#RRGGBB) and rgba(r, g, b, a) formats
      * @param {string|number} cssColor - CSS color string or number
@@ -2334,10 +2525,11 @@ class DrawingTool {
         }
         
         try {
-            // Determine if this is a box, line, or symbol drawing
+            // Determine if this is a box, ellipse, line, or symbol drawing
             if (data.type === 'box' && data.startX !== undefined && data.width !== undefined && data.height !== undefined) {
-                // Box drawing
                 this.createRemoteBox(data);
+            } else if (data.type === 'ellipse' && data.startX !== undefined && data.width !== undefined && data.height !== undefined) {
+                this.createRemoteEllipse(data);
             } else if (data.symbolType) {
                 // Symbol drawing
                 this.createRemoteSymbol(data);
@@ -2483,6 +2675,47 @@ class DrawingTool {
         });
         
         // Schedule cleanup if needed
+        this.scheduleCleanup();
+    }
+    
+    /**
+     * Create a remote ellipse drawing
+     * NOTE: This method does NOT broadcast - it's only for rendering remote drawings
+     * @param {Object} data - Ellipse drawing data (startX, startY, width, height, strokeWidth, strokeColor, lineStyle)
+     */
+    createRemoteEllipse(data) {
+        const layer = this.services.canvasLayer;
+        const graphics = new PIXI.Graphics();
+        const drawingAlpha = 1.0;
+        const drawingColor = this.cssToPixiColor(data.strokeColor);
+        const strokeWidth = data.strokeWidth || 6;
+        const shadowOffset = 2;
+        const shadowAlpha = drawingAlpha * 0.3;
+        const shadowColor = 0x000000;
+        const lineStyle = data.lineStyle || 'solid';
+        const opts = { strokeWidth, strokeColor: data.strokeColor, alpha: drawingAlpha };
+        graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+        this._drawEllipseWithStyle(graphics, data.startX + shadowOffset, data.startY + shadowOffset, data.width, data.height, 'solid', opts);
+        graphics.lineStyle(strokeWidth, drawingColor, drawingAlpha);
+        this._drawEllipseWithStyle(graphics, data.startX, data.startY, data.width, data.height, lineStyle, opts);
+        layer.addChild(graphics);
+        if (!this._pixiDrawings) this._pixiDrawings = [];
+        this._pixiDrawings.push({
+            id: data.drawingId,
+            graphics,
+            createdAt: data.createdAt || Date.now(),
+            expiresAt: data.expiresAt || null,
+            userId: data.userId,
+            userName: data.userName || 'Unknown',
+            startX: data.startX,
+            startY: data.startY,
+            width: data.width,
+            height: data.height,
+            strokeWidth,
+            strokeColor: data.strokeColor,
+            lineStyle,
+            type: 'ellipse'
+        });
         this.scheduleCleanup();
     }
     
@@ -2844,6 +3077,7 @@ class DrawingTool {
         this.state.drawingPoints = [];
         this.state.drawingStartPoint = null;
         this.state.boxStartPoint = null;
+        this.state.ellipseStartPoint = null;
         this.state.lastMousePosition = null;
         this.state.currentDrawing = null;
     }
@@ -2907,7 +3141,7 @@ class DrawingTool {
      * @param {string} mode - Drawing mode: 'line', 'box', 'stamp'
      */
     setDrawingMode(mode) {
-        if (['line', 'box', 'stamp'].includes(mode)) {
+        if (['line', 'box', 'ellipse', 'stamp'].includes(mode)) {
             this.state.drawingMode = mode;
             game.settings.set(MODULE.ID, 'toolbar.drawingMode', mode);
         }
@@ -2946,7 +3180,7 @@ class DrawingTool {
             if (!blacksmithModule?.api?.updateSecondaryBarItemActive || !this._modeButtons) return;
             const barTypeId = MODULE.ID;
             const currentMode = this.state.drawingMode;
-            ['line', 'box', 'stamp'].forEach(mode => {
+            ['line', 'box', 'ellipse', 'stamp'].forEach(mode => {
                 if (this._modeButtons[mode]) {
                     blacksmithModule.api.updateSecondaryBarItemActive(
                         barTypeId,
