@@ -70,16 +70,31 @@ Hooks.once('init', () => {
 
 Hooks.once('ready', async () => {
     try {
+        const blacksmithMod = game.modules.get('coffee-pub-blacksmith');
+        if (blacksmithMod?.active && typeof BlacksmithAPI.waitForReady === 'function') {
+            await BlacksmithAPI.waitForReady();
+        }
+
         // Register settings FIRST during the ready phase
         registerSettings();
         
-        // Register module with Blacksmith
-        if (typeof BlacksmithModuleManager !== 'undefined') {
-            BlacksmithModuleManager.registerModule(MODULE.ID, {
-                name: MODULE.NAME,
-                version: MODULE.VERSION
-            });
-            console.log(`✅ ${MODULE.NAME}: Registered with Blacksmith successfully`);
+        // Register module with Blacksmith (module.api first; globals are wired in markReadyForConsumers)
+        if (blacksmithMod?.active) {
+            if (blacksmithMod.api?.registerModule) {
+                blacksmithMod.api.registerModule(MODULE.ID, {
+                    name: MODULE.NAME,
+                    version: MODULE.VERSION
+                });
+                console.log(`✅ ${MODULE.NAME}: Registered with Blacksmith successfully`);
+            } else if (typeof BlacksmithModuleManager?.registerModule === 'function') {
+                BlacksmithModuleManager.registerModule(MODULE.ID, {
+                    name: MODULE.NAME,
+                    version: MODULE.VERSION
+                });
+                console.log(`✅ ${MODULE.NAME}: Registered with Blacksmith successfully`);
+            } else {
+                console.warn(`⚠️ ${MODULE.NAME}: Blacksmith not available`);
+            }
         } else {
             console.warn(`⚠️ ${MODULE.NAME}: Blacksmith not available`);
         }

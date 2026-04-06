@@ -277,6 +277,15 @@ export const registerSettings = () => {
 
 
     // *** REPORT SETTINGS LOADED ***
-    BlacksmithUtils.postConsoleAndNotification(MODULE.NAME, `${MODULE.NAME}: Settings registered.`, null, false, false);
+    // Prefer module.api (available once Blacksmith assigns api); globals like BlacksmithUtils may still be null if our ready runs first.
+    const blacksmithApi = game.modules.get('coffee-pub-blacksmith')?.api;
+    const msg = `${MODULE.NAME}: Settings registered.`;
+    if (blacksmithApi?.utils?.postConsoleAndNotification) {
+        blacksmithApi.utils.postConsoleAndNotification(MODULE.NAME, msg, null, false, false);
+    } else if (typeof globalThis.BlacksmithUtils?.postConsoleAndNotification === 'function') {
+        globalThis.BlacksmithUtils.postConsoleAndNotification(MODULE.NAME, msg, null, false, false);
+    } else {
+        console.log(msg);
+    }
 };
 

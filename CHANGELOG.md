@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+
+## [13.0.5]
+
+### Fixed
+- **Blacksmith bootstrap order**: Initialization could throw `Cannot read properties of null (reading 'postConsoleAndNotification')` when Cartographer’s `ready` ran before Blacksmith wired window globals like `BlacksmithUtils`.
+  - Settings registration now prefers `game.modules.get('coffee-pub-blacksmith').api.utils.postConsoleAndNotification`, with safe fallbacks so registration never fails on that path.
+  - When Blacksmith is active, `ready` awaits `BlacksmithAPI.waitForReady()` before registering settings and registering the module with Blacksmith.
+  - Module registration uses `module.api.registerModule` first, with a fallback to `BlacksmithModuleManager` for older setups.
+
 ## [13.0.4]
 
 ### Added
