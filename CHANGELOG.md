@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## [Unreleased]
+
+### Changed
+- **Toolbar sizing**: The secondary bar now registers with Blacksmith's `size: 'default'` preset (30px) instead of a pixel `height`. Blacksmith ignores `height` and warns on it. Group banners are now additive rather than subtractive, so toolbar buttons render at full size under their banners — the old 38px was only buying banner room.
+
+### Removed
+- **`toolbar.height` setting**: Removed along with its localization strings. Under Blacksmith's scale-factor model, bar height drives every font, icon and gap in the bar, so a free-number slider was a typography control mislabelled as a height — and being client-scoped, two people at the same table saw different-sized text.
+
 ## [13.0.5]
 
 ### Fixed

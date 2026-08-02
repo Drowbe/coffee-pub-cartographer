@@ -62,13 +62,13 @@ class CartographerToolbar {
             }
             
             const barTypeId = MODULE.ID;
-            // Get toolbar height from settings (default to 38 if not set)
-            const toolbarHeight = game.settings.get(MODULE.ID, 'toolbar.height') || 38;
             const barConfig = {
                 name: "Cartographer",
                 icon: "fa-solid fa-map",
                 title: "Cartographer",
-                height: toolbarHeight, // Height of the secondary bar in pixels (from settings)
+                size: 'default', // 30px preset - matches the primary menubar. Never pass a pixel height:
+                                 // bar height is a master scale factor for every font, icon and gap inside
+                                 // the bar, and group banners are additive so they cost no button size.
                 persistence: "manual", // manual = stays open until closed, auto = closes after delay
                 groups: {
                     'Drawing Mode': {
