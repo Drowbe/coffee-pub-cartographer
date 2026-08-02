@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
-## [Unreleased]
+## [13.0.6]
 
 ### Added
 - **Toast notifications**: New `scripts/utils-toast.js` wraps Blacksmith's Toast API with a `notify(title, options)` helper — severity presets (info/warn/error) supply the accent color and default icon, and toasts are tagged with `moduleId` so Blacksmith can clear them as a group. Falls back to `ui.notifications` when Blacksmith is absent or predates the API.
