@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Toast notifications**: New `scripts/utils-toast.js` wraps Blacksmith's Toast API with a `notify(title, options)` helper — severity presets (info/warn/error) supply the accent color and default icon, and toasts are tagged with `moduleId` so Blacksmith can clear them as a group. Falls back to `ui.notifications` when Blacksmith is absent or predates the API.
+
 ### Changed
+- **User feedback now uses toasts**: All six `ui.notifications` calls (clear, clear all, undo, timed erase) replaced with Blacksmith toasts. Messages gained a subtitle carrying the detail — clears report how many drawings were removed, undo says whether another one remains — and repeat actions use `stackKey` so rapid clicks replace the toast in place instead of stacking. Clearing with nothing to clear now reports "Nothing to clear" as a warning rather than claiming a clear happened.
+- **Menubar button color**: Removed the explicit `iconColor` / `buttonNormalTint` / `buttonSelectedTint` keys from the menubar tool registration; the button takes Blacksmith's default coloring. They were already `null`, which Blacksmith coalesces to the default, so this is a code cleanup with no visual change. Group banner color and the destructive-button tints are unchanged.
 - **Toolbar sizing**: The secondary bar now registers with Blacksmith's `size: 'default'` preset (30px) instead of a pixel `height`. Blacksmith ignores `height` and warns on it. Group banners are now additive rather than subtractive, so toolbar buttons render at full size under their banners — the old 38px was only buying banner room.
 
 ### Removed

@@ -239,10 +239,9 @@ class CartographerToolbar {
                 leaderOnly: false,
                 visible: true,
                 toggleable: true,
-                active: false,
-                iconColor: null,
-                buttonNormalTint: null,
-                buttonSelectedTint: null
+                active: false
+                // No iconColor / buttonNormalTint / buttonSelectedTint: the menubar
+                // button takes Blacksmith's default coloring.
             };
             
             if (typeof BlacksmithUtils !== 'undefined') {

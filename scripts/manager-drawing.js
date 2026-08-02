@@ -4,6 +4,7 @@
 
 import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
+import { notify } from './utils-toast.js';
 
 // ================================================================== 
 // ===== DRAWING TOOL CLASS ========================================
@@ -488,8 +489,18 @@ class DrawingTool {
                 buttonColor: "rgba(161, 60, 41, 0.2)", // Red tint for destructive action
                 onClick: () => {
                     // Always clear only the current user's drawings (for both GM and players)
-                    self.clearUserDrawings(game.user.id);
-                    ui.notifications.info(`${MODULE.NAME}: Your temporary drawings cleared`);
+                    const removed = self.clearUserDrawings(game.user.id) ?? 0;
+                    notify(
+                        removed ? 'Your drawings cleared' : 'Nothing to clear',
+                        {
+                            subtitle: removed
+                                ? `${removed} temporary drawing${removed === 1 ? '' : 's'} removed`
+                                : 'You have no temporary drawings on this scene',
+                            type: removed ? 'info' : 'warn',
+                            icon: 'fa-solid fa-eraser',
+                            stackKey: `${MODULE.ID}-clear`
+                        }
+                    );
                 }
             });
             
@@ -503,8 +514,19 @@ class DrawingTool {
                     buttonColor: "rgba(200, 40, 20, 0.3)", // Darker red for more destructive action
                     onClick: () => {
                         // GM clears all drawings from all users
+                        const removed = self._pixiDrawings?.length ?? 0;
                         self.clearAllDrawings();
-                        ui.notifications.info(`${MODULE.NAME}: All temporary drawings cleared`);
+                        notify(
+                            removed ? 'All drawings cleared' : 'Nothing to clear',
+                            {
+                                subtitle: removed
+                                    ? `${removed} temporary drawing${removed === 1 ? '' : 's'} removed from every player`
+                                    : 'No temporary drawings on this scene',
+                                type: removed ? 'info' : 'warn',
+                                icon: 'fa-solid fa-trash-can',
+                                stackKey: `${MODULE.ID}-clear-all`
+                            }
+                        );
                     }
                 });
             }
@@ -555,9 +577,13 @@ class DrawingTool {
                         30
                     ) || 30;
                     const scope = game.user.isGM ? 'all drawings' : 'your drawings';
-                    ui.notifications.info(
-                        `${MODULE.NAME}: Timed erase ${status} for ${scope} (${timeout}s timeout)`
-                    );
+                    notify(`Timed erase ${status}`, {
+                        subtitle: self.state.timedEraseEnabled
+                            ? `${scope} auto-delete after ${timeout}s`
+                            : `${scope} stay until cleared`,
+                        icon: 'fa-solid fa-clock',
+                        stackKey: `${MODULE.ID}-timed-erase` // toggling repeatedly replaces in place
+                    });
                 }
             });
             
@@ -1318,13 +1344,23 @@ class DrawingTool {
      */
     undoLastDrawing() {
         if (!this._lastDrawing || !this.services?.canvasLayer) {
-            ui.notifications.warn(`${MODULE.NAME}: No drawing to undo`);
+            notify('Nothing to undo', {
+                subtitle: 'You have no recent drawings on this scene',
+                type: 'warn',
+                icon: 'fa-solid fa-undo',
+                stackKey: `${MODULE.ID}-undo`
+            });
             return;
         }
-        
+
         // Only allow undoing own drawings (unless GM)
         if (!game.user.isGM && this._lastDrawing.userId !== game.user.id) {
-            ui.notifications.warn(`${MODULE.NAME}: Can only undo your own drawings`);
+            notify('Cannot undo that drawing', {
+                subtitle: 'You can only undo your own drawings',
+                type: 'warn',
+                icon: 'fa-solid fa-undo',
+                stackKey: `${MODULE.ID}-undo`
+            });
             return;
         }
         
@@ -1353,7 +1389,11 @@ class DrawingTool {
         // Broadcast specific drawing deletion to other clients (by ID, not all user drawings)
         this.broadcastDrawingDeletion(false, game.user.id, drawingToRemove.id);
         
-        ui.notifications.info(`${MODULE.NAME}: Last drawing undone`);
+        notify('Drawing undone', {
+            subtitle: this._lastDrawing ? 'Click again to undo the one before it' : 'That was your last drawing',
+            icon: 'fa-solid fa-undo',
+            stackKey: `${MODULE.ID}-undo` // rapid undos replace rather than pile up
+        });
     }
     
     /**
