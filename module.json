@@ -50,7 +50,8 @@
     "scripts/settings.js",
     "scripts/cartographer.js",
     "scripts/manager-toolbar.js",
-    "scripts/manager-drawing.js"
+    "scripts/manager-drawing.js",
+    "scripts/manager-mapping.js"
   ],
   "packs": [],
   

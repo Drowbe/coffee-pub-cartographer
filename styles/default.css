@@ -7,3 +7,6 @@
 
 /* --- Drawing Tool ---------------------- */
 @import "tool-drawing.css";
+
+/* --- Mapping Tool ---------------------- */
+@import "tool-mapping.css";

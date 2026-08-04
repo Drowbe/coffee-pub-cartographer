@@ -71,6 +71,10 @@ class CartographerToolbar {
                                  // the bar, and group banners are additive so they cost no button size.
                 persistence: "manual", // manual = stays open until closed, auto = closes after delay
                 groups: {
+                    'Mapping': {
+                        mode: 'default',
+                        order: 1
+                    },
                     'Drawing Mode': {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 5 // Order for the group (first group)

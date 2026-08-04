@@ -1,0 +1,37 @@
+<div class="cartographer-mapping-root">
+    <div class="cartographer-mapping-controls" role="toolbar">
+        <button type="button" data-action="zoom-out" data-tooltip="{{zoomOutLabel}}" aria-label="{{zoomOutLabel}}">
+            <i class="fa-solid fa-minus"></i>
+        </button>
+        <button type="button" data-action="center-party" data-tooltip="{{centerPartyLabel}}" aria-label="{{centerPartyLabel}}">
+            <i class="fa-solid fa-crosshairs"></i>
+        </button>
+        <button type="button" data-action="zoom-in" data-tooltip="{{zoomInLabel}}" aria-label="{{zoomInLabel}}">
+            <i class="fa-solid fa-plus"></i>
+        </button>
+        {{#if canReset}}
+        <button type="button" class="is-critical" data-action="reset-map" data-tooltip="{{resetLabel}}" aria-label="{{resetLabel}}">
+            <i class="fa-solid fa-trash-can"></i>
+        </button>
+        {{/if}}
+    </div>
+
+    <div class="cartographer-mapping-viewport">
+        {{#if empty}}
+        <div class="cartographer-mapping-empty">
+            <i class="fa-solid fa-map"></i>
+            <span>{{emptyMessage}}</span>
+        </div>
+        {{else}}
+        <div class="cartographer-mapping-grid" style="--cartographer-map-columns: {{columnCount}}; --cartographer-map-zoom: {{zoom}};">
+            {{#each rows}}
+                {{#each cells}}
+                <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}">
+                    {{#if isParty}}<i class="fa-solid fa-location-dot cartographer-mapping-party"></i>{{/if}}
+                </div>
+                {{/each}}
+            {{/each}}
+        </div>
+        {{/if}}
+    </div>
+</div>

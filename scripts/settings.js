@@ -103,7 +103,7 @@ export const registerSettings = () => {
 	});
 
     // -- Timed Erase Timeout --
-	game.settings.register(MODULE.ID, 'drawing.timedEraseTimeout', {
+    game.settings.register(MODULE.ID, 'drawing.timedEraseTimeout', {
         name: MODULE.ID + '.drawing.timedEraseTimeout-Label',
         hint: MODULE.ID + '.drawing.timedEraseTimeout-Hint',
         scope: 'world',
@@ -117,6 +117,26 @@ export const registerSettings = () => {
         },
 		group: WORKFLOW_GROUPS.CONFIGURATION
 	});
+
+    game.settings.register(MODULE.ID, 'mapping.enabled', {
+        name: MODULE.ID + '.mapping.enabled-Label',
+        hint: MODULE.ID + '.mapping.enabled-Hint',
+        scope: 'world',
+        config: true,
+        default: true,
+        type: Boolean,
+        group: WORKFLOW_GROUPS.CONFIGURATION
+    });
+
+    game.settings.register(MODULE.ID, 'mapping.allowPlayers', {
+        name: MODULE.ID + '.mapping.allowPlayers-Label',
+        hint: MODULE.ID + '.mapping.allowPlayers-Hint',
+        scope: 'world',
+        config: true,
+        default: true,
+        type: Boolean,
+        group: WORKFLOW_GROUPS.CONFIGURATION
+    });
 
 
 	// --------------------------------------

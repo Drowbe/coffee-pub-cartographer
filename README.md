@@ -6,7 +6,13 @@
 
 ## Description
 
-Party strategic planning and sketching.
+Party strategic planning, temporary canvas sketching, and shared old-school mapping.
+
+## Features
+
+- Temporary multiplayer canvas drawings with shapes, stamps, colors, and timed cleanup.
+- A persistent party map that reveals the 3×3 grid area around a controlled token as it moves.
+- A separate resizable map view using Blacksmith's Light, Dark, and Glass Tool window themes.
 
 ## Requirements
 
@@ -24,7 +30,9 @@ Party strategic planning and sketching.
 
 ## Usage
 
-Add usage instructions here.
+Open Cartographer from the Blacksmith menubar to access its drawing and mapping tools.
+
+To map a scene, control exactly one token and toggle **Mapping** on. The party map opens and records the 3×3 grid area surrounding the token as it moves. Toggle **Mapping** off—or close the map window—to stop.
 
 ## Configuration
 

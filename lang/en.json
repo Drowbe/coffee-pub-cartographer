@@ -2,7 +2,7 @@
 	"coffee-pub-cartographer": {
 		
 		"headingH1Introduction-Label": "Coffee Pub Cartographer",
-		"headingH1Introduction-Hint": "Give your party temporary canvas drawing tools for sketching plans, marking locations, and coordinating during play.",
+		"headingH1Introduction-Hint": "Give your party temporary canvas drawing tools and an old-school shared map for planning, marking locations, and coordinating during play.",
 
 		"headingH2Configuration-Label": "Configuration",
 		"headingH2Configuration-Hint": "",
@@ -23,7 +23,35 @@
 	"drawing.hotkeyMode-Hint": "Hold means active only while pressed. Toggle means press once to enable/disable.",
 
 	"drawing.blockWhenTyping-Label": "Ignore Hotkey While Typing",
-	"drawing.blockWhenTyping-Hint": "Prevents the hotkey from firing when chat or form fields have focus."
+	"drawing.blockWhenTyping-Hint": "Prevents the hotkey from firing when chat or form fields have focus.",
+	"mapping.enabled-Label": "Enable Mapping Tool",
+	"mapping.enabled-Hint": "Enable the old-school party mapping tool for square-grid scenes.",
+	"mapping.allowPlayers-Label": "Allow Player Mapping",
+	"mapping.allowPlayers-Hint": "Allow players to map with a token they own and control.",
+	"mapping.windowTitle": "Party Map",
+	"mapping.toggleHint": "Toggle party mapping for your controlled token",
+	"mapping.disabledTitle": "Mapping is disabled",
+	"mapping.disabledHint": "A GM can enable it in Cartographer settings.",
+	"mapping.notAllowedTitle": "Player mapping is disabled",
+	"mapping.noGmTitle": "Mapping needs an active GM",
+	"mapping.noGmHint": "A GM must be connected to validate and save the party map.",
+	"mapping.unsupportedGridTitle": "Unsupported scene grid",
+	"mapping.unsupportedGridHint": "The first mapping release supports square-grid scenes.",
+	"mapping.selectTokenTitle": "Select one token",
+	"mapping.selectTokenHint": "Control exactly one token before turning Mapping on.",
+	"mapping.notOwnerTitle": "You do not own that token",
+	"mapping.noToken": "No tracked token",
+	"mapping.statusActive": "Mapping",
+	"mapping.statusViewing": "Viewing",
+	"mapping.cellsMapped": "cells mapped",
+	"mapping.emptyMap": "Move your token to begin the party map.",
+	"mapping.resetTitle": "Reset Party Map",
+	"mapping.resetConfirm": "Clear every mapped cell for this scene? This cannot be undone.",
+	"mapping.resetDone": "Party map cleared",
+	"mapping.resetMap": "Reset map",
+	"mapping.zoomIn": "Zoom in",
+	"mapping.zoomOut": "Zoom out",
+	"mapping.centerParty": "Center on tracked token"
 	}
 }
 

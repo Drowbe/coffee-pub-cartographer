@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Old-school party mapper**: Added a toggleable Mapping tool for square-grid scenes. Turning it on with one controlled token opens a separate Glass-themed Blacksmith Tool window and permanently maps the 3×3 grid area surrounding that token as it moves.
+- **Shared persistent maps**: Mapped cells are stored per scene and synchronized to connected users. Player reveal requests are validated and persisted by the active GM; players never receive undiscovered scene geometry.
+- **Map window controls**: Added zoom, center-on-token, remembered pan position, mapped-cell status, tracked-token status, and a confirmed GM-only map reset.
+- **Mapping configuration**: Added world settings to enable the mapper and allow or deny player mapping.
+- **Placeholder map presentation**: Added theme-aware grid tiles and a party marker using Blacksmith's Tool content-surface variables, ready for later hand-drawn asset replacement.
+
+### Fixed
+- **Mapper initialization order**: The Mapping window is now imported lazily when opened, after Blacksmith's ready-time API is available, instead of reading `game.modules` during Foundry's early ES module loading phase.
+
 
 
 ## [13.0.7]

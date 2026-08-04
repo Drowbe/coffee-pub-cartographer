@@ -160,7 +160,7 @@ Responsibilities:
 
 - `manager-sockets.js`
   - Add mapper state/update messages using the existing Cartographer socket pattern.
-  - Notify the authoritative GM when a user starts or stops mapping.
+  - Send reveal requests to the authoritative GM when an active user's token enters a new grid cell.
   - Treat socket messages as notifications; the persisted scene flag remains the source of truth.
 
 ## Rendering Strategy

@@ -7,6 +7,7 @@ import { registerSettings } from './settings.js';
 import { drawingTool } from './manager-drawing.js';
 import { cartographerToolbar } from './manager-toolbar.js';
 import { socketManager } from './manager-sockets.js';
+import { mappingManager } from './manager-mapping.js';
 
 // ================================================================== 
 // ===== BLACKSMITH API INTEGRATION =================================
@@ -166,6 +167,12 @@ Hooks.once('canvasReady', async () => {
                 await drawingTool.initialize(CartographerServices);
             } catch (error) {
                 console.error(`❌ ${MODULE.NAME}: Failed to initialize drawing tool:`, error);
+            }
+
+            try {
+                await mappingManager.initialize(CartographerServices);
+            } catch (error) {
+                console.error(`❌ ${MODULE.NAME}: Failed to initialize mapping tool:`, error);
             }
         } else {
             console.warn(`⚠️ ${MODULE.NAME}: Canvas Layer not available, tools not initialized`);
