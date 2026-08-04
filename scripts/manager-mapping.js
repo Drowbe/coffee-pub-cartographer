@@ -132,18 +132,24 @@ class MappingManager {
                     x: 'x' in changes ? Number(changes.x) : tokenDocument.x,
                     y: 'y' in changes ? Number(changes.y) : tokenDocument.y,
                     width: tokenDocument.width,
-                    height: tokenDocument.height
+                    height: tokenDocument.height,
+                    actor: tokenDocument.actor,
+                    actorId: tokenDocument.actorId
                 }
                 : tokenDocument;
+            const position = this._gridPosition(movementDocument);
             if (game.user.isGM && this._isSquareGrid()) {
-                this._rememberTokenPosition(tokenDocument.id, this._gridPosition(movementDocument));
+                this._rememberTokenPosition(
+                    tokenDocument.id,
+                    position,
+                    this._tokenCoordinates(movementDocument)
+                );
             }
             if (tokenDocument.id !== this.trackedTokenId) return;
             const visionChanged = ('rotation' in changes) || ('sight' in changes);
             if (!moved && !visionChanged) return;
-            const position = this._gridPosition(movementDocument);
             if (!this.active) return;
-            void this._requestReveal(tokenDocument, position, { force: visionChanged }).catch(error => {
+            void this._requestReveal(movementDocument, position, { force: visionChanged }).catch(error => {
                 console.error(`${MODULE.NAME}: Failed to map token movement`, error);
             });
             if (moved) this._scheduleCatchUp(tokenDocument.id);
@@ -534,44 +540,81 @@ class MappingManager {
         return Number.isInteger(column) && Number.isInteger(row) ? { column, row } : null;
     }
 
+    _tokenCoordinates(tokenDocument) {
+        const x = Number(tokenDocument?.x);
+        const y = Number(tokenDocument?.y);
+        return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+    }
+
+    _normalizeCoordinates(coordinates) {
+        const x = Number(coordinates?.x);
+        const y = Number(coordinates?.y);
+        return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+    }
+
     _seedRecentTokenPositions() {
         if (!game.user?.isGM || !this._isSquareGrid()) return;
         for (const token of canvas.tokens?.placeables ?? []) {
-            this._rememberTokenPosition(token.id, this._gridPosition(token.document));
+            this._rememberTokenPosition(
+                token.id,
+                this._gridPosition(token.document),
+                this._tokenCoordinates(token.document)
+            );
         }
     }
 
-    _rememberTokenPosition(tokenId, position) {
+    _rememberTokenPosition(tokenId, position, coordinates) {
         if (!tokenId || !position || !canvas?.scene?.id) return;
         const key = `${canvas.scene.id}:${tokenId}`;
         const history = this._recentTokenPositions.get(key) ?? [];
         const gridKey = `${position.column},${position.row}`;
-        if (history.at(-1) !== gridKey) history.push(gridKey);
+        const normalizedCoordinates = this._normalizeCoordinates(coordinates);
+        const previous = history.at(-1);
+        if (
+            previous?.gridKey !== gridKey
+            || previous?.coordinates?.x !== normalizedCoordinates?.x
+            || previous?.coordinates?.y !== normalizedCoordinates?.y
+        ) {
+            history.push({ gridKey, coordinates: normalizedCoordinates });
+        }
         if (history.length > 100) history.splice(0, history.length - 100);
         this._recentTokenPositions.set(key, history);
     }
 
-    _isTrustedReportedPosition(sceneId, tokenId, position, currentPosition) {
-        if (!position) return false;
+    _trustedReportedState(sceneId, tokenId, position, coordinates, currentPosition, currentCoordinates) {
+        if (!position) return null;
         const gridKey = `${position.column},${position.row}`;
-        if (gridKey === `${currentPosition.column},${currentPosition.row}`) return true;
-        return this._recentTokenPositions.get(`${sceneId}:${tokenId}`)?.includes(gridKey) ?? false;
+        if (gridKey === `${currentPosition.column},${currentPosition.row}`) {
+            return { position, coordinates: currentCoordinates };
+        }
+
+        const reportedCoordinates = this._normalizeCoordinates(coordinates);
+        const history = this._recentTokenPositions.get(`${sceneId}:${tokenId}`) ?? [];
+        const match = history.findLast(entry => {
+            if (entry.gridKey !== gridKey) return false;
+            if (!reportedCoordinates || !entry.coordinates) return true;
+            return Math.abs(entry.coordinates.x - reportedCoordinates.x) < 1
+                && Math.abs(entry.coordinates.y - reportedCoordinates.y) < 1;
+        });
+        return match ? { position, coordinates: match.coordinates ?? reportedCoordinates } : null;
     }
 
-    _tokenAtGridPosition(tokenDocument, position) {
-        const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
-        const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
-        const center = typeof canvas.grid.getCenterPoint === 'function'
-            ? canvas.grid.getCenterPoint({ i: position.row, j: position.column })
-            : { x: (position.column + 0.5) * sizeX, y: (position.row + 0.5) * sizeY };
+    _tokenAtCoordinates(tokenDocument, coordinates) {
         const width = Number(tokenDocument.width) || 1;
         const height = Number(tokenDocument.height) || 1;
         return {
             id: tokenDocument.id,
-            x: center.x - ((width * sizeX) / 2),
-            y: center.y - ((height * sizeY) / 2),
+            x: coordinates.x,
+            y: coordinates.y,
             width,
             height
+        };
+    }
+
+    _interpolateCoordinates(start, end, amount) {
+        return {
+            x: start.x + ((end.x - start.x) * amount),
+            y: start.y + ((end.y - start.y) * amount)
         };
     }
 
@@ -628,6 +671,7 @@ class MappingManager {
             tokenId: tokenDocument.id,
             actorId: tokenDocument.actor?.id ?? tokenDocument.actorId,
             position: { column: position.column, row: position.row },
+            coordinates: this._tokenCoordinates(tokenDocument),
             resetPath
         };
         this._outgoingRevealQueue = this._outgoingRevealQueue
@@ -656,19 +700,31 @@ class MappingManager {
         if (!this._canManageActor(actor, user)) return;
 
         const currentPosition = this._gridPosition(tokenDocument);
+        const currentCoordinates = this._tokenCoordinates(tokenDocument);
         // Retain the endpoint captured by its update hook even if a later move
         // happens while an earlier path is still being drawn. A local GM is
         // authoritative. A remote endpoint is accepted only when the GM saw
-        // that token occupy the same cell in its bounded movement history.
+        // that token at the same pixel coordinates in its bounded movement
+        // history; grid identity alone is insufficient when a wall crosses a
+        // token's square.
         const reportedPosition = this._normalizePosition(data.position);
-        const position = allowLocalGM || this._isTrustedReportedPosition(
-            data.sceneId,
-            data.tokenId,
-            reportedPosition,
-            currentPosition
-        )
-            ? (reportedPosition ?? currentPosition)
-            : currentPosition;
+        const reportedCoordinates = this._normalizeCoordinates(data.coordinates);
+        const trustedState = allowLocalGM
+            ? {
+                position: reportedPosition ?? currentPosition,
+                coordinates: reportedCoordinates ?? currentCoordinates
+            }
+            : this._trustedReportedState(
+                data.sceneId,
+                data.tokenId,
+                reportedPosition,
+                reportedCoordinates,
+                currentPosition,
+                currentCoordinates
+            );
+        const position = trustedState?.position ?? currentPosition;
+        const coordinates = trustedState?.coordinates ?? currentCoordinates;
+        if (!coordinates) return;
         const id = this._recordId(actor.id, canvas.scene.id);
         const existing = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
         const sessionKey = `${data.userId}:${data.sceneId}:${data.tokenId}`;
@@ -676,15 +732,24 @@ class MappingManager {
         const previous = data.resetPath
             ? position
             : (authoritative?.mapId === id ? authoritative.position : existing.lastPosition) ?? position;
+        const previousCoordinates = data.resetPath
+            ? coordinates
+            : (authoritative?.mapId === id ? authoritative.coordinates : null) ?? coordinates;
         const path = gridTravelPath(previous, position);
-        this._authoritativePositions.set(sessionKey, { mapId: id, position });
+        this._authoritativePositions.set(sessionKey, { mapId: id, position, coordinates });
         const explored = new Set(existing.explored);
         const observedAlongPath = {};
 
         for (let index = 0; index < path.length; index++) {
             const step = path[index];
-            const sampleToken = this._tokenAtGridPosition(tokenDocument, step);
+            const amount = path.length > 1 ? index / (path.length - 1) : 1;
+            const sampleCoordinates = this._interpolateCoordinates(previousCoordinates, coordinates, amount);
+            const sampleToken = this._tokenAtCoordinates(tokenDocument, sampleCoordinates);
             const revealKeys = visibleRevealKeys(sampleToken, this._revealKeys(step));
+            // A wall can cross the same Foundry grid square as the token. The
+            // cell-center ray may therefore hit that wall even though the token
+            // is standing in the square, so the occupied square is always known.
+            revealKeys.add(`${step.column},${step.row}`);
             for (const key of revealKeys) explored.add(key);
             const observed = observeVisibleFeatures(sampleToken, revealKeys);
             for (const [key, codes] of Object.entries(observed)) {

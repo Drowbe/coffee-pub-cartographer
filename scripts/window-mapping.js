@@ -246,126 +246,87 @@ export class MappingWindow extends ToolWindowBase {
     _getMappedTileGeometry(explored, features) {
         const segmentsByCell = new Map();
         const doorSymbolsByCell = new Map();
-        const priorities = { wall: 1, window: 2 };
-        const doorDirections = new Map();
-        const consumedDoorLegs = new Set();
-
+        const priorities = { wall: 1, window: 2, door: 3 };
+        const edges = new Map();
         for (const [key, codes] of Object.entries(features ?? {})) {
             if (!explored.has(key)) continue;
-            const directions = new Set(codes
-                .filter(code => code.startsWith('door:'))
-                .map(code => code.split(':')[1]));
-            if (directions.size) doorDirections.set(key, directions);
-        }
-
-        const neighborFor = (key, direction) => {
             const [column, row] = key.split(',').map(Number);
-            const offsets = { east: [1, 0], south: [0, 1] }[direction];
-            return offsets ? `${column + offsets[0]},${row + offsets[1]}` : null;
-        };
-        const opposite = { east: 'west', south: 'north' };
-
-        // A normal Foundry door is represented by two matching half-legs in
-        // neighboring map cells. Replace the pair with one guide-style symbol
-        // centered on their shared edge.
-        for (const [key, directions] of doorDirections) {
-            for (const direction of ['east', 'south']) {
-                if (!directions.has(direction)) continue;
-                const neighborKey = neighborFor(key, direction);
-                if (!neighborKey || !doorDirections.get(neighborKey)?.has(opposite[direction])) continue;
-                doorSymbolsByCell.set(key, [
-                    ...(doorSymbolsByCell.get(key) ?? []),
-                    this._doorSymbol(direction === 'east' ? 'horizontal-edge' : 'vertical-edge')
-                ]);
-                consumedDoorLegs.add(`${key}:door:${direction}`);
-                consumedDoorLegs.add(`${neighborKey}:door:${opposite[direction]}`);
-            }
-        }
-
-        // Very short doors can resolve wholly inside one abstract cell.
-        for (const [key, directions] of doorDirections) {
-            if (directions.has('east') && directions.has('west')
-                && !consumedDoorLegs.has(`${key}:door:east`)
-                && !consumedDoorLegs.has(`${key}:door:west`)) {
-                doorSymbolsByCell.set(key, [
-                    ...(doorSymbolsByCell.get(key) ?? []),
-                    this._doorSymbol('horizontal-center')
-                ]);
-                consumedDoorLegs.add(`${key}:door:east`);
-                consumedDoorLegs.add(`${key}:door:west`);
-            }
-            if (directions.has('north') && directions.has('south')
-                && !consumedDoorLegs.has(`${key}:door:north`)
-                && !consumedDoorLegs.has(`${key}:door:south`)) {
-                doorSymbolsByCell.set(key, [
-                    ...(doorSymbolsByCell.get(key) ?? []),
-                    this._doorSymbol('vertical-center')
-                ]);
-                consumedDoorLegs.add(`${key}:door:north`);
-                consumedDoorLegs.add(`${key}:door:south`);
-            }
-        }
-
-        for (const [key, codes] of Object.entries(features ?? {})) {
-            if (!explored.has(key)) continue;
-            const cellSegments = new Map();
             for (const code of codes) {
                 const [feature, direction] = code.split(':');
-                if (feature === 'door' && consumedDoorLegs.has(`${key}:${code}`)) continue;
-                const renderedFeature = feature === 'door' ? 'wall' : feature;
-                const segment = this._tileSegment(renderedFeature, direction, priorities[renderedFeature]);
-                if (segment) cellSegments.set(`${renderedFeature}:${direction}`, segment);
+                const edgeKey = {
+                    north: `h:${column}:${row}`,
+                    south: `h:${column}:${row + 1}`,
+                    west: `v:${column}:${row}`,
+                    east: `v:${column + 1}:${row}`
+                }[direction];
+                if (!edgeKey || !priorities[feature]) continue;
+                const existing = edges.get(edgeKey);
+                if (!existing || priorities[feature] > priorities[existing.feature]) {
+                    edges.set(edgeKey, { key, feature, direction });
+                }
             }
-            const segments = [...cellSegments.values()].sort((left, right) => left.priority - right.priority);
-            if (segments.length) segmentsByCell.set(key, segments);
+        }
+
+        for (const edge of edges.values()) {
+            if (edge.feature === 'door') {
+                doorSymbolsByCell.set(edge.key, [
+                    ...(doorSymbolsByCell.get(edge.key) ?? []),
+                    this._doorSymbol(edge.direction)
+                ]);
+                continue;
+            }
+            const segment = this._tileSegment(edge.feature, edge.direction, priorities[edge.feature]);
+            if (segment) {
+                segmentsByCell.set(edge.key, [...(segmentsByCell.get(edge.key) ?? []), segment]);
+            }
         }
         return { segmentsByCell, doorSymbolsByCell };
     }
 
-    _doorSymbol(type) {
+    _doorSymbol(direction) {
         const symbols = {
-            'horizontal-edge': {
+            north: {
                 lines: [
-                    { points: '50,50 88,50', echoPoints: '50,48.8 88,50.8' },
-                    { points: '112,50 150,50', echoPoints: '112,49.1 150,51' }
+                    { points: '0,0 38,0', echoPoints: '0,-1.2 38,0.8' },
+                    { points: '62,0 100,0', echoPoints: '62,-0.9 100,1' }
                 ],
-                boxPoints: '88,36 112,37.5 111,64 89,63 88,36',
-                echoBoxPoints: '89,37 111,36.5 112,63 88,64 89,37'
+                boxPoints: '38,-12 62,-10.5 61,14 39,13 38,-12',
+                echoBoxPoints: '39,-11 61,-11.5 62,13 38,14 39,-11'
             },
-            'vertical-edge': {
+            south: {
                 lines: [
-                    { points: '50,50 50,88', echoPoints: '48.8,50 50.8,88' },
-                    { points: '50,112 50,150', echoPoints: '49.1,112 51,150' }
+                    { points: '0,100 38,100', echoPoints: '0,98.8 38,100.8' },
+                    { points: '62,100 100,100', echoPoints: '62,99.1 100,101' }
                 ],
-                boxPoints: '36,88 63,89 64,111 37.5,112 36,88',
-                echoBoxPoints: '37,89 64,88 63,112 36.5,111 37,89'
+                boxPoints: '38,88 62,89.5 61,114 39,113 38,88',
+                echoBoxPoints: '39,89 61,88.5 62,113 38,114 39,89'
             },
-            'horizontal-center': {
+            west: {
                 lines: [
-                    { points: '0,50 38,50', echoPoints: '0,48.8 38,50.8' },
-                    { points: '62,50 100,50', echoPoints: '62,49.1 100,51' }
+                    { points: '0,0 0,38', echoPoints: '-1.2,0 0.8,38' },
+                    { points: '0,62 0,100', echoPoints: '-0.9,62 1,100' }
                 ],
-                boxPoints: '38,36 62,37.5 61,64 39,63 38,36',
-                echoBoxPoints: '39,37 61,36.5 62,63 38,64 39,37'
+                boxPoints: '-12,38 -10.5,62 14,61 13,39 -12,38',
+                echoBoxPoints: '-11,39 -11.5,61 13,62 14,38 -11,39'
             },
-            'vertical-center': {
+            east: {
                 lines: [
-                    { points: '50,0 50,38', echoPoints: '48.8,0 50.8,38' },
-                    { points: '50,62 50,100', echoPoints: '49.1,62 51,100' }
+                    { points: '100,0 100,38', echoPoints: '98.8,0 100.8,38' },
+                    { points: '100,62 100,100', echoPoints: '99.1,62 101,100' }
                 ],
-                boxPoints: '36,38 63,39 64,61 37.5,62 36,38',
-                echoBoxPoints: '37,39 64,38 63,62 36.5,61 37,39'
+                boxPoints: '88,38 89.5,62 114,61 113,39 88,38',
+                echoBoxPoints: '89,39 88.5,61 113,62 114,38 89,39'
             }
         };
-        return symbols[type];
+        return symbols[direction];
     }
 
     _tileSegment(feature, direction, priority) {
         const endpoints = {
-            north: { x1: 50, y1: 50, x2: 50, y2: 0 },
-            east: { x1: 50, y1: 50, x2: 100, y2: 50 },
-            south: { x1: 50, y1: 50, x2: 50, y2: 100 },
-            west: { x1: 50, y1: 50, x2: 0, y2: 50 }
+            north: { x1: 0, y1: 0, x2: 100, y2: 0 },
+            east: { x1: 100, y1: 0, x2: 100, y2: 100 },
+            south: { x1: 0, y1: 100, x2: 100, y2: 100 },
+            west: { x1: 0, y1: 0, x2: 0, y2: 100 }
         }[direction];
         if (!endpoints || !priority) return null;
         const horizontal = endpoints.y1 === endpoints.y2;

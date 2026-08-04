@@ -113,56 +113,72 @@ function oppositeDirection(direction) {
     return { north: 'south', east: 'west', south: 'north', west: 'east' }[direction] ?? null;
 }
 
-function wallTileLegs(document) {
+function gridCellAt(point) {
+    const offset = canvas.grid.getOffset({ x: point.x, y: point.y });
+    const column = Number(offset.j ?? offset.x);
+    const row = Number(offset.i ?? offset.y);
+    return Number.isInteger(column) && Number.isInteger(row) ? { column, row } : null;
+}
+
+/**
+ * Snap the visible side of a Foundry wall segment to edges of explored floor
+ * cells. Curved-wall endpoints commonly share grid squares with the token, so
+ * routing them through cell centers puts linework directly through the path.
+ */
+function wallBoundaryObservations(document, tokenDocument, allowed) {
     const feature = classifyWall(document);
     if (!feature || !canvas?.grid) return [];
     const coordinates = document?.c ?? document?._source?.c;
     if (!Array.isArray(coordinates) || coordinates.length < 4) return [];
     const [x1, y1, x2, y2] = coordinates.map(Number);
     if (![x1, y1, x2, y2].every(Number.isFinite)) return [];
+    const wallDx = x2 - x1;
+    const wallDy = y2 - y1;
+    const length = Math.hypot(wallDx, wallDy);
+    if (!length) return [];
 
-    const startOffset = canvas.grid.getOffset({ x: x1, y: y1 });
-    const endOffset = canvas.grid.getOffset({ x: x2, y: y2 });
-    const start = {
-        column: Number(startOffset.j ?? startOffset.x),
-        row: Number(startOffset.i ?? startOffset.y)
-    };
-    const end = {
-        column: Number(endOffset.j ?? endOffset.x),
-        row: Number(endOffset.i ?? endOffset.y)
-    };
-    if (![start.column, start.row, end.column, end.row].every(Number.isInteger)) return [];
+    const origin = tokenCenter(tokenDocument);
+    const gridSize = Math.min(
+        canvas.grid.sizeX ?? canvas.grid.size,
+        canvas.grid.sizeY ?? canvas.grid.size
+    );
+    const sampleCount = Math.max(1, Math.ceil(length / (gridSize * 0.25)));
+    const sideInset = Math.max(3, gridSize * 0.08);
+    const observations = [];
+    const seen = new Set();
 
-    const path = orthogonalPath(start, end);
-    const legs = [];
-    const add = (cell, direction) => {
-        if (!direction) return;
-        legs.push({
-            key: `${cell.column},${cell.row}`,
-            cell,
-            code: `${feature}:${direction}`,
-            feature,
-            direction,
-            wallPoint: closestPointOnSegment(cellCenter(cell), { x: x1, y: y1 }, { x: x2, y: y2 })
-        });
-    };
+    for (let index = 0; index < sampleCount; index++) {
+        const amount = (index + 0.5) / sampleCount;
+        const wallPoint = {
+            x: x1 + (wallDx * amount),
+            y: y1 + (wallDy * amount)
+        };
+        const towardTokenX = origin.x - wallPoint.x;
+        const towardTokenY = origin.y - wallPoint.y;
+        const tokenDistance = Math.hypot(towardTokenX, towardTokenY);
+        if (!tokenDistance) continue;
+        const floorPoint = {
+            x: wallPoint.x + ((towardTokenX / tokenDistance) * sideInset),
+            y: wallPoint.y + ((towardTokenY / tokenDistance) * sideInset)
+        };
+        const cell = gridCellAt(floorPoint);
+        if (!cell) continue;
+        const key = `${cell.column},${cell.row}`;
+        if (!allowed.has(key) || !visibleFromToken(tokenDocument, wallPoint)) continue;
 
-    if (path.length === 1) {
-        const directions = Math.abs(x2 - x1) >= Math.abs(y2 - y1)
-            ? ['west', 'east']
-            : ['north', 'south'];
-        for (const direction of directions) add(path[0], direction);
-        return legs;
+        let direction;
+        if (Math.abs(wallDx) >= Math.abs(wallDy)) {
+            direction = origin.y < wallPoint.y ? 'south' : 'north';
+        } else {
+            direction = origin.x < wallPoint.x ? 'east' : 'west';
+        }
+        const code = `${feature}:${direction}`;
+        const observationKey = `${key}:${code}`;
+        if (seen.has(observationKey)) continue;
+        seen.add(observationKey);
+        observations.push({ key, code });
     }
-
-    for (let index = 1; index < path.length; index++) {
-        const previous = path[index - 1];
-        const current = path[index];
-        const direction = directionBetween(previous, current);
-        add(previous, direction);
-        add(current, oppositeDirection(direction));
-    }
-    return legs;
+    return observations;
 }
 
 function cellCenter(cell) {
@@ -176,17 +192,6 @@ function cellCenter(cell) {
         x: (cell.column + 0.5) * sizeX,
         y: (cell.row + 0.5) * sizeY
     };
-}
-
-function closestPointOnSegment(point, start, end) {
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const lengthSquared = (dx * dx) + (dy * dy);
-    if (!lengthSquared) return { ...start };
-    const amount = Math.max(0, Math.min(1,
-        (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / lengthSquared
-    ));
-    return { x: start.x + (amount * dx), y: start.y + (amount * dy) };
 }
 
 function tokenCenter(tokenDocument) {
@@ -252,10 +257,11 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
     const allowed = revealKeys instanceof Set ? revealKeys : new Set(revealKeys ?? []);
     const observed = {};
     for (const wall of canvas.walls?.placeables ?? []) {
-        for (const leg of wallTileLegs(wall.document)) {
-            if (!allowed.has(leg.key) || !visibleFromToken(tokenDocument, leg.wallPoint)) continue;
-            observed[leg.key] ??= [];
-            if (!observed[leg.key].includes(leg.code)) observed[leg.key].push(leg.code);
+        for (const observation of wallBoundaryObservations(wall.document, tokenDocument, allowed)) {
+            observed[observation.key] ??= [];
+            if (!observed[observation.key].includes(observation.code)) {
+                observed[observation.key].push(observation.code);
+            }
         }
     }
     return observed;
