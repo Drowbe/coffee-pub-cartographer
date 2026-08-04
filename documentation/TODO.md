@@ -7,6 +7,7 @@
 
 ## Mapping tools
 
-- [ ] Add an old-school mapping tool that builds a simplified map as the party explores.
-  - Base the map on the scene grid.
-  - Render it as a clean, deliberately grid-based dungeon map.
+- [ ] Add an old-school mapping tool that builds a simplified map as the party explores. See [Mapping Tool Implementation Plan](MAPPING_TOOL_PLAN.md).
+  - Track a GM-selected token and reveal the 3×3 grid area centered on it.
+  - Display the accumulated map in a separate Glass-themed Blacksmith Tool window.
+  - Begin with placeholder tiles that can be replaced by hand-drawn artwork.
