@@ -79,7 +79,7 @@ export class MappingWindow extends ToolWindowBase {
         const explored = new Set(this.manager.state.explored);
         const tracked = this.manager._getTrackedToken();
         const trackedPosition = tracked ? this.manager._gridPosition(tracked.document) : null;
-        const wallCells = this._getWallCellKeys();
+        const mappedFeatures = this._getMappedFeatures();
         const common = {
             canReset: game.user.isGM,
             zoom: this.zoom,
@@ -106,12 +106,12 @@ export class MappingWindow extends ToolWindowBase {
         const rowCount = Math.max(Math.ceil(canvas.dimensions.height / sizeY), maxExploredRow + 1);
         const cells = coordinates.map(([column, row]) => {
             const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
-            const isWall = wallCells.has(`${column},${row}`);
+            const feature = mappedFeatures.get(`${column},${row}`) ?? null;
             return {
                 key: `${column},${row}`,
                 gridColumn: column + 1,
                 gridRow: row + 1,
-                className: `is-explored${isWall ? ' is-wall' : ''}${isParty ? ' is-party' : ''}`
+                className: `is-explored${feature ? ` is-${feature}` : ''}${isParty ? ' is-party' : ''}`
             };
         });
 
@@ -126,13 +126,16 @@ export class MappingWindow extends ToolWindowBase {
         };
     }
 
-    _getWallCellKeys() {
-        const keys = new Set();
+    _getMappedFeatures() {
+        const features = new Map();
         const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
         const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
         const sampleSize = Math.max(1, Math.min(sizeX, sizeY) / 3);
+        const priorities = { wall: 1, window: 2, door: 3 };
 
         for (const wall of canvas.walls?.placeables ?? []) {
+            const feature = this._classifyWall(wall.document);
+            if (!feature) continue;
             const coordinates = wall.document?.c ?? wall.document?._source?.c;
             if (!Array.isArray(coordinates) || coordinates.length < 4) continue;
             const [x1, y1, x2, y2] = coordinates.map(Number);
@@ -147,10 +150,42 @@ export class MappingWindow extends ToolWindowBase {
                 });
                 const column = Number(offset.j ?? offset.x);
                 const row = Number(offset.i ?? offset.y);
-                if (Number.isInteger(column) && Number.isInteger(row)) keys.add(`${column},${row}`);
+                if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
+                const key = `${column},${row}`;
+                const existing = features.get(key);
+                if (!existing || priorities[feature] > priorities[existing]) features.set(key, feature);
             }
         }
-        return keys;
+        return features;
+    }
+
+    _classifyWall(document) {
+        const source = document?._source ?? document;
+        if (!source) return null;
+
+        const doorTypes = CONST.WALL_DOOR_TYPES ?? {};
+        const senseTypes = CONST.WALL_SENSE_TYPES ?? {};
+        const movementTypes = CONST.WALL_MOVEMENT_TYPES ?? {};
+        const door = Number(source.door ?? doorTypes.NONE ?? 0);
+        const move = Number(source.move);
+        const sight = Number(source.sight);
+        const light = Number(source.light);
+
+        if (door === doorTypes.DOOR) return 'door';
+        if (door === doorTypes.SECRET) return 'wall';
+
+        const isTerrain = sight === senseTypes.LIMITED
+            && light === senseTypes.LIMITED;
+        if (isTerrain) return null;
+
+        const isWindow = move === movementTypes.NORMAL
+            && sight === senseTypes.PROXIMITY
+            && light === senseTypes.PROXIMITY;
+        if (isWindow) return 'window';
+
+        const isPhysicalWall = move === movementTypes.NORMAL
+            && (sight === senseTypes.NORMAL || light === senseTypes.NORMAL);
+        return isPhysicalWall ? 'wall' : null;
     }
 
     async setZoom(value) {

@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Simplified map tiles**: Explored floor tiles are now borderless solid fills with no decorative texture or inset outline.
 - **Centered party tracking**: The party marker stays fixed in the middle of the Tool window while the map recenters beneath it after movement and zoom changes.
 - **Prototype wall tiles**: Wall segments crossing explored scene cells now render those cells as solid black tiles. This deliberately simple representation establishes the floor/wall tile distinction before doorway and final artwork support.
+- **Wall element classification**: The mapper now reads placed Wall document fields directly and limits rendering to physical walls, windows, and regular doors. Terrain, invisible, and ethereal boundaries are ignored; secret doors deliberately render as ordinary walls to avoid revealing them to players. Tiles remain simple solid colors: black walls, blue windows, and orange doors.
 
 
 

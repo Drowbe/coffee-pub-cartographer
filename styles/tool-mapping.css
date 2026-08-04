@@ -4,6 +4,9 @@
 
 .application.blacksmith-window-tool.cartographer-mapping-window {
     --cartographer-map-cell-size: 32px;
+    --cartographer-map-wall: #000;
+    --cartographer-map-window: #4c93cc;
+    --cartographer-map-door: #db820c;
 }
 
 .cartographer-mapping-window .blacksmith-window-tool-body {
@@ -86,7 +89,15 @@
 }
 
 .cartographer-mapping-cell.is-wall {
-    background: #000;
+    background: var(--cartographer-map-wall);
+}
+
+.cartographer-mapping-cell.is-window {
+    background: var(--cartographer-map-window);
+}
+
+.cartographer-mapping-cell.is-door {
+    background: var(--cartographer-map-door);
 }
 
 .cartographer-mapping-party {
