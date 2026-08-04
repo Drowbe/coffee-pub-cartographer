@@ -47,6 +47,7 @@ export class MappingWindow extends ToolWindowBase {
         this._handlePanStart = this._handlePanStart.bind(this);
         this._handlePanMove = this._handlePanMove.bind(this);
         this._handlePanEnd = this._handlePanEnd.bind(this);
+        this._handleWheelZoom = this._handleWheelZoom.bind(this);
         this._preventPanMenu = event => event.preventDefault();
     }
 
@@ -334,8 +335,7 @@ export class MappingWindow extends ToolWindowBase {
 
     async setZoom(value) {
         this.zoom = Math.max(0.4, Math.min(2.5, Number(value) || 1));
-        await this.render(false);
-        if (this.manager.active) requestAnimationFrame(() => this.centerOnParty());
+        await this.manager.renderWindow({ centerOnParty: Boolean(this.manager._getTrackedToken()) });
         return this;
     }
 
@@ -347,6 +347,7 @@ export class MappingWindow extends ToolWindowBase {
         viewport.addEventListener('pointermove', this._handlePanMove);
         viewport.addEventListener('pointerup', this._handlePanEnd);
         viewport.addEventListener('pointercancel', this._handlePanEnd);
+        viewport.addEventListener('wheel', this._handleWheelZoom, { passive: false });
         viewport.addEventListener('contextmenu', this._preventPanMenu);
     }
 
@@ -379,6 +380,22 @@ export class MappingWindow extends ToolWindowBase {
         viewport.releasePointerCapture?.(event.pointerId);
         viewport.classList.remove('is-panning');
         this._pan = null;
+    }
+
+    _handleWheelZoom(event) {
+        event.preventDefault();
+        const direction = event.deltaY < 0 ? 1 : -1;
+        this._pendingWheelZoom = Math.max(
+            0.4,
+            Math.min(2.5, (this._pendingWheelZoom ?? this.zoom) + (direction * 0.1))
+        );
+        if (this._wheelZoomTimer) clearTimeout(this._wheelZoomTimer);
+        this._wheelZoomTimer = setTimeout(() => {
+            const zoom = this._pendingWheelZoom;
+            this._pendingWheelZoom = null;
+            this._wheelZoomTimer = null;
+            void this.setZoom(zoom);
+        }, 45);
     }
 
     centerOnParty() {
@@ -445,6 +462,9 @@ export class MappingWindow extends ToolWindowBase {
 
     _onClose(options) {
         this._pan = null;
+        if (this._wheelZoomTimer) clearTimeout(this._wheelZoomTimer);
+        this._wheelZoomTimer = null;
+        this._pendingWheelZoom = null;
         if (this._followFrame) cancelAnimationFrame(this._followFrame);
         this._followFrame = null;
         void this.manager?.onWindowClosed(this);

@@ -23,6 +23,7 @@ class MappingManager {
         this._hooks = [];
         this._saveQueue = Promise.resolve();
         this._renderQueue = Promise.resolve();
+        this._selectionFrame = null;
         this._closingWindow = false;
     }
 
@@ -52,6 +53,8 @@ class MappingManager {
         this.active = false;
         this.trackedTokenId = null;
         this.lastGridKey = null;
+        if (this._selectionFrame) cancelAnimationFrame(this._selectionFrame);
+        this._selectionFrame = null;
         this.window = null;
     }
 
@@ -83,10 +86,11 @@ class MappingManager {
 
     _registerHooks() {
         const updateToken = Hooks.on('updateToken', (tokenDocument, changes) => {
-            if (!this.active || tokenDocument.id !== this.trackedTokenId) return;
+            if (tokenDocument.id !== this.trackedTokenId) return;
             if (!('x' in changes) && !('y' in changes)) return;
             const position = this._gridPosition(tokenDocument);
             this.window?.followParty(position);
+            if (!this.active) return;
             void this._requestReveal(tokenDocument, position).catch(error => {
                 console.error(`${MODULE.NAME}: Failed to map token movement`, error);
             });
@@ -103,17 +107,27 @@ class MappingManager {
         this._hooks.push({ name: 'updateScene', id: updateScene });
 
         const controlToken = Hooks.on('controlToken', () => {
-            if (this.active && !this._getTrackedToken()) void this.stopMapping();
+            if (this._selectionFrame) cancelAnimationFrame(this._selectionFrame);
+            this._selectionFrame = requestAnimationFrame(() => {
+                this._selectionFrame = null;
+                void this._handleTokenSelectionChanged();
+            });
         });
         this._hooks.push({ name: 'controlToken', id: controlToken });
 
         const deleteToken = Hooks.on('deleteToken', tokenDocument => {
-            if (this.active && tokenDocument.id === this.trackedTokenId) void this.stopMapping();
+            if (tokenDocument.id !== this.trackedTokenId) return;
+            if (this.active) void this.stopMapping();
+            else {
+                this.trackedTokenId = null;
+                void this.renderWindow();
+            }
         });
         this._hooks.push({ name: 'deleteToken', id: deleteToken });
 
         const canvasReady = Hooks.on('canvasReady', () => {
             if (this.active) void this.stopMapping();
+            this.trackedTokenId = null;
             this.loadSceneState();
             void this.renderWindow();
         });
@@ -196,8 +210,8 @@ class MappingManager {
 
     async stopMapping({ closeWindow = false } = {}) {
         this.active = false;
-        this.trackedTokenId = null;
         this.lastGridKey = null;
+        this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
 
         if (closeWindow && this.window?.rendered) {
             this._closingWindow = true;
@@ -219,13 +233,35 @@ class MappingManager {
     }
 
     async openWindow() {
+        if (!this.active) this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
+        this.loadSceneState();
         if (this.window?.rendered) {
             this.window.bringToFront?.();
+            await this.renderWindow({ centerOnParty: Boolean(this.trackedTokenId) });
             return this.window;
         }
         const { MappingWindow } = await import('./window-mapping.js');
         this.window = await MappingWindow.open(this);
+        if (this.trackedTokenId) {
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            this.window?.centerOnParty();
+        }
         return this.window;
+    }
+
+    async _handleTokenSelectionChanged() {
+        const selected = this._getSingleControlledToken();
+        if (this.active) {
+            if (!selected || selected.id !== this.trackedTokenId) {
+                await this.stopMapping({ closeWindow: false });
+            }
+            return;
+        }
+
+        const nextTokenId = selected?.id ?? null;
+        if (nextTokenId === this.trackedTokenId) return;
+        this.trackedTokenId = nextTokenId;
+        await this.renderWindow({ centerOnParty: Boolean(nextTokenId) });
     }
 
     async renderWindow({ centerOnParty = false } = {}) {
@@ -304,6 +340,11 @@ class MappingManager {
 
     _getTrackedToken() {
         return this.trackedTokenId ? canvas?.tokens?.get(this.trackedTokenId) ?? null : null;
+    }
+
+    _getSingleControlledToken() {
+        const controlled = canvas?.tokens?.controlled ?? [];
+        return controlled.length === 1 ? controlled[0] : null;
     }
 
     getTrackedTokenName() {

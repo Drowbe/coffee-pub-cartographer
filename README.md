@@ -32,7 +32,7 @@ Party strategic planning, temporary canvas sketching, and shared old-school mapp
 
 Open Cartographer from the Blacksmith menubar to access its drawing and mapping tools.
 
-Open **Mapping** from the Cartographer toolbar to view the party map. To record exploration, control exactly one token and press **Record** in the map window. The mapper records the 5×5 grid area surrounding the token as it moves. Press **Stop**—or close the map window—to stop recording. Right-drag the map to pan it.
+Select one token and open **Mapping** from the Cartographer toolbar to load the existing party map with that token centered. Press **Record** to add its exploration: the mapper records the 5×5 grid area surrounding the token as it moves. Press **Stop** to stop recording while retaining the selected-token view, or close the window to stop and close it. Right-drag the map to pan it and use the mouse wheel to zoom.
 
 ## Configuration
 

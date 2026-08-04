@@ -37,8 +37,8 @@ The map appears in a resizable Blacksmith Tool window rather than as an overlay 
 
 ### Player workflow
 
-1. Open **Mapping** from the Cartographer toolbar to view the Glass map window.
-2. Select or control one owned token.
+1. Select or control one owned token.
+2. Open **Mapping** from the Cartographer toolbar to load the Glass map window with that token centered.
 3. Press **Record** in the map window.
 4. Move the token normally to add its 5×5 surroundings to the party map.
 5. Press **Stop** to stop recording while leaving the map open, or close the window to stop and close it.
@@ -73,6 +73,8 @@ Suggested controls:
 - **Reset View**
 - **Mapping status and tracked-token name**
 - **Clear Map** — GM only, with confirmation
+
+While recording is stopped, changing to a different single selected token updates and recenters the viewing context without revealing new cells.
 
 The Glass effect belongs to the frame. The map surface should remain opaque and use the Blacksmith Tool content-surface variables so the drawing stays legible in Light, Dark, and Glass themes.
 
@@ -241,6 +243,7 @@ Mapping start and stop belong to the menubar toggle. Map reset belongs in the wi
 
 - Register and open the Blacksmith Tool window.
 - Add the Mapping toolbar tool as a window launcher.
+- Load and center the existing scene map for one selected token without starting recording.
 - Add Record and Stop inside the map window.
 - Make closing the window stop recording.
 - Apply Glass and Micro defaults.
@@ -300,6 +303,8 @@ This phase should remain optional until the radius mapper is proven fun and reli
 ## Testing Checklist
 
 - Open Mapping, press Record with one controlled token, and reveal its starting 5×5 area.
+- Open Mapping with one selected token and verify its existing map and marker load before Record is pressed.
+- Change the selected token while viewing and verify the context recenters without adding cells.
 - Press Record with zero or multiple controlled tokens and verify recording remains stopped with useful feedback.
 - Move one cell horizontally, vertically, and diagonally.
 - Confirm only newly discovered cells are added.

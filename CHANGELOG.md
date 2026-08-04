@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Floor grid**: Added a very light graph-paper grid to explored floor cells, preserving spatial scale without competing with the heavier hand-drawn wall, window, and door strokes.
 - **Map interaction cleanup**: The Cartographer Mapping tool now opens the map for viewing instead of toggling recording. Record/Stop lives inside the map window, right-drag pans like the Foundry canvas, native scrollbars are hidden, and Street View identifies the launcher and tracked party position.
 - **Rebased default zoom**: Reduced the base map-cell size so the former 70% presentation is now the clearer 100% default scale.
+- **Selected-token map context**: Opening Mapping with one selected token now loads the existing scene map with that token marked and centered before recording begins. Record adds its movement; Stop retains the selected-token view, and changing selection while viewing updates the map context.
+- **Wheel zoom**: The mouse wheel now zooms the map in and out like the Foundry canvas. Rapid wheel input is batched into stable zoom updates instead of scrolling the hidden viewport or launching overlapping renders.
 
 
 
