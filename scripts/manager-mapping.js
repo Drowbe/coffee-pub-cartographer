@@ -97,7 +97,9 @@ class MappingManager {
 
         const updateScene = Hooks.on('updateScene', (scene, changes) => {
             if (scene.id !== canvas?.scene?.id || !changes?.flags?.[MODULE.ID]?.[FLAG_KEY]) return;
-            this.loadSceneState();
+            const incoming = this._normalizeState(scene.getFlag(MODULE.ID, FLAG_KEY));
+            const isReset = incoming.explored.length === 0 && incoming.updatedAt === 0;
+            if (!this._applyIncomingState(incoming, { replace: isReset })) return;
             void this.renderWindow({ centerOnParty: this.active });
         });
         this._hooks.push({ name: 'updateScene', id: updateScene });
@@ -131,7 +133,7 @@ class MappingManager {
         socketManager.registerToolHandlers('mapping', {
             'reveal-request': (data) => this._handleRevealRequest(data),
             'state-updated': (data) => this._handleStateUpdated(data),
-            'reset': (data) => this._handleStateUpdated(data)
+            'reset': (data) => this._handleStateUpdated(data, { replace: true })
         });
     }
 
@@ -243,8 +245,8 @@ class MappingManager {
                 await window.render(false);
                 if (centerOnParty && this.window === window && window.rendered) {
                     // Blacksmith restores saved scroll positions on its first
-                    // post-render frame. Center on the following frame so the
-                    // tracked token, rather than stale scroll, wins.
+                    // post-render frame. Our callback is registered afterward,
+                    // so tracked-token centering wins over that stale scroll.
                     await new Promise(resolve => requestAnimationFrame(resolve));
                     if (this.window === window && window.rendered) window.centerOnParty();
                 }
@@ -270,6 +272,33 @@ class MappingManager {
             updatedAt: Number(raw.updatedAt) || 0,
             updatedBy: typeof raw.updatedBy === 'string' ? raw.updatedBy : null
         };
+    }
+
+    _applyIncomingState(incoming, { replace = false } = {}) {
+        const next = replace ? incoming : this._mergeState(incoming);
+        if (this._statesEqual(next, this.state)) return false;
+        this.state = next;
+        return true;
+    }
+
+    _mergeState(incoming) {
+        const incomingIsNewer = incoming.updatedAt >= this.state.updatedAt;
+        return {
+            version: Math.max(this.state.version, incoming.version),
+            gridType: 'square',
+            explored: [...new Set([...this.state.explored, ...incoming.explored])],
+            updatedAt: incomingIsNewer ? incoming.updatedAt : this.state.updatedAt,
+            updatedBy: incomingIsNewer ? incoming.updatedBy : this.state.updatedBy
+        };
+    }
+
+    _statesEqual(left, right) {
+        return left.version === right.version
+            && left.gridType === right.gridType
+            && left.updatedAt === right.updatedAt
+            && left.updatedBy === right.updatedBy
+            && left.explored.length === right.explored.length
+            && left.explored.every((key, index) => key === right.explored[index]);
     }
 
     _isSquareGrid() {
@@ -357,6 +386,7 @@ class MappingManager {
             updatedAt: Date.now(),
             updatedBy: data.userId
         };
+        void this.renderWindow({ centerOnParty: this.active });
         await this._persistState('state-updated');
     }
 
@@ -375,15 +405,10 @@ class MappingManager {
         return this._saveQueue;
     }
 
-    _handleStateUpdated(data) {
+    _handleStateUpdated(data, { replace = false } = {}) {
         if (!data || data.sceneId !== canvas?.scene?.id) return;
         const incoming = this._normalizeState(data.state);
-        const unchanged = incoming.updatedAt === this.state.updatedAt
-            && incoming.updatedBy === this.state.updatedBy
-            && incoming.explored.length === this.state.explored.length
-            && incoming.explored.every((key, index) => key === this.state.explored[index]);
-        if (unchanged) return;
-        this.state = incoming;
+        if (!this._applyIncomingState(incoming, { replace })) return;
         void this.renderWindow({ centerOnParty: this.active });
     }
 

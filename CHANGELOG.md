@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Old-school wall linework**: Replaced whole-cell wall fills with a graph-paper tile vocabulary. Foundry walls are simplified into horizontal and vertical strokes, corners, junctions, and deliberate stair-steps instead of reproducing exact wall coordinates. Windows render above walls, and doors render last so short doorway segments are not erased by neighboring walls.
 - **Stable token following**: Token movement now relocates and recenters the party marker directly, even while crossing previously mapped cells. Mapping window renders are serialized and duplicate state broadcasts are ignored, preventing competing renders from restoring stale scroll positions and making the map jump.
 - **Hand-drawn map strokes**: Increased wall, window, and door line weight and added subtly bent paths with a faint second ink pass. Shared endpoints remain exact so the sketch treatment keeps corners and junctions connected.
+- **Reliable discovery accumulation**: Ordinary mapping updates now merge explored cells instead of replacing them with queued scene snapshots. Rapid movement can no longer let an older persistence update erase the newly mapped cells in front of the tracked token; explicit map resets still replace the state normally.
+- **Floor grid**: Added a very light graph-paper grid to explored floor cells, preserving spatial scale without competing with the heavier hand-drawn wall, window, and door strokes.
 
 
 

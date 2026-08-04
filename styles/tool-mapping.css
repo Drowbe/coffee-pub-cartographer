@@ -7,6 +7,7 @@
     --cartographer-map-wall: #000;
     --cartographer-map-window: #4c93cc;
     --cartographer-map-door: #db820c;
+    --cartographer-map-floor-grid: color-mix(in srgb, var(--blacksmith-tool-divider) 28%, transparent);
 }
 
 .cartographer-mapping-window .blacksmith-window-tool-body {
@@ -88,6 +89,7 @@
 
 .cartographer-mapping-cell.is-explored {
     background: var(--blacksmith-tool-scrim);
+    box-shadow: inset -1px -1px 0 var(--cartographer-map-floor-grid);
 }
 
 .cartographer-mapping-segments {
