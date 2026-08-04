@@ -43,6 +43,8 @@ export class MappingWindow extends ToolWindowBase {
         super(options);
         this.manager = manager;
         this.zoom = 1;
+        this._hasBuiltMap = false;
+        this._renderedExplored = new Set();
         this._pan = null;
         this._handlePanStart = this._handlePanStart.bind(this);
         this._handlePanMove = this._handlePanMove.bind(this);
@@ -84,6 +86,10 @@ export class MappingWindow extends ToolWindowBase {
 
     _buildMapModel() {
         const explored = new Set(this.manager.state.explored);
+        const animateNewTiles = this._hasBuiltMap;
+        const newTiles = animateNewTiles
+            ? new Set([...explored].filter(key => !this._renderedExplored.has(key)))
+            : new Set();
         const tracked = this.manager._getTrackedToken();
         const trackedPosition = tracked ? this.manager._gridPosition(tracked.document) : null;
         const mappedSegments = this._getMappedTileSegments(explored);
@@ -100,6 +106,8 @@ export class MappingWindow extends ToolWindowBase {
             centerPartyLabel: game.i18n.localize(`${MODULE.ID}.mapping.centerParty`)
         };
         if (!explored.size) {
+            this._hasBuiltMap = true;
+            this._renderedExplored = explored;
             return {
                 ...common,
                 empty: true,
@@ -116,17 +124,21 @@ export class MappingWindow extends ToolWindowBase {
         const columnCount = Math.max(Math.ceil(canvas.dimensions.width / sizeX), maxExploredColumn + 1);
         const rowCount = Math.max(Math.ceil(canvas.dimensions.height / sizeY), maxExploredRow + 1);
         const cells = coordinates.map(([column, row]) => {
+            const key = `${column},${row}`;
             const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
-            const segments = mappedSegments.get(`${column},${row}`) ?? [];
+            const isNew = newTiles.has(key);
+            const segments = mappedSegments.get(key) ?? [];
             return {
-                key: `${column},${row}`,
+                key,
                 gridColumn: column + 1,
                 gridRow: row + 1,
-                className: `is-explored${isParty ? ' is-party' : ''}`,
+                className: `is-explored${isNew ? ' is-new' : ''}${isParty ? ' is-party' : ''}`,
                 segments,
                 isParty
             };
         });
+        this._hasBuiltMap = true;
+        this._renderedExplored = explored;
 
         return {
             ...common,
@@ -333,10 +345,25 @@ export class MappingWindow extends ToolWindowBase {
         return isPhysicalWall ? 'wall' : null;
     }
 
-    async setZoom(value) {
-        this.zoom = Math.max(0.4, Math.min(2.5, Number(value) || 1));
-        await this.manager.renderWindow({ centerOnParty: Boolean(this.manager._getTrackedToken()) });
-        return this;
+    setZoom(value, { anchor = null } = {}) {
+        const zoom = Math.max(0.4, Math.min(2.5, Number(value) || 1));
+        this._targetZoom = zoom;
+        this._zoomQueue = (this._zoomQueue ?? Promise.resolve())
+            .catch(error => console.error(`${MODULE.NAME}: Failed to zoom mapping window`, error))
+            .then(async () => {
+                this.zoom = zoom;
+                await this.manager.renderWindow({
+                    centerOnParty: !anchor && Boolean(this.manager._getTrackedToken())
+                });
+                if (!anchor) return;
+
+                this._ensureScrollMargin();
+                // Blacksmith restores the pre-render scroll on its queued
+                // animation frame. Apply the cursor anchor afterward.
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                this._restoreZoomAnchor(anchor);
+            });
+        return this._zoomQueue.then(() => this);
     }
 
     _onRender(context, options) {
@@ -387,26 +414,60 @@ export class MappingWindow extends ToolWindowBase {
         const direction = event.deltaY < 0 ? 1 : -1;
         this._pendingWheelZoom = Math.max(
             0.4,
-            Math.min(2.5, (this._pendingWheelZoom ?? this.zoom) + (direction * 0.1))
+            Math.min(2.5, (this._pendingWheelZoom ?? this._targetZoom ?? this.zoom) + (direction * 0.1))
         );
+        this._pendingWheelAnchor = this._captureZoomAnchor(event);
         if (this._wheelZoomTimer) clearTimeout(this._wheelZoomTimer);
         this._wheelZoomTimer = setTimeout(() => {
             const zoom = this._pendingWheelZoom;
+            const anchor = this._pendingWheelAnchor;
             this._pendingWheelZoom = null;
+            this._pendingWheelAnchor = null;
             this._wheelZoomTimer = null;
-            void this.setZoom(zoom);
+            void this.setZoom(zoom, { anchor });
         }, 45);
     }
 
-    centerOnParty() {
+    _captureZoomAnchor(event) {
+        const grid = this.element?.querySelector('.cartographer-mapping-grid');
+        if (!grid) return null;
+        const gridRect = grid.getBoundingClientRect();
+        const renderedZoom = Number.parseFloat(
+            grid.style.getPropertyValue('--cartographer-map-zoom')
+        ) || this.zoom;
+        return {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            mapX: (event.clientX - gridRect.left) / renderedZoom,
+            mapY: (event.clientY - gridRect.top) / renderedZoom
+        };
+    }
+
+    _restoreZoomAnchor(anchor) {
         const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
         const grid = this.element?.querySelector('.cartographer-mapping-grid');
+        if (!viewport || !grid || !anchor) return;
+        const gridRect = grid.getBoundingClientRect();
+        viewport.scrollLeft += gridRect.left + (anchor.mapX * this.zoom) - anchor.clientX;
+        viewport.scrollTop += gridRect.top + (anchor.mapY * this.zoom) - anchor.clientY;
+    }
+
+    _ensureScrollMargin() {
+        const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
+        const grid = this.element?.querySelector('.cartographer-mapping-grid');
+        if (!viewport || !grid) return null;
+        grid.style.margin = `${viewport.clientHeight / 2}px ${viewport.clientWidth / 2}px`;
+        return { viewport, grid };
+    }
+
+    centerOnParty() {
+        const elements = this._ensureScrollMargin();
         const partyCell = this.element?.querySelector('.cartographer-mapping-cell.is-party');
-        if (!viewport || !grid || !partyCell) return;
+        if (!elements || !partyCell) return;
+        const { viewport } = elements;
 
         // The extra margin is scrollable breathing room. Without it a cell near
         // a scene edge cannot physically reach the middle of the viewport.
-        grid.style.margin = `${viewport.clientHeight / 2}px ${viewport.clientWidth / 2}px`;
         const viewportRect = viewport.getBoundingClientRect();
         const partyRect = partyCell.getBoundingClientRect();
         viewport.scrollTo({
@@ -465,6 +526,8 @@ export class MappingWindow extends ToolWindowBase {
         if (this._wheelZoomTimer) clearTimeout(this._wheelZoomTimer);
         this._wheelZoomTimer = null;
         this._pendingWheelZoom = null;
+        this._pendingWheelAnchor = null;
+        this._targetZoom = null;
         if (this._followFrame) cancelAnimationFrame(this._followFrame);
         this._followFrame = null;
         void this.manager?.onWindowClosed(this);
