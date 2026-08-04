@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Old-school party mapper**: Added a toggleable Mapping tool for square-grid scenes. Turning it on with one controlled token opens a separate Glass-themed Blacksmith Tool window and permanently maps the 5×5 grid area surrounding that token as it moves.
+- **Old-school party mapper**: Added a Mapping tool for square-grid scenes. It opens a separate Glass-themed Blacksmith Tool window where recording permanently maps the 5×5 grid area surrounding one controlled token as it moves.
 - **Shared persistent maps**: Mapped cells are stored per scene and synchronized to connected users. Player reveal requests are validated and persisted by the active GM; players never receive undiscovered scene geometry.
 - **Map window controls**: Added zoom, center-on-token, remembered pan position, mapped-cell status, tracked-token status, and a confirmed GM-only map reset.
 - **Mapping configuration**: Added world settings to enable the mapper and allow or deny player mapping.
@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hand-drawn map strokes**: Increased wall, window, and door line weight and added subtly bent paths with a faint second ink pass. Shared endpoints remain exact so the sketch treatment keeps corners and junctions connected.
 - **Reliable discovery accumulation**: Ordinary mapping updates now merge explored cells instead of replacing them with queued scene snapshots. Rapid movement can no longer let an older persistence update erase the newly mapped cells in front of the tracked token; explicit map resets still replace the state normally.
 - **Floor grid**: Added a very light graph-paper grid to explored floor cells, preserving spatial scale without competing with the heavier hand-drawn wall, window, and door strokes.
+- **Map interaction cleanup**: The Cartographer Mapping tool now opens the map for viewing instead of toggling recording. Record/Stop lives inside the map window, right-drag pans like the Foundry canvas, native scrollbars are hidden, and Street View identifies the launcher and tracked party position.
+- **Rebased default zoom**: Reduced the base map-cell size so the former 70% presentation is now the clearer 100% default scale.
 
 
 
@@ -37,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Settings introduction**: Added a concise introduction explaining Cartographer's temporary canvas drawing tools.
 - **Feature planning**: Restored the project TODO with planned clipboard export, persistent Drawings, and an old-school mapping tool.
-- **Mapping tool plan**: Added a phased implementation plan for a persistent party map. A player toggles Mapping on from the Cartographer menubar to open a Glass-themed Tool window and begin revealing the 5×5 grid area around their controlled token; toggling it off stops mapping. The plan covers synchronization, permissions, rendering, placeholder and hand-drawn tiles, testing, and future wall-aware mapping.
+- **Mapping tool plan**: Added a phased implementation plan for a persistent party map. A player opens a Glass-themed Tool window from Cartographer and uses its Record button to begin revealing the 5×5 grid area around their controlled token; Stop ends recording without closing the map. The plan covers synchronization, permissions, rendering, placeholder and hand-drawn tiles, testing, and future wall-aware mapping.
 
 ### Changed
 - **Simplified settings hierarchy**: Reorganized module settings under one H1 and two description-free H2 sections: **Configuration** for player-drawing enablement and erase timing, and **Drawing** for personal hotkey controls. Removed the unnecessary H3, H4, and divider headings.

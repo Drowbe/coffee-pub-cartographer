@@ -72,15 +72,13 @@ class MappingManager {
 
     _registerToolbarTool() {
         cartographerToolbar.registerTool(TOOL_ID, {
-            icon: 'fa-solid fa-map-location-dot',
-            tooltip: game.i18n.localize(`${MODULE.ID}.mapping.toggleHint`),
+            icon: 'fa-solid fa-street-view',
+            tooltip: game.i18n.localize(`${MODULE.ID}.mapping.openHint`),
             group: 'Mapping',
             order: 1,
-            toggleable: true,
-            active: () => this.active,
-            onClick: () => this.toggle()
+            toggleable: false,
+            onClick: () => this.openWindow()
         });
-        this._updateToolbarButton();
     }
 
     _registerHooks() {
@@ -137,8 +135,8 @@ class MappingManager {
         });
     }
 
-    async toggle() {
-        if (this.active) return this.stopMapping();
+    async toggleRecording() {
+        if (this.active) return this.stopMapping({ closeWindow: false });
         return this.startMapping();
     }
 
@@ -148,13 +146,11 @@ class MappingManager {
                 subtitle: game.i18n.localize(`${MODULE.ID}.mapping.disabledHint`),
                 type: 'warn'
             });
-            this._updateToolbarButton();
             return false;
         }
 
         if (!game.user.isGM && !game.settings.get(MODULE.ID, 'mapping.allowPlayers')) {
             notify(game.i18n.localize(`${MODULE.ID}.mapping.notAllowedTitle`), { type: 'warn' });
-            this._updateToolbarButton();
             return false;
         }
 
@@ -163,7 +159,6 @@ class MappingManager {
                 subtitle: game.i18n.localize(`${MODULE.ID}.mapping.noGmHint`),
                 type: 'warn'
             });
-            this._updateToolbarButton();
             return false;
         }
 
@@ -172,7 +167,6 @@ class MappingManager {
                 subtitle: game.i18n.localize(`${MODULE.ID}.mapping.unsupportedGridHint`),
                 type: 'warn'
             });
-            this._updateToolbarButton();
             return false;
         }
 
@@ -182,32 +176,28 @@ class MappingManager {
                 subtitle: game.i18n.localize(`${MODULE.ID}.mapping.selectTokenHint`),
                 type: 'warn'
             });
-            this._updateToolbarButton();
             return false;
         }
 
         const token = controlled[0];
         if (!game.user.isGM && !token.document.testUserPermission(game.user, CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER)) {
             notify(game.i18n.localize(`${MODULE.ID}.mapping.notOwnerTitle`), { type: 'warn' });
-            this._updateToolbarButton();
             return false;
         }
 
         this.active = true;
         this.trackedTokenId = token.id;
         this.lastGridKey = null;
-        this._updateToolbarButton();
         await this.openWindow();
         await this._requestReveal(token.document);
         await this.renderWindow({ centerOnParty: true });
         return true;
     }
 
-    async stopMapping({ closeWindow = true } = {}) {
+    async stopMapping({ closeWindow = false } = {}) {
         this.active = false;
         this.trackedTokenId = null;
         this.lastGridKey = null;
-        this._updateToolbarButton();
 
         if (closeWindow && this.window?.rendered) {
             this._closingWindow = true;
@@ -217,6 +207,8 @@ class MappingManager {
                 this._closingWindow = false;
                 this.window = null;
             }
+        } else if (this.window?.rendered) {
+            await this.renderWindow();
         }
         return true;
     }
@@ -428,13 +420,6 @@ class MappingManager {
         return true;
     }
 
-    _updateToolbarButton() {
-        game.modules.get('coffee-pub-blacksmith')?.api?.updateSecondaryBarItemActive?.(
-            MODULE.ID,
-            TOOL_ID,
-            this.active
-        );
-    }
 }
 
 const mappingManager = new MappingManager();

@@ -3,7 +3,7 @@
 /* ------------------------------------ */
 
 .application.blacksmith-window-tool.cartographer-mapping-window {
-    --cartographer-map-cell-size: 32px;
+    --cartographer-map-cell-size: 22.4px;
     --cartographer-map-wall: #000;
     --cartographer-map-window: #4c93cc;
     --cartographer-map-door: #db820c;
@@ -56,13 +56,33 @@
     color: var(--blacksmith-status-danger);
 }
 
+.cartographer-mapping-controls button.cartographer-mapping-record {
+    color: var(--blacksmith-status-danger);
+}
+
+.cartographer-mapping-controls button.cartographer-mapping-record.is-recording {
+    border-color: var(--blacksmith-status-danger);
+    background: color-mix(in srgb, var(--blacksmith-status-danger) 18%, var(--blacksmith-tool-field-background));
+}
+
 .cartographer-mapping-viewport {
     width: 100%;
     height: 100%;
     min-height: 240px;
     overflow: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     padding: 0;
     background-color: var(--blacksmith-tool-surface-sunken);
+    user-select: none;
+}
+
+.cartographer-mapping-viewport::-webkit-scrollbar {
+    display: none;
+}
+
+.cartographer-mapping-viewport.is-panning {
+    cursor: grabbing;
 }
 
 .cartographer-mapping-grid {

@@ -1,5 +1,8 @@
 <div class="cartographer-mapping-root">
     <div class="cartographer-mapping-controls" role="toolbar">
+        <button type="button" class="cartographer-mapping-record{{#if isRecording}} is-recording{{/if}}" data-action="toggle-recording" data-tooltip="{{recordLabel}}" aria-label="{{recordLabel}}">
+            {{#if isRecording}}<i class="fa-solid fa-stop"></i>{{else}}<i class="fa-solid fa-circle"></i>{{/if}}
+        </button>
         <button type="button" data-action="zoom-out" data-tooltip="{{zoomOutLabel}}" aria-label="{{zoomOutLabel}}">
             <i class="fa-solid fa-minus"></i>
         </button>
@@ -34,7 +37,7 @@
                     {{/each}}
                 </svg>
                 {{/if}}
-                {{#if isParty}}<i class="fa-solid fa-location-dot cartographer-mapping-party" aria-hidden="true"></i>{{/if}}
+                {{#if isParty}}<i class="fa-solid fa-street-view cartographer-mapping-party" aria-hidden="true"></i>{{/if}}
             </div>
             {{/each}}
         </div>

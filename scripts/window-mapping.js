@@ -21,7 +21,7 @@ export class MappingWindow extends ToolWindowBase {
             position: { width: 560, height: 560 },
             window: {
                 title: `${MODULE.ID}.mapping.windowTitle`,
-                icon: 'fa-solid fa-map-location-dot',
+                icon: 'fa-solid fa-street-view',
                 resizable: true,
                 minimizable: true
             },
@@ -32,6 +32,7 @@ export class MappingWindow extends ToolWindowBase {
     );
 
     static ACTION_HANDLERS = {
+        'toggle-recording': (_event, _target, app) => void app.manager.toggleRecording(),
         'zoom-in': (_event, _target, app) => app.setZoom(app.zoom + 0.15),
         'zoom-out': (_event, _target, app) => app.setZoom(app.zoom - 0.15),
         'center-party': (_event, _target, app) => app.centerOnParty(),
@@ -42,6 +43,11 @@ export class MappingWindow extends ToolWindowBase {
         super(options);
         this.manager = manager;
         this.zoom = 1;
+        this._pan = null;
+        this._handlePanStart = this._handlePanStart.bind(this);
+        this._handlePanMove = this._handlePanMove.bind(this);
+        this._handlePanEnd = this._handlePanEnd.bind(this);
+        this._preventPanMenu = event => event.preventDefault();
     }
 
     static async open(manager) {
@@ -82,7 +88,11 @@ export class MappingWindow extends ToolWindowBase {
         const mappedSegments = this._getMappedTileSegments(explored);
         const common = {
             canReset: game.user.isGM,
+            isRecording: this.manager.active,
             zoom: this.zoom,
+            recordLabel: game.i18n.localize(
+                `${MODULE.ID}.mapping.${this.manager.active ? 'stopRecording' : 'startRecording'}`
+            ),
             resetLabel: game.i18n.localize(`${MODULE.ID}.mapping.resetMap`),
             zoomInLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomIn`),
             zoomOutLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomOut`),
@@ -329,6 +339,48 @@ export class MappingWindow extends ToolWindowBase {
         return this;
     }
 
+    _onRender(context, options) {
+        super._onRender?.(context, options);
+        const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
+        if (!viewport) return;
+        viewport.addEventListener('pointerdown', this._handlePanStart);
+        viewport.addEventListener('pointermove', this._handlePanMove);
+        viewport.addEventListener('pointerup', this._handlePanEnd);
+        viewport.addEventListener('pointercancel', this._handlePanEnd);
+        viewport.addEventListener('contextmenu', this._preventPanMenu);
+    }
+
+    _handlePanStart(event) {
+        if (event.button !== 2) return;
+        const viewport = event.currentTarget;
+        event.preventDefault();
+        viewport.setPointerCapture?.(event.pointerId);
+        viewport.classList.add('is-panning');
+        this._pan = {
+            pointerId: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            left: viewport.scrollLeft,
+            top: viewport.scrollTop
+        };
+    }
+
+    _handlePanMove(event) {
+        if (!this._pan || event.pointerId !== this._pan.pointerId) return;
+        event.preventDefault();
+        const viewport = event.currentTarget;
+        viewport.scrollLeft = this._pan.left - (event.clientX - this._pan.x);
+        viewport.scrollTop = this._pan.top - (event.clientY - this._pan.y);
+    }
+
+    _handlePanEnd(event) {
+        if (!this._pan || event.pointerId !== this._pan.pointerId) return;
+        const viewport = event.currentTarget;
+        viewport.releasePointerCapture?.(event.pointerId);
+        viewport.classList.remove('is-panning');
+        this._pan = null;
+    }
+
     centerOnParty() {
         const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
         const grid = this.element?.querySelector('.cartographer-mapping-grid');
@@ -364,7 +416,7 @@ export class MappingWindow extends ToolWindowBase {
             previousCell?.querySelector('.cartographer-mapping-party')?.remove();
             partyCell.classList.add('is-party');
             const marker = document.createElement('i');
-            marker.className = 'fa-solid fa-location-dot cartographer-mapping-party';
+            marker.className = 'fa-solid fa-street-view cartographer-mapping-party';
             marker.setAttribute('aria-hidden', 'true');
             partyCell.append(marker);
         }
@@ -392,6 +444,7 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     _onClose(options) {
+        this._pan = null;
         if (this._followFrame) cancelAnimationFrame(this._followFrame);
         this._followFrame = null;
         void this.manager?.onWindowClosed(this);

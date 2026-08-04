@@ -29,7 +29,7 @@
 	"mapping.allowPlayers-Label": "Allow Player Mapping",
 	"mapping.allowPlayers-Hint": "Allow players to map with a token they own and control.",
 	"mapping.windowTitle": "Party Map",
-	"mapping.toggleHint": "Toggle party mapping for your controlled token",
+	"mapping.openHint": "Open the party map",
 	"mapping.disabledTitle": "Mapping is disabled",
 	"mapping.disabledHint": "A GM can enable it in Cartographer settings.",
 	"mapping.notAllowedTitle": "Player mapping is disabled",
@@ -38,20 +38,22 @@
 	"mapping.unsupportedGridTitle": "Unsupported scene grid",
 	"mapping.unsupportedGridHint": "The first mapping release supports square-grid scenes.",
 	"mapping.selectTokenTitle": "Select one token",
-	"mapping.selectTokenHint": "Control exactly one token before turning Mapping on.",
+	"mapping.selectTokenHint": "Control exactly one token before starting map recording.",
 	"mapping.notOwnerTitle": "You do not own that token",
 	"mapping.noToken": "No tracked token",
-	"mapping.statusActive": "Mapping",
+	"mapping.statusActive": "Recording",
 	"mapping.statusViewing": "Viewing",
 	"mapping.cellsMapped": "cells mapped",
-	"mapping.emptyMap": "Move your token to begin the party map.",
+	"mapping.emptyMap": "Press Record and move your token to begin the party map.",
 	"mapping.resetTitle": "Reset Party Map",
 	"mapping.resetConfirm": "Clear every mapped cell for this scene? This cannot be undone.",
 	"mapping.resetDone": "Party map cleared",
 	"mapping.resetMap": "Reset map",
 	"mapping.zoomIn": "Zoom in",
 	"mapping.zoomOut": "Zoom out",
-	"mapping.centerParty": "Center on tracked token"
+	"mapping.centerParty": "Center on tracked token",
+	"mapping.startRecording": "Start recording",
+	"mapping.stopRecording": "Stop recording"
 	}
 }
 

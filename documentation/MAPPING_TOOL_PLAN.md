@@ -2,7 +2,7 @@
 
 ## Goal
 
-Create a separate old-school party map that builds itself while a player has **Mapping** toggled on in the Cartographer menubar. Each time that player's controlled token enters a new grid cell, the mapper permanently reveals the 5×5 area centered on the token.
+Create a separate old-school party map that a player opens from the Cartographer toolbar and records from inside the map window. Each time the recorded token enters a new grid cell, the mapper permanently reveals the 5×5 area centered on the token.
 
 The map appears in a resizable Blacksmith Tool window rather than as an overlay on the scene.
 
@@ -11,13 +11,13 @@ The map appears in a resizable Blacksmith Tool window rather than as an overlay 
 ### Included
 
 - Square-grid scenes.
-- A toggleable **Mapping** tool in the Cartographer menubar.
+- A **Mapping** tool in the Cartographer toolbar that opens the map window.
 - One controlled token per actively mapping user.
 - A 5×5 reveal centered on the tracked token.
 - Previously revealed cells remain mapped.
 - A separate map view using the Blacksmith Tool Window API.
 - Glass as the initial Tool window theme, while allowing the standard theme selector.
-- Pan, zoom, and center-on-party controls.
+- Record/stop, right-drag pan, zoom, and center-on-party controls.
 - Persistent scene-level map state.
 - Synchronized map updates for connected users.
 - Placeholder tiles that can later be replaced by hand-drawn artwork.
@@ -37,17 +37,17 @@ The map appears in a resizable Blacksmith Tool window rather than as an overlay 
 
 ### Player workflow
 
-1. Select or control one owned token.
-2. Toggle **Mapping** on in the Cartographer menubar.
-3. The Glass map window opens and mapping starts immediately.
+1. Open **Mapping** from the Cartographer toolbar to view the Glass map window.
+2. Select or control one owned token.
+3. Press **Record** in the map window.
 4. Move the token normally to add its 5×5 surroundings to the party map.
-5. Toggle **Mapping** off to stop mapping and close the map window.
+5. Press **Stop** to stop recording while leaving the map open, or close the window to stop and close it.
 
-The menubar toggle is the source of truth. Closing the map window also turns the toggle off and stops mapping; minimizing the window leaves mapping active.
+The Record button is the source of truth. Closing the map window stops recording; minimizing the window leaves recording active.
 
 ### GM workflow
 
-The GM can use the same Mapping toggle with a controlled token. The GM can also clear or reset the shared map through a confirmed action in the map window.
+The GM can use the same Record button with a controlled token. The GM can also clear or reset the shared map through a confirmed action in the map window.
 
 Players must never receive undiscovered scene geometry or hidden tile metadata.
 
@@ -66,6 +66,7 @@ Recommended defaults:
 
 Suggested controls:
 
+- **Record / Stop**
 - **Center on Party**
 - **Zoom In**
 - **Zoom Out**
@@ -80,19 +81,21 @@ The Glass effect belongs to the frame. The map surface should remain opaque and 
 The tracked token's occupied grid cell is the center cell. On each grid-cell transition, reveal these offsets:
 
 ```text
-(-1,-1) ( 0,-1) ( 1,-1)
-(-1, 0) ( 0, 0) ( 1, 0)
-(-1, 1) ( 0, 1) ( 1, 1)
+(-2,-2) (-1,-2) ( 0,-2) ( 1,-2) ( 2,-2)
+(-2,-1) (-1,-1) ( 0,-1) ( 1,-1) ( 2,-1)
+(-2, 0) (-1, 0) ( 0, 0) ( 1, 0) ( 2, 0)
+(-2, 1) (-1, 1) ( 0, 1) ( 1, 1) ( 2, 1)
+(-2, 2) (-1, 2) ( 0, 2) ( 1, 2) ( 2, 2)
 ```
 
 Rules:
 
 - Clip coordinates to scene grid bounds.
 - Do nothing when the token moves within its current grid cell.
-- Do nothing while the user's Mapping toggle is off.
+- Do nothing while recording is stopped.
 - Ignore movement on gridless or unsupported scenes and show a clear status message.
-- Require exactly one controlled token when Mapping is toggled on; otherwise leave the toggle off and explain what is needed.
-- Reveal the starting 5×5 area as soon as Mapping is toggled on.
+- Require exactly one controlled token when Record is pressed; otherwise leave recording stopped and explain what is needed.
+- Reveal the starting 5×5 area as soon as Record is pressed.
 - Teleporting reveals only the 5×5 area at the destination in the initial version.
 - Each active user contributes discoveries from their own controlled token to the shared party map.
 - An active GM client is authoritative for validating contributors, calculating discoveries, and persisting the map.
@@ -237,11 +240,11 @@ Mapping start and stop belong to the menubar toggle. Map reset belongs in the wi
 ### Phase 1 — Window prototype
 
 - Register and open the Blacksmith Tool window.
-- Add the toggleable Mapping menubar tool.
-- Make toggle-on open the window and toggle-off close it.
-- Make closing the window turn mapping off.
+- Add the Mapping toolbar tool as a window launcher.
+- Add Record and Stop inside the map window.
+- Make closing the window stop recording.
 - Apply Glass and Micro defaults.
-- Add a resizable opaque map surface with pan and zoom.
+- Add a resizable opaque map surface with right-drag pan and zoom.
 - Render a fixed sample grid with placeholder tiles.
 
 **Exit condition:** The window opens reliably, remembers its presentation, and renders a navigable sample map.
@@ -249,13 +252,13 @@ Mapping start and stop belong to the menubar toggle. Map reset belongs in the wi
 ### Phase 2 — Local discovery engine
 
 - Resolve the activating user's single controlled token.
-- Start and stop tracking from the menubar toggle.
+- Start and stop tracking from the map window's Record button.
 - Convert token positions to square-grid coordinates.
 - Detect cell transitions.
 - Accumulate the 5×5 reveal locally.
 - Center the window on the tracked token.
 
-**Exit condition:** Moving the token reveals the correct nine-cell neighborhoods without duplicate work.
+**Exit condition:** Moving the token reveals the correct 25-cell neighborhoods without duplicate work.
 
 ### Phase 3 — Persistence and synchronization
 
@@ -270,7 +273,7 @@ Mapping start and stop belong to the menubar toggle. Map reset belongs in the wi
 ### Phase 4 — Controls and hardening
 
 - Add mapping status, tracked-token name, center, and confirmed reset actions.
-- Keep the menubar toggle synchronized with the Tool window lifecycle.
+- Keep recording state synchronized with the Tool window lifecycle.
 - Handle deleted tokens, scene changes, unsupported grids, and missing Blacksmith APIs.
 - Add localization and accessible labels/tooltips.
 - Add settings and status feedback.
@@ -296,16 +299,16 @@ This phase should remain optional until the radius mapper is proven fun and reli
 
 ## Testing Checklist
 
-- Toggle Mapping on with one controlled token and reveal its starting 5×5 area.
-- Toggle Mapping on with zero or multiple controlled tokens and verify it remains off with useful feedback.
+- Open Mapping, press Record with one controlled token, and reveal its starting 5×5 area.
+- Press Record with zero or multiple controlled tokens and verify recording remains stopped with useful feedback.
 - Move one cell horizontally, vertically, and diagonally.
 - Confirm only newly discovered cells are added.
 - Move rapidly and verify writes are batched without losing cells.
 - Teleport the token and verify only the destination neighborhood is revealed.
-- Toggle Mapping off and confirm movement reveals nothing.
-- Toggle Mapping back on and verify the current neighborhood is revealed.
-- Close the Tool window and verify the menubar toggle turns off.
-- Minimize the Tool window and verify mapping remains active.
+- Press Stop and confirm movement reveals nothing while the map stays open.
+- Press Record again and verify the current neighborhood is revealed.
+- Close the Tool window and verify recording stops.
+- Minimize the Tool window and verify recording remains active.
 - Move at all four scene edges and corners without out-of-bounds cells.
 - Delete the tracked token and verify graceful recovery.
 - Reload the world and restore the same map.
@@ -313,7 +316,7 @@ This phase should remain optional until the radius mapper is proven fun and reli
 - Connect as a player and verify synchronized updates.
 - Verify players receive no undiscovered geometry.
 - Test Light, Dark, and Glass themes with the map window open.
-- Test window resizing, minimizing, pan, zoom, and position restoration.
+- Test window resizing, minimizing, right-drag pan, zoom, and position restoration with hidden scrollbars.
 
 ## Estimated Effort
 
@@ -326,4 +329,4 @@ A reliable square-grid release is therefore approximately one to two focused dev
 
 ## MVP Completion Criteria
 
-The first release is complete when a player can control a token, toggle Mapping on from the Cartographer menubar, and build a persistent shared 5×5-per-step party map in a separate Glass Tool window; toggling it off stops mapping, and no undiscovered scene information is exposed.
+The first release is complete when a player can open Mapping from the Cartographer toolbar, press Record with a controlled token, and build a persistent shared 5×5-per-step party map in a separate Glass Tool window; Stop ends recording without closing the map, and no undiscovered scene information is exposed.
