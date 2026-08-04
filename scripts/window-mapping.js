@@ -97,35 +97,29 @@ export class MappingWindow extends ToolWindowBase {
         }
 
         const coordinates = [...explored].map(key => key.split(',').map(Number));
-        if (trackedPosition) coordinates.push([trackedPosition.column, trackedPosition.row]);
-        const columns = coordinates.map(([column]) => column);
-        const rows = coordinates.map(([, row]) => row);
-        const minColumn = Math.min(...columns) - 1;
-        const maxColumn = Math.max(...columns) + 1;
-        const minRow = Math.min(...rows) - 1;
-        const maxRow = Math.max(...rows) + 1;
-        const mapRows = [];
-
-        for (let row = minRow; row <= maxRow; row++) {
-            const cells = [];
-            for (let column = minColumn; column <= maxColumn; column++) {
-                const key = `${column},${row}`;
-                const isExplored = explored.has(key);
-                const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
-                cells.push({
-                    key,
-                    className: `${isExplored ? 'is-explored' : 'is-unexplored'}${isParty ? ' is-party' : ''}`,
-                    isParty
-                });
-            }
-            mapRows.push({ cells });
-        }
+        const maxExploredColumn = Math.max(...coordinates.map(([column]) => column));
+        const maxExploredRow = Math.max(...coordinates.map(([, row]) => row));
+        const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
+        const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
+        const columnCount = Math.max(Math.ceil(canvas.dimensions.width / sizeX), maxExploredColumn + 1);
+        const rowCount = Math.max(Math.ceil(canvas.dimensions.height / sizeY), maxExploredRow + 1);
+        const cells = coordinates.map(([column, row]) => {
+            const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
+            return {
+                key: `${column},${row}`,
+                gridColumn: column + 1,
+                gridRow: row + 1,
+                className: isParty ? 'is-explored is-party' : 'is-explored',
+                isParty
+            };
+        });
 
         return {
             ...common,
             empty: false,
-            rows: mapRows,
-            columnCount: maxColumn - minColumn + 1,
+            cells,
+            columnCount,
+            rowCount,
             exploredCount: explored.size
         };
     }

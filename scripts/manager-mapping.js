@@ -187,7 +187,7 @@ class MappingManager {
         this._updateToolbarButton();
         await this.openWindow();
         await this._requestReveal(token.document);
-        this.renderWindow();
+        await this.renderWindow({ centerOnParty: true });
         return true;
     }
 
@@ -224,8 +224,10 @@ class MappingManager {
         return this.window;
     }
 
-    renderWindow() {
-        if (this.window?.rendered) void this.window.render(false);
+    async renderWindow({ centerOnParty = false } = {}) {
+        if (!this.window?.rendered) return;
+        await this.window.render(false);
+        if (centerOnParty) requestAnimationFrame(() => this.window?.centerOnParty());
     }
 
     loadSceneState() {
