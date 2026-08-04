@@ -121,9 +121,36 @@ function gridCellAt(point) {
 }
 
 /**
- * Snap the visible side of a Foundry wall segment to edges of explored floor
- * cells. Curved-wall endpoints commonly share grid squares with the token, so
- * routing them through cell centers puts linework directly through the path.
+ * Return the two cells which share the nearest grid boundary for a sampled
+ * wall point. The boundary is derived from scene geometry, not the observer's
+ * side, so seeing the same structure from another direction cannot move it to
+ * a different map edge.
+ */
+function boundaryCandidates(wallPoint, wallDx, wallDy) {
+    const cell = gridCellAt(wallPoint);
+    if (!cell) return [];
+    const center = cellCenter(cell);
+
+    if (Math.abs(wallDx) >= Math.abs(wallDy)) {
+        const direction = wallPoint.y < center.y ? 'north' : 'south';
+        const neighbor = direction === 'north'
+            ? { column: cell.column, row: cell.row - 1, direction: 'south' }
+            : { column: cell.column, row: cell.row + 1, direction: 'north' };
+        return [{ ...cell, direction }, neighbor];
+    }
+
+    const direction = wallPoint.x < center.x ? 'west' : 'east';
+    const neighbor = direction === 'west'
+        ? { column: cell.column - 1, row: cell.row, direction: 'east' }
+        : { column: cell.column + 1, row: cell.row, direction: 'west' };
+    return [{ ...cell, direction }, neighbor];
+}
+
+/**
+ * Snap a visible Foundry wall segment to stable old-school grid boundaries.
+ * Curved walls are sampled into stair steps. Doors deliberately use only their
+ * midpoint because the official symbol represents a doorway, not every
+ * quarter-grid sample of its wall document.
  */
 function wallBoundaryObservations(document, tokenDocument, allowed) {
     const feature = classifyWall(document);
@@ -142,8 +169,9 @@ function wallBoundaryObservations(document, tokenDocument, allowed) {
         canvas.grid.sizeX ?? canvas.grid.size,
         canvas.grid.sizeY ?? canvas.grid.size
     );
-    const sampleCount = Math.max(1, Math.ceil(length / (gridSize * 0.25)));
-    const sideInset = Math.max(3, gridSize * 0.08);
+    const sampleCount = feature === 'door'
+        ? 1
+        : Math.max(1, Math.ceil(length / (gridSize * 0.25)));
     const observations = [];
     const seen = new Set();
 
@@ -153,25 +181,19 @@ function wallBoundaryObservations(document, tokenDocument, allowed) {
             x: x1 + (wallDx * amount),
             y: y1 + (wallDy * amount)
         };
-        const towardTokenX = origin.x - wallPoint.x;
-        const towardTokenY = origin.y - wallPoint.y;
-        const tokenDistance = Math.hypot(towardTokenX, towardTokenY);
-        if (!tokenDistance) continue;
-        const floorPoint = {
-            x: wallPoint.x + ((towardTokenX / tokenDistance) * sideInset),
-            y: wallPoint.y + ((towardTokenY / tokenDistance) * sideInset)
-        };
-        const cell = gridCellAt(floorPoint);
-        if (!cell) continue;
+        if (!visibleFromToken(tokenDocument, wallPoint)) continue;
+        const candidates = boundaryCandidates(wallPoint, wallDx, wallDy)
+            .filter(candidate => allowed.has(`${candidate.column},${candidate.row}`));
+        if (!candidates.length) continue;
+        candidates.sort((left, right) => {
+            const leftCenter = cellCenter(left);
+            const rightCenter = cellCenter(right);
+            return Math.hypot(leftCenter.x - origin.x, leftCenter.y - origin.y)
+                - Math.hypot(rightCenter.x - origin.x, rightCenter.y - origin.y);
+        });
+        const cell = candidates[0];
         const key = `${cell.column},${cell.row}`;
-        if (!allowed.has(key) || !visibleFromToken(tokenDocument, wallPoint)) continue;
-
-        let direction;
-        if (Math.abs(wallDx) >= Math.abs(wallDy)) {
-            direction = origin.y < wallPoint.y ? 'south' : 'north';
-        } else {
-            direction = origin.x < wallPoint.x ? 'east' : 'west';
-        }
+        const direction = cell.direction;
         const code = `${feature}:${direction}`;
         const observationKey = `${key}:${code}`;
         if (seen.has(observationKey)) continue;
@@ -282,9 +304,39 @@ function normalizeFeatures(raw) {
     return normalized;
 }
 
+function featureEdgeKey(key, code) {
+    const [column, row] = key.split(',').map(Number);
+    const [, direction] = code.split(':');
+    if (!Number.isInteger(column) || !Number.isInteger(row)) return null;
+    return {
+        north: `h:${column}:${row}`,
+        south: `h:${column}:${row + 1}`,
+        west: `v:${column}:${row}`,
+        east: `v:${column + 1}:${row}`
+    }[direction] ?? null;
+}
+
 function mergeFeatures(left, right) {
     const merged = normalizeFeatures(left);
-    for (const [key, codes] of Object.entries(normalizeFeatures(right))) {
+    const incoming = normalizeFeatures(right);
+    const observedEdges = new Set();
+    for (const [key, codes] of Object.entries(incoming)) {
+        for (const code of codes) {
+            const edgeKey = featureEdgeKey(key, code);
+            if (edgeKey) observedEdges.add(edgeKey);
+        }
+    }
+
+    // An edge that has been seen again is current information. Replace its
+    // former wall/window/door classification instead of accumulating stale
+    // classifications forever.
+    for (const [key, codes] of Object.entries(merged)) {
+        const retained = codes.filter(code => !observedEdges.has(featureEdgeKey(key, code)));
+        if (retained.length) merged[key] = retained;
+        else delete merged[key];
+    }
+
+    for (const [key, codes] of Object.entries(incoming)) {
         merged[key] = [...new Set([...(merged[key] ?? []), ...codes])];
     }
     return merged;

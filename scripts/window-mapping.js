@@ -83,11 +83,16 @@ export class MappingWindow extends ToolWindowBase {
         );
         const statusKey = this.viewMode === 'list'
             ? 'mapping.statusMaps'
-            : (this.manager.active ? 'mapping.statusActive' : 'mapping.statusViewing');
+            : (this.manager.paused
+                ? 'mapping.statusPaused'
+                : (this.manager.active ? 'mapping.statusActive' : 'mapping.statusViewing'));
         const footerLeft = this.viewMode === 'list'
             ? game.i18n.format(`${MODULE.ID}.mapping.mapCount`, { count: model.maps.length })
             : `${model.feetMapped} ${game.i18n.localize(`${MODULE.ID}.mapping.feetMapped`)}`;
-        const status = `<span class="cartographer-mapping-status${this.manager.active ? ' is-recording' : ''}"><i class="fa-solid fa-circle"></i> ${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.${statusKey}`))}</span>`;
+        const statusClass = this.manager.paused
+            ? ' is-paused'
+            : (this.manager.active ? ' is-recording' : '');
+        const status = `<span class="cartographer-mapping-status${statusClass}"><i class="fa-solid fa-circle"></i> ${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.${statusKey}`))}</span>`;
         return {
             appId: this.id,
             bodyContent,
@@ -125,7 +130,7 @@ export class MappingWindow extends ToolWindowBase {
                 action: 'toggle-recording',
                 icon: this.manager.active ? 'fa-solid fa-stop' : 'fa-solid fa-circle',
                 label: model.recordLabel,
-                className: `cartographer-mapping-record${this.manager.active ? ' is-recording' : ''}`,
+                className: `cartographer-mapping-record${this.manager.paused ? ' is-paused' : (this.manager.active ? ' is-recording' : '')}`,
                 disabled: !model.canRecord && !this.manager.active
             }));
         }

@@ -227,6 +227,10 @@
     color: var(--blacksmith-status-danger);
 }
 
+.cartographer-mapping-status.is-paused i {
+    color: var(--blacksmith-status-warning);
+}
+
 .cartographer-mapping-token {
     color: var(--blacksmith-tool-text-muted);
 }
@@ -278,6 +282,11 @@
 .cartographer-mapping-chrome-actions button.cartographer-mapping-record.is-recording {
     border-color: var(--blacksmith-status-danger);
     background: color-mix(in srgb, var(--blacksmith-status-danger) 18%, var(--blacksmith-tool-field-background));
+}
+
+.cartographer-mapping-chrome-actions button.cartographer-mapping-record.is-paused {
+    border-color: var(--blacksmith-status-warning);
+    background: color-mix(in srgb, var(--blacksmith-status-warning) 18%, var(--blacksmith-tool-field-background));
 }
 
 .cartographer-mapping-zoom-readout {

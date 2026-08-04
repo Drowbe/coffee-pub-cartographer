@@ -23,6 +23,7 @@ class MappingManager {
     constructor() {
         this.services = null;
         this.active = false;
+        this.paused = false;
         this.trackedTokenId = null;
         this.currentMapId = null;
         this.lastGridKey = null;
@@ -86,6 +87,7 @@ class MappingManager {
         for (const hook of this._hooks) Hooks.off(hook.name, hook.id);
         this._hooks = [];
         this.active = false;
+        this.paused = false;
         this.trackedTokenId = null;
         this.currentMapId = null;
         this.lastGridKey = null;
@@ -148,7 +150,7 @@ class MappingManager {
             if (tokenDocument.id !== this.trackedTokenId) return;
             const visionChanged = ('rotation' in changes) || ('sight' in changes);
             if (!moved && !visionChanged) return;
-            if (!this.active) return;
+            if (!this.active || this.paused) return;
             void this._requestReveal(movementDocument, position, { force: visionChanged }).catch(error => {
                 console.error(`${MODULE.NAME}: Failed to map token movement`, error);
             });
@@ -200,7 +202,7 @@ class MappingManager {
         for (const hookName of ['createWall', 'updateWall']) {
             const hookId = Hooks.on(hookName, () => {
                 const token = this._getTrackedToken();
-                if (!this.active || !token) return;
+                if (!this.active || this.paused || !token) return;
                 void this._requestReveal(token.document, this._gridPosition(token.document), { force: true });
             });
             this._hooks.push({ name: hookName, id: hookId });
@@ -391,6 +393,7 @@ class MappingManager {
         }
 
         this.active = true;
+        this.paused = false;
         this.trackedTokenId = token.id;
         this.lastGridKey = null;
         this._selectMapForToken(token);
@@ -411,12 +414,13 @@ class MappingManager {
         // keeps Stop (and window close) from jumping the marker ahead of map
         // linework which is still catching up.
         if (this.active) {
-            await this._flushCatchUp();
+            if (!this.paused) await this._flushCatchUp();
             await this._outgoingRevealQueue.catch(error => {
                 console.error(`${MODULE.NAME}: Failed while finishing the recorded map path`, error);
             });
         }
         this.active = false;
+        this.paused = false;
         this.lastGridKey = null;
         this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
         if (closeWindow && this.window?.rendered) {
@@ -457,7 +461,9 @@ class MappingManager {
     async _handleTokenSelectionChanged() {
         const selected = this._getSingleControlledToken();
         if (this.active) {
-            if (!selected || selected.id !== this.trackedTokenId) await this.stopMapping({ closeWindow: false });
+            if (selected?.id === this.trackedTokenId) {
+                if (this.paused) await this.resumeMapping();
+            } else if (!this.paused) await this.pauseMapping();
             return;
         }
         const nextTokenId = selected?.id ?? null;
@@ -472,6 +478,35 @@ class MappingManager {
             await new Promise(resolve => requestAnimationFrame(resolve));
             this.window.centerOnMap?.();
         }
+    }
+
+    async pauseMapping() {
+        if (!this.active || this.paused) return false;
+        this.paused = true;
+        this.lastGridKey = null;
+        if (this._catchUpTimer) {
+            clearTimeout(this._catchUpTimer);
+            this._catchUpTimer = null;
+        }
+        await this.renderWindow();
+        return true;
+    }
+
+    async resumeMapping() {
+        if (!this.active || !this.paused) return false;
+        const token = this._getSingleControlledToken();
+        if (!token || token.id !== this.trackedTokenId) return false;
+        if (!this._canManageActor(token.actor, game.user)) return false;
+
+        this.paused = false;
+        this.lastGridKey = null;
+        const position = this._gridPosition(token.document);
+        await this._requestReveal(token.document, position, {
+            force: true,
+            resetPath: true
+        });
+        await this.renderWindow({ centerOnParty: true, centerBehavior: 'smooth' });
+        return true;
     }
 
     async renderWindow({ centerOnParty = false, centerBehavior = 'auto' } = {}) {
@@ -622,7 +657,7 @@ class MappingManager {
         if (this._catchUpTimer) clearTimeout(this._catchUpTimer);
         this._catchUpTimer = setTimeout(() => {
             this._catchUpTimer = null;
-            if (!this.active || tokenId !== this.trackedTokenId) return;
+            if (!this.active || this.paused || tokenId !== this.trackedTokenId) return;
             const token = this._getTrackedToken();
             if (!token) return;
             const position = this._gridPosition(token.document);

@@ -52,6 +52,7 @@
 	"mapping.notOwnerTitle": "You do not own that token",
 	"mapping.noToken": "No tracked token",
 	"mapping.statusActive": "Recording",
+	"mapping.statusPaused": "Paused",
 	"mapping.statusViewing": "Viewing",
 	"mapping.statusMaps": "Recorded Maps",
 	"mapping.feetMapped": "feet mapped",
