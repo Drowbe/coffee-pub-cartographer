@@ -2,7 +2,7 @@
 
 ## Goal
 
-Create a separate old-school party map that builds itself as a tracked token moves through a gridded scene. Each time the token enters a new grid cell, the mapper permanently reveals the 3×3 area centered on that token.
+Create a separate old-school party map that builds itself while a player has **Mapping** toggled on in the Cartographer menubar. Each time that player's controlled token enters a new grid cell, the mapper permanently reveals the 3×3 area centered on the token.
 
 The map appears in a resizable Blacksmith Tool window rather than as an overlay on the scene.
 
@@ -11,43 +11,43 @@ The map appears in a resizable Blacksmith Tool window rather than as an overlay 
 ### Included
 
 - Square-grid scenes.
-- One GM-selected token per scene.
+- A toggleable **Mapping** tool in the Cartographer menubar.
+- One controlled token per actively mapping user.
 - A 3×3 reveal centered on the tracked token.
 - Previously revealed cells remain mapped.
 - A separate map view using the Blacksmith Tool Window API.
 - Glass as the initial Tool window theme, while allowing the standard theme selector.
-- Pan, zoom, center-on-party, pause, and resume controls.
+- Pan, zoom, and center-on-party controls.
 - Persistent scene-level map state.
 - Synchronized map updates for connected users.
 - Placeholder tiles that can later be replaced by hand-drawn artwork.
-- GM-only reset and tracked-token controls.
+- GM-only map reset controls.
 
 ### Deferred
 
 - Hex and gridless scenes.
 - Foundry vision, lighting, and wall-based reveal clipping.
 - Automatic room, corridor, or terrain classification.
-- Multiple tracked tokens.
+- Tracking more than one token for a single user.
 - Multiple floors or scene levels in one map.
 - Player annotations and manual map editing.
 - Exporting the completed map as an image.
 
 ## User Experience
 
-### GM workflow
-
-1. Open the Mapper from the Cartographer secondary bar.
-2. Select a token and choose **Track Selected Token**.
-3. Start or pause mapping.
-4. Move the token normally on the scene.
-5. Open the map window at any time to inspect the accumulated party map.
-6. Clear or reset the map through a confirmed GM-only action.
-
 ### Player workflow
 
-1. Open the Mapper from the Cartographer secondary bar.
-2. View the same accumulated party map.
-3. Pan, zoom, or center the local view without changing shared map data.
+1. Select or control one owned token.
+2. Toggle **Mapping** on in the Cartographer menubar.
+3. The Glass map window opens and mapping starts immediately.
+4. Move the token normally to add its 3×3 surroundings to the party map.
+5. Toggle **Mapping** off to stop mapping and close the map window.
+
+The menubar toggle is the source of truth. Closing the map window also turns the toggle off and stops mapping; minimizing the window leaves mapping active.
+
+### GM workflow
+
+The GM can use the same Mapping toggle with a controlled token. The GM can also clear or reset the shared map through a confirmed action in the map window.
 
 Players must never receive undiscovered scene geometry or hidden tile metadata.
 
@@ -70,8 +70,7 @@ Suggested controls:
 - **Zoom In**
 - **Zoom Out**
 - **Reset View**
-- **Pause/Resume Mapping** — GM only
-- **Track Selected Token** — GM only
+- **Mapping status and tracked-token name**
 - **Clear Map** — GM only, with confirmation
 
 The Glass effect belongs to the frame. The map surface should remain opaque and use the Blacksmith Tool content-surface variables so the drawing stays legible in Light, Dark, and Glass themes.
@@ -90,11 +89,13 @@ Rules:
 
 - Clip coordinates to scene grid bounds.
 - Do nothing when the token moves within its current grid cell.
-- Do nothing while mapping is paused.
+- Do nothing while the user's Mapping toggle is off.
 - Ignore movement on gridless or unsupported scenes and show a clear status message.
-- Reveal the starting 3×3 area as soon as tracking begins.
+- Require exactly one controlled token when Mapping is toggled on; otherwise leave the toggle off and explain what is needed.
+- Reveal the starting 3×3 area as soon as Mapping is toggled on.
 - Teleporting reveals only the 3×3 area at the destination in the initial version.
-- The GM is authoritative for discovery and persistence.
+- Each active user contributes discoveries from their own controlled token to the shared party map.
+- An active GM client is authoritative for validating contributors, calculating discoveries, and persisting the map.
 
 ## Data Model
 
@@ -105,8 +106,6 @@ Suggested shape:
 ```js
 {
   version: 1,
-  enabled: true,
-  trackedTokenId: "TOKEN_ID",
   gridType: "square",
   explored: ["12,8", "13,8", "14,8"],
   updatedAt: 0,
@@ -121,6 +120,7 @@ Implementation notes:
 - Batch or debounce scene-flag writes during rapid movement.
 - Include a schema version so the format can evolve safely.
 - Keep pan, zoom, window position, and theme local to each user rather than in shared scene data.
+- Keep each user's Mapping toggle and tracked-token session state out of the persistent party-map data.
 
 If map sizes make string coordinates too large, a later migration can use row spans or a compact bitset without changing the window contract.
 
@@ -144,7 +144,8 @@ assets/mapping/
 Responsibilities:
 
 - `manager-mapping.js`
-  - Track the selected token.
+  - Handle the menubar Mapping toggle.
+  - Resolve the activating user's single controlled token.
   - Detect grid-cell transitions.
   - Calculate newly revealed coordinates.
   - Persist and synchronize authoritative map state.
@@ -154,10 +155,12 @@ Responsibilities:
   - Extend the Blacksmith Tool window base.
   - Render the map surface and local navigation controls.
   - React to synchronized discovery updates.
-  - Provide GM-only tool actions.
+  - Reflect active mapping status and the tracked token.
+  - Provide the GM-only reset action.
 
 - `manager-sockets.js`
   - Add mapper state/update messages using the existing Cartographer socket pattern.
+  - Notify the authoritative GM when a user starts or stops mapping.
   - Treat socket messages as notifications; the persisted scene flag remains the source of truth.
 
 ## Rendering Strategy
@@ -217,14 +220,16 @@ Add only settings needed for stable behavior:
 - Default map zoom
 - Automatically center on the tracked token
 
-Tracked token, pause state, and map reset belong in the map window because they are scene-specific actions, not global settings.
+Mapping start and stop belong to the menubar toggle. Map reset belongs in the window because it is a scene-specific GM action.
 
 ## Permissions and Safety
 
-- Only a GM may select the tracked token, change shared mapping state, or reset a map.
+- A player may start mapping only from a token they own and control.
+- The authoritative GM validates the user/token relationship and calculates the revealed coordinates from actual token movement.
+- Only a GM may reset the shared map.
 - Player clients render only the explored coordinate set sent by the GM or read from scene flags.
 - Do not send wall, door, light, room, or unexplored-cell data to players.
-- Validate scene id, token id, sender, and GM authority on every mapping socket event.
+- Validate scene id, token id, sender, token ownership, and GM authority on every mapping socket event.
 - Confirm destructive reset actions and report what was cleared.
 
 ## Implementation Phases
@@ -232,6 +237,9 @@ Tracked token, pause state, and map reset belong in the map window because they 
 ### Phase 1 — Window prototype
 
 - Register and open the Blacksmith Tool window.
+- Add the toggleable Mapping menubar tool.
+- Make toggle-on open the window and toggle-off close it.
+- Make closing the window turn mapping off.
 - Apply Glass and Micro defaults.
 - Add a resizable opaque map surface with pan and zoom.
 - Render a fixed sample grid with placeholder tiles.
@@ -240,7 +248,8 @@ Tracked token, pause state, and map reset belong in the map window because they 
 
 ### Phase 2 — Local discovery engine
 
-- Track a GM-selected token.
+- Resolve the activating user's single controlled token.
+- Start and stop tracking from the menubar toggle.
 - Convert token positions to square-grid coordinates.
 - Detect cell transitions.
 - Accumulate the 3×3 reveal locally.
@@ -260,7 +269,8 @@ Tracked token, pause state, and map reset belong in the map window because they 
 
 ### Phase 4 — Controls and hardening
 
-- Add pause/resume, track-token, center, and confirmed reset actions.
+- Add mapping status, tracked-token name, center, and confirmed reset actions.
+- Keep the menubar toggle synchronized with the Tool window lifecycle.
 - Handle deleted tokens, scene changes, unsupported grids, and missing Blacksmith APIs.
 - Add localization and accessible labels/tooltips.
 - Add settings and status feedback.
@@ -286,13 +296,16 @@ This phase should remain optional until the radius mapper is proven fun and reli
 
 ## Testing Checklist
 
-- Track a token and reveal its starting 3×3 area.
+- Toggle Mapping on with one controlled token and reveal its starting 3×3 area.
+- Toggle Mapping on with zero or multiple controlled tokens and verify it remains off with useful feedback.
 - Move one cell horizontally, vertically, and diagonally.
 - Confirm only newly discovered cells are added.
 - Move rapidly and verify writes are batched without losing cells.
 - Teleport the token and verify only the destination neighborhood is revealed.
-- Pause mapping and confirm movement reveals nothing.
-- Resume and verify the current neighborhood is revealed.
+- Toggle Mapping off and confirm movement reveals nothing.
+- Toggle Mapping back on and verify the current neighborhood is revealed.
+- Close the Tool window and verify the menubar toggle turns off.
+- Minimize the Tool window and verify mapping remains active.
 - Move at all four scene edges and corners without out-of-bounds cells.
 - Delete the tracked token and verify graceful recovery.
 - Reload the world and restore the same map.
@@ -313,4 +326,4 @@ A reliable square-grid release is therefore approximately one to two focused dev
 
 ## MVP Completion Criteria
 
-The first release is complete when a GM can select a token, move it through a square-grid scene, and have a persistent 3×3-per-step party map appear consistently in a separate Glass Tool window for both GM and permitted players—without exposing undiscovered scene information.
+The first release is complete when a player can control a token, toggle Mapping on from the Cartographer menubar, and build a persistent shared 3×3-per-step party map in a separate Glass Tool window; toggling it off stops mapping, and no undiscovered scene information is exposed.

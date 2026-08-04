@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Settings introduction**: Added a concise introduction explaining Cartographer's temporary canvas drawing tools.
 - **Feature planning**: Restored the project TODO with planned clipboard export, persistent Drawings, and an old-school mapping tool.
-- **Mapping tool plan**: Added a phased implementation plan for a persistent party map that reveals the 3×3 grid area around a GM-selected token in a separate Glass-themed Blacksmith Tool window. The plan covers synchronization, permissions, rendering, placeholder and hand-drawn tiles, testing, and future wall-aware mapping.
+- **Mapping tool plan**: Added a phased implementation plan for a persistent party map. A player toggles Mapping on from the Cartographer menubar to open a Glass-themed Tool window and begin revealing the 3×3 grid area around their controlled token; toggling it off stops mapping. The plan covers synchronization, permissions, rendering, placeholder and hand-drawn tiles, testing, and future wall-aware mapping.
 
 ### Changed
 - **Simplified settings hierarchy**: Reorganized module settings under one H1 and two description-free H2 sections: **Configuration** for player-drawing enablement and erase timing, and **Drawing** for personal hotkey controls. Removed the unnecessary H3, H4, and divider headings.
