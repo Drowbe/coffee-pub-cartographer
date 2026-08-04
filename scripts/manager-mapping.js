@@ -272,8 +272,13 @@ class MappingManager {
             x: tokenDocument.x + ((tokenDocument.width ?? 1) * sizeX) / 2,
             y: tokenDocument.y + ((tokenDocument.height ?? 1) * sizeY) / 2
         };
-        const offset = canvas.grid.getOffset(center.x, center.y);
-        return { column: Number(offset.x), row: Number(offset.y) };
+        const offset = canvas.grid.getOffset(center);
+        const column = Number(offset.j ?? offset.x);
+        const row = Number(offset.i ?? offset.y);
+        if (!Number.isInteger(column) || !Number.isInteger(row)) {
+            throw new Error(`Invalid grid offset for token ${tokenDocument.id}: ${JSON.stringify(offset)}`);
+        }
+        return { column, row };
     }
 
     _revealKeys(position) {
