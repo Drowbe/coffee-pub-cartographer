@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Old-school party mapper**: Added a toggleable Mapping tool for square-grid scenes. Turning it on with one controlled token opens a separate Glass-themed Blacksmith Tool window and permanently maps the 3×3 grid area surrounding that token as it moves.
+- **Old-school party mapper**: Added a toggleable Mapping tool for square-grid scenes. Turning it on with one controlled token opens a separate Glass-themed Blacksmith Tool window and permanently maps the 5×5 grid area surrounding that token as it moves.
 - **Shared persistent maps**: Mapped cells are stored per scene and synchronized to connected users. Player reveal requests are validated and persisted by the active GM; players never receive undiscovered scene geometry.
 - **Map window controls**: Added zoom, center-on-token, remembered pan position, mapped-cell status, tracked-token status, and a confirmed GM-only map reset.
 - **Mapping configuration**: Added world settings to enable the mapper and allow or deny player mapping.
@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Centered party tracking**: The party marker stays fixed in the middle of the Tool window while the map recenters beneath it after movement and zoom changes.
 - **Prototype wall tiles**: Wall segments crossing explored scene cells now render those cells as solid black tiles. This deliberately simple representation establishes the floor/wall tile distinction before doorway and final artwork support.
 - **Wall element classification**: The mapper now reads placed Wall document fields directly and limits rendering to physical walls, windows, and regular doors. Terrain, invisible, and ethereal boundaries are ignored; secret doors deliberately render as ordinary walls to avoid revealing them to players. Tiles remain simple solid colors: black walls, blue windows, and orange doors.
+- **Token-relative map tracking**: The map pin is attached to the tracked token's actual grid cell again. The viewport now pans immediately after each move to keep that cell centered, with dynamic scroll margins so tokens near any scene edge can still reach the center.
+- **Wall/window corners**: Structural walls now take precedence when wall and window samples occupy the same corner cell, preventing nearby windows from coloring the entire corner as a window.
+- **Larger mapping footprint**: Each token step now reveals a 5×5 area centered on the tracked token, providing a more readable old-school map than the original 3×3 footprint.
 
 
 
@@ -31,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Settings introduction**: Added a concise introduction explaining Cartographer's temporary canvas drawing tools.
 - **Feature planning**: Restored the project TODO with planned clipboard export, persistent Drawings, and an old-school mapping tool.
-- **Mapping tool plan**: Added a phased implementation plan for a persistent party map. A player toggles Mapping on from the Cartographer menubar to open a Glass-themed Tool window and begin revealing the 3×3 grid area around their controlled token; toggling it off stops mapping. The plan covers synchronization, permissions, rendering, placeholder and hand-drawn tiles, testing, and future wall-aware mapping.
+- **Mapping tool plan**: Added a phased implementation plan for a persistent party map. A player toggles Mapping on from the Cartographer menubar to open a Glass-themed Tool window and begin revealing the 5×5 grid area around their controlled token; toggling it off stops mapping. The plan covers synchronization, permissions, rendering, placeholder and hand-drawn tiles, testing, and future wall-aware mapping.
 
 ### Changed
 - **Simplified settings hierarchy**: Reorganized module settings under one H1 and two description-free H2 sections: **Configuration** for player-drawing enablement and erase timing, and **Drawing** for personal hotkey controls. Removed the unnecessary H3, H4, and divider headings.

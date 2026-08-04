@@ -111,7 +111,8 @@ export class MappingWindow extends ToolWindowBase {
                 key: `${column},${row}`,
                 gridColumn: column + 1,
                 gridRow: row + 1,
-                className: `is-explored${feature ? ` is-${feature}` : ''}${isParty ? ' is-party' : ''}`
+                className: `is-explored${feature ? ` is-${feature}` : ''}${isParty ? ' is-party' : ''}`,
+                isParty
             };
         });
 
@@ -121,7 +122,6 @@ export class MappingWindow extends ToolWindowBase {
             cells,
             columnCount,
             rowCount,
-            hasParty: Boolean(trackedPosition),
             exploredCount: explored.size
         };
     }
@@ -131,7 +131,9 @@ export class MappingWindow extends ToolWindowBase {
         const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
         const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
         const sampleSize = Math.max(1, Math.min(sizeX, sizeY) / 3);
-        const priorities = { wall: 1, window: 2, door: 3 };
+        // Structural walls win shared endpoint/corner cells so a nearby window
+        // does not turn the whole corner into a window tile.
+        const priorities = { window: 1, door: 2, wall: 3 };
 
         for (const wall of canvas.walls?.placeables ?? []) {
             const feature = this._classifyWall(wall.document);
@@ -197,12 +199,23 @@ export class MappingWindow extends ToolWindowBase {
 
     centerOnParty() {
         const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
+        const grid = this.element?.querySelector('.cartographer-mapping-grid');
         const partyCell = this.element?.querySelector('.cartographer-mapping-cell.is-party');
-        if (!viewport || !partyCell) return;
+        if (!viewport || !grid || !partyCell) return;
+
+        // The extra margin is scrollable breathing room. Without it a cell near
+        // a scene edge cannot physically reach the middle of the viewport.
+        grid.style.margin = `${viewport.clientHeight / 2}px ${viewport.clientWidth / 2}px`;
+        const viewportRect = viewport.getBoundingClientRect();
+        const partyRect = partyCell.getBoundingClientRect();
         viewport.scrollTo({
-            left: partyCell.offsetLeft + (partyCell.offsetWidth / 2) - (viewport.clientWidth / 2),
-            top: partyCell.offsetTop + (partyCell.offsetHeight / 2) - (viewport.clientHeight / 2),
-            behavior: 'smooth'
+            left: viewport.scrollLeft
+                + partyRect.left - viewportRect.left
+                + (partyRect.width / 2) - (viewport.clientWidth / 2),
+            top: viewport.scrollTop
+                + partyRect.top - viewportRect.top
+                + (partyRect.height / 2) - (viewport.clientHeight / 2),
+            behavior: 'auto'
         });
     }
 

@@ -292,8 +292,8 @@ class MappingManager {
 
     _revealKeys(position) {
         const keys = [];
-        for (let rowOffset = -1; rowOffset <= 1; rowOffset++) {
-            for (let columnOffset = -1; columnOffset <= 1; columnOffset++) {
+        for (let rowOffset = -2; rowOffset <= 2; rowOffset++) {
+            for (let columnOffset = -2; columnOffset <= 2; columnOffset++) {
                 const column = position.column + columnOffset;
                 const row = position.row + rowOffset;
                 if (column < 0 || row < 0) continue;

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Create a separate old-school party map that builds itself while a player has **Mapping** toggled on in the Cartographer menubar. Each time that player's controlled token enters a new grid cell, the mapper permanently reveals the 3×3 area centered on the token.
+Create a separate old-school party map that builds itself while a player has **Mapping** toggled on in the Cartographer menubar. Each time that player's controlled token enters a new grid cell, the mapper permanently reveals the 5×5 area centered on the token.
 
 The map appears in a resizable Blacksmith Tool window rather than as an overlay on the scene.
 
@@ -13,7 +13,7 @@ The map appears in a resizable Blacksmith Tool window rather than as an overlay 
 - Square-grid scenes.
 - A toggleable **Mapping** tool in the Cartographer menubar.
 - One controlled token per actively mapping user.
-- A 3×3 reveal centered on the tracked token.
+- A 5×5 reveal centered on the tracked token.
 - Previously revealed cells remain mapped.
 - A separate map view using the Blacksmith Tool Window API.
 - Glass as the initial Tool window theme, while allowing the standard theme selector.
@@ -40,7 +40,7 @@ The map appears in a resizable Blacksmith Tool window rather than as an overlay 
 1. Select or control one owned token.
 2. Toggle **Mapping** on in the Cartographer menubar.
 3. The Glass map window opens and mapping starts immediately.
-4. Move the token normally to add its 3×3 surroundings to the party map.
+4. Move the token normally to add its 5×5 surroundings to the party map.
 5. Toggle **Mapping** off to stop mapping and close the map window.
 
 The menubar toggle is the source of truth. Closing the map window also turns the toggle off and stops mapping; minimizing the window leaves mapping active.
@@ -92,8 +92,8 @@ Rules:
 - Do nothing while the user's Mapping toggle is off.
 - Ignore movement on gridless or unsupported scenes and show a clear status message.
 - Require exactly one controlled token when Mapping is toggled on; otherwise leave the toggle off and explain what is needed.
-- Reveal the starting 3×3 area as soon as Mapping is toggled on.
-- Teleporting reveals only the 3×3 area at the destination in the initial version.
+- Reveal the starting 5×5 area as soon as Mapping is toggled on.
+- Teleporting reveals only the 5×5 area at the destination in the initial version.
 - Each active user contributes discoveries from their own controlled token to the shared party map.
 - An active GM client is authoritative for validating contributors, calculating discoveries, and persisting the map.
 
@@ -252,7 +252,7 @@ Mapping start and stop belong to the menubar toggle. Map reset belongs in the wi
 - Start and stop tracking from the menubar toggle.
 - Convert token positions to square-grid coordinates.
 - Detect cell transitions.
-- Accumulate the 3×3 reveal locally.
+- Accumulate the 5×5 reveal locally.
 - Center the window on the tracked token.
 
 **Exit condition:** Moving the token reveals the correct nine-cell neighborhoods without duplicate work.
@@ -296,7 +296,7 @@ This phase should remain optional until the radius mapper is proven fun and reli
 
 ## Testing Checklist
 
-- Toggle Mapping on with one controlled token and reveal its starting 3×3 area.
+- Toggle Mapping on with one controlled token and reveal its starting 5×5 area.
 - Toggle Mapping on with zero or multiple controlled tokens and verify it remains off with useful feedback.
 - Move one cell horizontally, vertically, and diagonally.
 - Confirm only newly discovered cells are added.
@@ -326,4 +326,4 @@ A reliable square-grid release is therefore approximately one to two focused dev
 
 ## MVP Completion Criteria
 
-The first release is complete when a player can control a token, toggle Mapping on from the Cartographer menubar, and build a persistent shared 3×3-per-step party map in a separate Glass Tool window; toggling it off stops mapping, and no undiscovered scene information is exposed.
+The first release is complete when a player can control a token, toggle Mapping on from the Cartographer menubar, and build a persistent shared 5×5-per-step party map in a separate Glass Tool window; toggling it off stops mapping, and no undiscovered scene information is exposed.
