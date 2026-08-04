@@ -79,7 +79,7 @@ export class MappingWindow extends ToolWindowBase {
         const explored = new Set(this.manager.state.explored);
         const tracked = this.manager._getTrackedToken();
         const trackedPosition = tracked ? this.manager._gridPosition(tracked.document) : null;
-        const mappedFeatures = this._getMappedFeatures();
+        const mappedSegments = this._getMappedTileSegments(explored);
         const common = {
             canReset: game.user.isGM,
             zoom: this.zoom,
@@ -106,12 +106,13 @@ export class MappingWindow extends ToolWindowBase {
         const rowCount = Math.max(Math.ceil(canvas.dimensions.height / sizeY), maxExploredRow + 1);
         const cells = coordinates.map(([column, row]) => {
             const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
-            const feature = mappedFeatures.get(`${column},${row}`) ?? null;
+            const segments = mappedSegments.get(`${column},${row}`) ?? [];
             return {
                 key: `${column},${row}`,
                 gridColumn: column + 1,
                 gridRow: row + 1,
-                className: `is-explored${feature ? ` is-${feature}` : ''}${isParty ? ' is-party' : ''}`,
+                className: `is-explored${isParty ? ' is-party' : ''}`,
+                segments,
                 isParty
             };
         });
@@ -126,14 +127,11 @@ export class MappingWindow extends ToolWindowBase {
         };
     }
 
-    _getMappedFeatures() {
-        const features = new Map();
+    _getMappedTileSegments(explored) {
+        const legsByCell = new Map();
         const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
         const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
-        const sampleSize = Math.max(1, Math.min(sizeX, sizeY) / 3);
-        // Structural walls win shared endpoint/corner cells so a nearby window
-        // does not turn the whole corner into a window tile.
-        const priorities = { window: 1, door: 2, wall: 3 };
+        const priorities = { wall: 1, window: 2, door: 3 };
 
         for (const wall of canvas.walls?.placeables ?? []) {
             const feature = this._classifyWall(wall.document);
@@ -141,24 +139,158 @@ export class MappingWindow extends ToolWindowBase {
             const coordinates = wall.document?.c ?? wall.document?._source?.c;
             if (!Array.isArray(coordinates) || coordinates.length < 4) continue;
             const [x1, y1, x2, y2] = coordinates.map(Number);
-            const distance = Math.hypot(x2 - x1, y2 - y1);
-            const steps = Math.max(1, Math.ceil(distance / sampleSize));
+            if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
 
-            for (let step = 0; step <= steps; step++) {
-                const ratio = step / steps;
-                const offset = canvas.grid.getOffset({
-                    x: x1 + ((x2 - x1) * ratio),
-                    y: y1 + ((y2 - y1) * ratio)
-                });
-                const column = Number(offset.j ?? offset.x);
-                const row = Number(offset.i ?? offset.y);
-                if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
-                const key = `${column},${row}`;
-                const existing = features.get(key);
-                if (!existing || priorities[feature] > priorities[existing]) features.set(key, feature);
+            const startOffset = canvas.grid.getOffset({ x: x1, y: y1 });
+            const endOffset = canvas.grid.getOffset({ x: x2, y: y2 });
+            const start = {
+                column: Number(startOffset.j ?? startOffset.x),
+                row: Number(startOffset.i ?? startOffset.y)
+            };
+            const end = {
+                column: Number(endOffset.j ?? endOffset.x),
+                row: Number(endOffset.i ?? endOffset.y)
+            };
+            if (![start.column, start.row, end.column, end.row].every(Number.isInteger)) continue;
+
+            const path = this._orthogonalPath(start, end);
+            if (path.length === 1) {
+                const horizontal = Math.abs(x2 - x1) >= Math.abs(y2 - y1);
+                const directions = horizontal ? ['west', 'east'] : ['north', 'south'];
+                for (const direction of directions) {
+                    this._addTileLeg(legsByCell, explored, path[0], direction, feature, priorities[feature]);
+                }
+                continue;
+            }
+
+            for (let index = 1; index < path.length; index++) {
+                const previous = path[index - 1];
+                const current = path[index];
+                const direction = this._directionBetween(previous, current);
+                if (!direction) continue;
+                this._addTileLeg(legsByCell, explored, previous, direction, feature, priorities[feature]);
+                this._addTileLeg(
+                    legsByCell,
+                    explored,
+                    current,
+                    this._oppositeDirection(direction),
+                    feature,
+                    priorities[feature]
+                );
             }
         }
-        return features;
+
+        const segmentsByCell = new Map();
+        for (const [key, legs] of legsByCell) {
+            const segments = [...legs.values()];
+            segments.sort((a, b) => a.priority - b.priority);
+            segmentsByCell.set(key, segments);
+        }
+        return segmentsByCell;
+    }
+
+    _addTileLeg(legsByCell, explored, cell, direction, feature, priority) {
+        const key = `${cell.column},${cell.row}`;
+        if (!explored.has(key)) return;
+        const cellLegs = legsByCell.get(key) ?? new Map();
+        const legKey = `${feature}:${direction}`;
+        if (!cellLegs.has(legKey)) {
+            const endpoints = {
+                north: { x1: 50, y1: 50, x2: 50, y2: 0 },
+                east: { x1: 50, y1: 50, x2: 100, y2: 50 },
+                south: { x1: 50, y1: 50, x2: 50, y2: 100 },
+                west: { x1: 50, y1: 50, x2: 0, y2: 50 }
+            }[direction];
+            if (!endpoints) return;
+            const horizontal = endpoints.y1 === endpoints.y2;
+            const bend = {
+                north: -1.8,
+                east: 1.4,
+                south: 1.8,
+                west: -1.4
+            }[direction];
+            const midpoint = {
+                x: (endpoints.x1 + endpoints.x2) / 2,
+                y: (endpoints.y1 + endpoints.y2) / 2
+            };
+            const mainMidpoint = {
+                x: midpoint.x + (horizontal ? 0 : bend),
+                y: midpoint.y + (horizontal ? bend : 0)
+            };
+            const echoMidpoint = {
+                x: midpoint.x - (horizontal ? 0 : bend * 0.7),
+                y: midpoint.y - (horizontal ? bend * 0.7 : 0)
+            };
+            cellLegs.set(legKey, {
+                className: `is-${feature}`,
+                priority,
+                points: `${endpoints.x1},${endpoints.y1} ${mainMidpoint.x},${mainMidpoint.y} ${endpoints.x2},${endpoints.y2}`,
+                echoPoints: `${endpoints.x1},${endpoints.y1} ${echoMidpoint.x},${echoMidpoint.y} ${endpoints.x2},${endpoints.y2}`
+            });
+            legsByCell.set(key, cellLegs);
+        }
+    }
+
+    _orthogonalPath(start, end) {
+        const path = [{ ...start }];
+        let current = { ...start };
+        const lineDx = end.column - start.column;
+        const lineDy = end.row - start.row;
+        let preferHorizontal = Math.abs(lineDx) >= Math.abs(lineDy);
+
+        while (current.column !== end.column || current.row !== end.row) {
+            const candidates = [];
+            if (current.column !== end.column) {
+                candidates.push({
+                    column: current.column + Math.sign(end.column - current.column),
+                    row: current.row,
+                    horizontal: true
+                });
+            }
+            if (current.row !== end.row) {
+                candidates.push({
+                    column: current.column,
+                    row: current.row + Math.sign(end.row - current.row),
+                    horizontal: false
+                });
+            }
+
+            if (candidates.length === 1) current = candidates[0];
+            else {
+                const scored = candidates.map(candidate => ({
+                    candidate,
+                    score: Math.abs(
+                        (lineDy * (candidate.column - start.column))
+                        - (lineDx * (candidate.row - start.row))
+                    )
+                }));
+                scored.sort((a, b) => {
+                    if (a.score !== b.score) return a.score - b.score;
+                    return a.candidate.horizontal === preferHorizontal ? -1 : 1;
+                });
+                current = scored[0].candidate;
+                preferHorizontal = !preferHorizontal;
+            }
+            path.push({ column: current.column, row: current.row });
+        }
+        return path;
+    }
+
+    _directionBetween(from, to) {
+        if (to.column === from.column + 1 && to.row === from.row) return 'east';
+        if (to.column === from.column - 1 && to.row === from.row) return 'west';
+        if (to.row === from.row + 1 && to.column === from.column) return 'south';
+        if (to.row === from.row - 1 && to.column === from.column) return 'north';
+        return null;
+    }
+
+    _oppositeDirection(direction) {
+        return {
+            north: 'south',
+            east: 'west',
+            south: 'north',
+            west: 'east'
+        }[direction] ?? null;
     }
 
     _classifyWall(document) {
@@ -219,6 +351,31 @@ export class MappingWindow extends ToolWindowBase {
         });
     }
 
+    followParty(position) {
+        if (!this.rendered || !position) return;
+        const key = `${position.column},${position.row}`;
+        const selector = `.cartographer-mapping-cell[data-cell="${CSS.escape(key)}"]`;
+        const partyCell = this.element?.querySelector(selector);
+        if (!partyCell) return;
+
+        const previousCell = this.element?.querySelector('.cartographer-mapping-cell.is-party');
+        if (previousCell !== partyCell) {
+            previousCell?.classList.remove('is-party');
+            previousCell?.querySelector('.cartographer-mapping-party')?.remove();
+            partyCell.classList.add('is-party');
+            const marker = document.createElement('i');
+            marker.className = 'fa-solid fa-location-dot cartographer-mapping-party';
+            marker.setAttribute('aria-hidden', 'true');
+            partyCell.append(marker);
+        }
+
+        if (this._followFrame) cancelAnimationFrame(this._followFrame);
+        this._followFrame = requestAnimationFrame(() => {
+            this._followFrame = null;
+            this.centerOnParty();
+        });
+    }
+
     _saveScrollPositions() {
         const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
         return {
@@ -235,6 +392,8 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     _onClose(options) {
+        if (this._followFrame) cancelAnimationFrame(this._followFrame);
+        this._followFrame = null;
         void this.manager?.onWindowClosed(this);
         return super._onClose?.(options);
     }

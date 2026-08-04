@@ -26,6 +26,14 @@
         <div class="cartographer-mapping-grid" style="--cartographer-map-columns: {{columnCount}}; --cartographer-map-rows: {{rowCount}}; --cartographer-map-zoom: {{zoom}};">
             {{#each cells}}
             <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}};">
+                {{#if segments.length}}
+                <svg class="cartographer-mapping-segments" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    {{#each segments}}
+                    <polyline class="cartographer-mapping-segment {{className}} is-sketch-echo" points="{{echoPoints}}"></polyline>
+                    <polyline class="cartographer-mapping-segment {{className}}" points="{{points}}"></polyline>
+                    {{/each}}
+                </svg>
+                {{/if}}
                 {{#if isParty}}<i class="fa-solid fa-location-dot cartographer-mapping-party" aria-hidden="true"></i>{{/if}}
             </div>
             {{/each}}

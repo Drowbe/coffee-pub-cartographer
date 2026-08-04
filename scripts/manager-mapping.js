@@ -22,6 +22,7 @@ class MappingManager {
         this.window = null;
         this._hooks = [];
         this._saveQueue = Promise.resolve();
+        this._renderQueue = Promise.resolve();
         this._closingWindow = false;
     }
 
@@ -86,7 +87,9 @@ class MappingManager {
         const updateToken = Hooks.on('updateToken', (tokenDocument, changes) => {
             if (!this.active || tokenDocument.id !== this.trackedTokenId) return;
             if (!('x' in changes) && !('y' in changes)) return;
-            void this._requestReveal(tokenDocument).catch(error => {
+            const position = this._gridPosition(tokenDocument);
+            this.window?.followParty(position);
+            void this._requestReveal(tokenDocument, position).catch(error => {
                 console.error(`${MODULE.NAME}: Failed to map token movement`, error);
             });
         });
@@ -232,9 +235,21 @@ class MappingManager {
     }
 
     async renderWindow({ centerOnParty = false } = {}) {
-        if (!this.window?.rendered) return;
-        await this.window.render(false);
-        if (centerOnParty) requestAnimationFrame(() => this.window?.centerOnParty());
+        this._renderQueue = this._renderQueue
+            .catch(error => console.error(`${MODULE.NAME}: Failed to render mapping window`, error))
+            .then(async () => {
+                const window = this.window;
+                if (!window?.rendered) return;
+                await window.render(false);
+                if (centerOnParty && this.window === window && window.rendered) {
+                    // Blacksmith restores saved scroll positions on its first
+                    // post-render frame. Center on the following frame so the
+                    // tracked token, rather than stale scroll, wins.
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                    if (this.window === window && window.rendered) window.centerOnParty();
+                }
+            });
+        return this._renderQueue;
     }
 
     loadSceneState() {
@@ -303,8 +318,7 @@ class MappingManager {
         return keys;
     }
 
-    async _requestReveal(tokenDocument) {
-        const position = this._gridPosition(tokenDocument);
+    async _requestReveal(tokenDocument, position = this._gridPosition(tokenDocument)) {
         const gridKey = `${position.column},${position.row}`;
         if (gridKey === this.lastGridKey) return;
         this.lastGridKey = gridKey;
@@ -343,7 +357,6 @@ class MappingManager {
             updatedAt: Date.now(),
             updatedBy: data.userId
         };
-        void this.renderWindow({ centerOnParty: this.active });
         await this._persistState('state-updated');
     }
 
@@ -364,7 +377,13 @@ class MappingManager {
 
     _handleStateUpdated(data) {
         if (!data || data.sceneId !== canvas?.scene?.id) return;
-        this.state = this._normalizeState(data.state);
+        const incoming = this._normalizeState(data.state);
+        const unchanged = incoming.updatedAt === this.state.updatedAt
+            && incoming.updatedBy === this.state.updatedBy
+            && incoming.explored.length === this.state.explored.length
+            && incoming.explored.every((key, index) => key === this.state.explored[index]);
+        if (unchanged) return;
+        this.state = incoming;
         void this.renderWindow({ centerOnParty: this.active });
     }
 
