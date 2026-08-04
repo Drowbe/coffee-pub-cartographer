@@ -32,12 +32,13 @@ const WORKFLOW_GROUPS = {
  * @param {string} hintKey - Localization key for the hint
  * @param {string} level - Header level (H1, H2, H3, H4)
  * @param {string} group - Workflow group for collapsible sections
+ * @param {string} scope - Foundry setting scope for controlling who can see the header
  */
-function registerHeader(id, labelKey, hintKey, level = 'H2', group = null) {
+function registerHeader(id, labelKey, hintKey, level = 'H2', group = null, scope = 'world') {
     game.settings.register(MODULE.ID, `heading${level}${id}`, {
         name: MODULE.ID + `.${labelKey}`,
         hint: MODULE.ID + `.${hintKey}`,
-        scope: "world",
+        scope,
         config: true,
         default: "",
         type: String,
@@ -105,13 +106,13 @@ export const registerSettings = () => {
 	// --------------------------------------
 	// -- H2: COMMON SETTINGS
 	// --------------------------------------
-	registerHeader('CommonSettings', 'headingH2CommonSettings-Label', 'headingH2CommonSettings-Hint', 'H2', WORKFLOW_GROUPS.COMMON_SETTINGS);
+	registerHeader('CommonSettings', 'headingH2CommonSettings-Label', 'headingH2CommonSettings-Hint', 'H2', WORKFLOW_GROUPS.COMMON_SETTINGS, 'user');
 
 
     // --------------------------------------
 	// -- H3: DRAWING TOOL SETTINGS
 	// --------------------------------------
-	registerHeader('DrawingToolSettings', 'headingH3DrawingToolSettings-Label', 'headingH3DrawingToolSettings-Hint', 'H3', WORKFLOW_GROUPS.COMMON_SETTINGS);
+	registerHeader('DrawingToolSettings', 'headingH3DrawingToolSettings-Label', 'headingH3DrawingToolSettings-Hint', 'H3', WORKFLOW_GROUPS.COMMON_SETTINGS, 'user');
 
     // -- Enable Player Drawing --
 	game.settings.register(MODULE.ID, 'drawing.enablePlayerDrawing', {
