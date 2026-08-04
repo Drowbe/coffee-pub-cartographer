@@ -11,13 +11,14 @@ import { MODULE } from './const.js';
 // ================================================================== 
 
 /**
- * WROKFLOW GROUPS
+ * WORKFLOW GROUPS
  * Use workflow groups to organize settings into visual sections
  * This will allow the global CSS rules to style the settings window.
  */
 const WORKFLOW_GROUPS = {
-    GETTING_STARTED: 'getting-started',
-    COMMON_SETTINGS: 'common-settings',
+    INTRODUCTION: 'introduction',
+    CONFIGURATION: 'configuration',
+    DRAWING: 'drawing',
 };
 
 
@@ -60,13 +61,13 @@ function registerHeader(id, labelKey, hintKey, level = 'H2', group = null, scope
  * - hintKey: Localization key for the hint
  * - level: Header level (H1, H2, H3, H4, or HR)
  * - group: Workflow group for collapsible sections
- * Example: registerHeader('ExampleSubheader', 'headingH3ExampleSubheader-Label', 'headingH3ExampleSubheader-Hint', 'H3', WORKFLOW_GROUPS.COMMON_SETTINGS);
+ * Example: registerHeader('ExampleSection', 'headingH2ExampleSection-Label', 'headingH2ExampleSection-Hint', 'H2', WORKFLOW_GROUPS.DRAWING);
  * This will register the header with the following parameters:
- * - id: ExampleSubheader
- * - labelKey: headingH3ExampleSubheader-Label
- * - hintKey: headingH3ExampleSubheader-Hint
- * - level: H3
- * - group: COMMON_SETTINGS
+ * - id: ExampleSection
+ * - labelKey: headingH2ExampleSection-Label
+ * - hintKey: headingH2ExampleSection-Hint
+ * - level: H2
+ * - group: DRAWING
  */
 
 
@@ -79,40 +80,16 @@ export const registerSettings = () => {
    
 	// ==================================================================================================================== 
 	// ==================================================================================================================== 
-	// == H1: GETTING STARTED
+	// == H1: INTRODUCTION
 	// ==================================================================================================================== 
 	// ==================================================================================================================== 
-	registerHeader('GettingStarted', 'headingH1GettingStarted-Label', 'headingH1GettingStarted-Hint', 'H1', WORKFLOW_GROUPS.GETTING_STARTED);
-
-	// --------------------------------------
-	// -- H4: INTRODUCTION
-	// --------------------------------------
-	registerHeader('Introduction', 'headingH4Introduction-Label', 'headingH4Introduction-Hint', 'H4', WORKFLOW_GROUPS.GETTING_STARTED);
-
-
-	// ==================================================================================================================== 
-	// ===== HR Visual Divider
-	// ==================================================================================================================== 
-	game.settings.register(MODULE.ID, "headingHR", {
-		name: "",
-		hint: "",
-		scope: "world",
-		config: true,
-		default: "",
-		type: String,
-	});
+	registerHeader('Introduction', 'headingH1Introduction-Label', 'headingH1Introduction-Hint', 'H1', WORKFLOW_GROUPS.INTRODUCTION, 'user');
 
 
 	// --------------------------------------
-	// -- H2: COMMON SETTINGS
+	// -- H2: CONFIGURATION
 	// --------------------------------------
-	registerHeader('CommonSettings', 'headingH2CommonSettings-Label', 'headingH2CommonSettings-Hint', 'H2', WORKFLOW_GROUPS.COMMON_SETTINGS, 'user');
-
-
-    // --------------------------------------
-	// -- H3: DRAWING TOOL SETTINGS
-	// --------------------------------------
-	registerHeader('DrawingToolSettings', 'headingH3DrawingToolSettings-Label', 'headingH3DrawingToolSettings-Hint', 'H3', WORKFLOW_GROUPS.COMMON_SETTINGS, 'user');
+	registerHeader('Configuration', 'headingH2Configuration-Label', 'headingH2Configuration-Hint', 'H2', WORKFLOW_GROUPS.CONFIGURATION);
 
     // -- Enable Player Drawing --
 	game.settings.register(MODULE.ID, 'drawing.enablePlayerDrawing', {
@@ -122,7 +99,7 @@ export const registerSettings = () => {
         config: true,
         default: true,
         type: Boolean,
-		group: WORKFLOW_GROUPS.COMMON_SETTINGS
+		group: WORKFLOW_GROUPS.CONFIGURATION
 	});
 
     // -- Timed Erase Timeout --
@@ -138,9 +115,14 @@ export const registerSettings = () => {
             max: 120,
             step: 5
         },
-		group: WORKFLOW_GROUPS.COMMON_SETTINGS
+		group: WORKFLOW_GROUPS.CONFIGURATION
 	});
-    
+
+
+	// --------------------------------------
+	// -- H2: DRAWING
+	// --------------------------------------
+	registerHeader('Drawing', 'headingH2Drawing-Label', 'headingH2Drawing-Hint', 'H2', WORKFLOW_GROUPS.DRAWING, 'user');
 
 
 	// -- Draw Hotkey Settings --
@@ -151,7 +133,8 @@ export const registerSettings = () => {
 		scope: "user",
 		config: true,
 		type: Boolean,
-		default: true
+		default: true,
+		group: WORKFLOW_GROUPS.DRAWING
 	  });
 	
 	  game.settings.register(MODULE.ID, "drawing.hotkeyMode", {
@@ -164,7 +147,8 @@ export const registerSettings = () => {
 		  hold: "Hold",
 		  toggle: "Toggle"
 		},
-		default: "hold"
+		default: "hold",
+		group: WORKFLOW_GROUPS.DRAWING
 	  });
 	
 	  game.settings.register(MODULE.ID, "drawing.blockWhenTyping", {
@@ -173,7 +157,8 @@ export const registerSettings = () => {
 		scope: "user",
 		config: true,
 		type: Boolean,
-		default: true
+		default: true,
+		group: WORKFLOW_GROUPS.DRAWING
 	  });
 
 	  // Toolbar height is no longer a setting. The secondary bar takes its size from a
