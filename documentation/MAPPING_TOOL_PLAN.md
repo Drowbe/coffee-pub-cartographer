@@ -6,6 +6,19 @@ Create a separate old-school party map that a player opens from the Cartographer
 
 The map appears in a resizable Blacksmith Tool window rather than as an overlay on the scene.
 
+## Current Map Model
+
+- A recorded map is uniquely identified by **Actor + Scene**.
+- Maps belong to the party: every user can view the world-wide Recorded Maps list, including maps from scenes other than the current scene.
+- Only a map for the current scene can be recorded or created.
+- The Actor's owners and GMs can create, continue, rename, reset, and delete its maps.
+- Explored floors and visibility-approved abstract wall, window, and door strokes are persisted with the record. Viewing a map never scans live scene walls, so it cannot reveal geometry the token did not experience.
+- The record format reserves independent map features so official old-school symbols can be placed without coupling them to Foundry Wall documents.
+
+### Planned symbol placement and Phase 2
+
+Add a **Place** context menu with nested categories based on the official old-school mapping key. After choosing a door, passage, hazard, structure, terrain, or furnishing symbol, the next click places it on the map. In Phase 2, reuse this map model and symbol vocabulary for ad-hoc old-school maps authored directly on the Foundry canvas.
+
 ## Initial Scope
 
 ### Included
@@ -18,15 +31,17 @@ The map appears in a resizable Blacksmith Tool window rather than as an overlay 
 - A separate map view using the Blacksmith Tool Window API.
 - Glass as the initial Tool window theme, while allowing the standard theme selector.
 - Record/stop, right-drag pan, zoom, and center-on-party controls.
-- Persistent scene-level map state.
+- Persistent Actor+Scene map records stored in scene flags.
+- A party-wide Recorded Maps list, including view-only maps from other scenes.
 - Synchronized map updates for connected users.
+- Visibility-filtered wall, window, and door memory.
 - Placeholder tiles that can later be replaced by hand-drawn artwork.
-- GM-only map reset controls.
+- Actor-owner and GM create, rename, reset, and delete controls.
 
 ### Deferred
 
 - Hex and gridless scenes.
-- Foundry vision, lighting, and wall-based reveal clipping.
+- Full lighting-aware floor clipping; the initial implementation uses vision/LOS to decide which structural strokes are experienced while retaining the 5×5 floor reveal.
 - Automatic room, corridor, or terrain classification.
 - Tracking more than one token for a single user.
 - Multiple floors or scene levels in one map.
@@ -47,7 +62,7 @@ The Record button is the source of truth. Closing the map window stops recording
 
 ### GM workflow
 
-The GM can use the same Record button with a controlled token. The GM can also clear or reset the shared map through a confirmed action in the map window.
+The GM can use the same Record button with a controlled token and can manage any party map. Actor owners can manage their Actor's maps as well.
 
 Players must never receive undiscovered scene geometry or hidden tile metadata.
 
@@ -72,7 +87,7 @@ Suggested controls:
 - **Zoom Out**
 - **Reset View**
 - **Mapping status and tracked-token name**
-- **Clear Map** — GM only, with confirmation
+- **Clear Map** — Actor owner or GM, with confirmation
 
 While recording is stopped, changing to a different single selected token updates and recenters the viewing context without revealing new cells.
 
@@ -98,30 +113,46 @@ Rules:
 - Ignore movement on gridless or unsupported scenes and show a clear status message.
 - Require exactly one controlled token when Record is pressed; otherwise leave recording stopped and explain what is needed.
 - Reveal the starting 5×5 area as soon as Record is pressed.
-- Teleporting reveals only the 5×5 area at the destination in the initial version.
+- Long drags are interpolated through every crossed grid square. Each queued square receives the same 5×5 reveal and visibility-filtered structural sampling as a normal one-cell move.
+- The party marker follows the last completed mapping step while queued drawing catches up to the live token.
 - Each active user contributes discoveries from their own controlled token to the shared party map.
 - An active GM client is authoritative for validating contributors, calculating discoveries, and persisting the map.
 
 ## Data Model
 
-Store shared mapping state in scene flags under the Cartographer module namespace.
+Store a versioned collection of Actor maps in each Scene's flags under the Cartographer module namespace. The window builds its party-wide list by reading these collections across the world's scenes.
 
 Suggested shape:
 
 ```js
 {
-  version: 1,
-  gridType: "square",
-  explored: ["12,8", "13,8", "14,8"],
-  updatedAt: 0,
-  updatedBy: "USER_ID"
+  version: 2,
+  maps: {
+    ACTOR_ID: {
+      id: "ACTOR_ID::SCENE_ID",
+      actorId: "ACTOR_ID",
+      sceneId: "SCENE_ID",
+      name: "Actor — Scene",
+      gridType: "square",
+      columns: 40,
+      rows: 30,
+      gridDistance: 5,
+      explored: ["12,8", "13,8", "14,8"],
+      features: {
+        "12,8": ["wall:north", "door:east"]
+      },
+      symbols: [],
+      updatedAt: 0,
+      updatedBy: "USER_ID"
+    }
+  }
 }
 ```
 
 Implementation notes:
 
 - Use a `Set` in memory and serialize it as an array.
-- Store only discovered cell coordinates; never store the complete scene grid.
+- Store only discovered cell coordinates and visibility-approved abstract feature strokes; never store complete scene geometry.
 - Batch or debounce scene-flag writes during rapid movement.
 - Include a schema version so the format can evolve safely.
 - Keep pan, zoom, window position, and theme local to each user rather than in shared scene data.
@@ -135,8 +166,9 @@ Add the mapper as an independent Cartographer tool:
 
 ```text
 scripts/
-  manager-mapping.js       movement tracking, reveal rules, persistence
-  window-mapping.js        Blacksmith Tool window
+  manager-mapping.js       movement tracking, map records, permissions, persistence
+  utils-mapping.js         wall classification, abstraction, and visibility checks
+  window-mapping.js        Blacksmith Tool window and Map/List views
 templates/
   window-mapping.hbs       map window content
 styles/
@@ -161,7 +193,7 @@ Responsibilities:
   - Render the map surface and local navigation controls.
   - React to synchronized discovery updates.
   - Reflect active mapping status and the tracked token.
-  - Provide the GM-only reset action.
+  - Provide Actor-owner and GM management actions.
 
 - `manager-sockets.js`
   - Add mapper state/update messages using the existing Cartographer socket pattern.
@@ -292,13 +324,13 @@ Mapping start and stop belong to the menubar toggle. Map reset belongs in the wi
 
 **Exit condition:** The mapper has a cohesive old-school visual style at multiple zoom levels.
 
-### Phase 6 — Optional wall-aware mapping
+### Phase 6 — Exploration-aware structural mapping (implemented)
 
 - Evaluate scene wall segments adjacent to discovered cells on the GM client.
 - Add only perceived wall/door edges to the shared mapped state.
 - Never derive or transmit undiscovered geometry.
 
-This phase should remain optional until the radius mapper is proven fun and reliable.
+The persisted result is deliberately abstract graph-paper linework rather than a copy of the Foundry wall drawing.
 
 ## Testing Checklist
 
@@ -317,7 +349,11 @@ This phase should remain optional until the radius mapper is proven fun and reli
 - Move at all four scene edges and corners without out-of-bounds cells.
 - Delete the tracked token and verify graceful recovery.
 - Reload the world and restore the same map.
-- Switch scenes and maintain independent maps.
+- Verify maps are independent per Actor per Scene.
+- Open Recorded Maps and view maps from current and inactive scenes.
+- Verify only the current-scene map can record.
+- Verify everyone can view, while only the Actor owner or GM can add, rename, reset, or delete.
+- Walk near nested walls and verify only the first experienced wall is recorded; terrain walls remain absent.
 - Connect as a player and verify synchronized updates.
 - Verify players receive no undiscovered geometry.
 - Test Light, Dark, and Glass themes with the map window open.

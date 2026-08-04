@@ -6,9 +6,7 @@ import { MODULE } from './const.js';
 
 const ToolWindowBase = game.modules.get('coffee-pub-blacksmith')?.api?.BlacksmithToolWindowBaseV2 ?? class {
     static DEFAULT_OPTIONS = {};
-    constructor() {
-        throw new Error('Coffee Pub Blacksmith Tool Window API is unavailable');
-    }
+    constructor() { throw new Error('Coffee Pub Blacksmith Tool Window API is unavailable'); }
 };
 const APP_ID = `${MODULE.ID}-mapper`;
 
@@ -33,9 +31,20 @@ export class MappingWindow extends ToolWindowBase {
 
     static ACTION_HANDLERS = {
         'toggle-recording': (_event, _target, app) => void app.manager.toggleRecording(),
+        'toggle-list': (_event, _target, app) => void app.toggleList(),
+        'add-map': (_event, _target, app) => void app.manager.createMapForSelection(),
+        'select-map': (_event, target, app) => void app.selectMap(target.dataset.mapId),
+        'rename-map': (event, target, app) => {
+            event.stopPropagation();
+            void app.manager.renameMap(target.dataset.mapId);
+        },
+        'delete-map': (event, target, app) => {
+            event.stopPropagation();
+            void app.manager.deleteMap(target.dataset.mapId);
+        },
         'zoom-in': (_event, _target, app) => app.setZoom(app.zoom + 0.15),
         'zoom-out': (_event, _target, app) => app.setZoom(app.zoom - 0.15),
-        'center-party': (_event, _target, app) => app.centerOnParty(),
+        'center-view': (_event, _target, app) => app.centerView(),
         'reset-map': (_event, _target, app) => void app.manager.resetMap()
     };
 
@@ -43,8 +52,11 @@ export class MappingWindow extends ToolWindowBase {
         super(options);
         this.manager = manager;
         this.zoom = 1;
+        this.viewMode = 'map';
         this._hasBuiltMap = false;
         this._renderedExplored = new Set();
+        this._mapScroll = { left: 0, top: 0, gridMargin: '' };
+        this._listScrollTop = 0;
         this._pan = null;
         this._handlePanStart = this._handlePanStart.bind(this);
         this._handlePanMove = this._handlePanMove.bind(this);
@@ -66,22 +78,114 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     async getData() {
-        const model = this._buildMapModel();
+        const model = this._buildModel();
         const bodyContent = await foundry.applications.handlebars.renderTemplate(
-            `modules/${MODULE.ID}/templates/window-mapping.hbs`,
-            model
+            `modules/${MODULE.ID}/templates/window-mapping.hbs`, model
         );
-        const statusKey = this.manager.active ? 'mapping.statusActive' : 'mapping.statusViewing';
+        const statusKey = this.viewMode === 'list'
+            ? 'mapping.statusMaps'
+            : (this.manager.active ? 'mapping.statusActive' : 'mapping.statusViewing');
+        const footerLeft = this.viewMode === 'list'
+            ? game.i18n.format(`${MODULE.ID}.mapping.mapCount`, { count: model.maps.length })
+            : `${model.feetMapped} ${game.i18n.localize(`${MODULE.ID}.mapping.feetMapped`)}`;
+        const status = `<span class="cartographer-mapping-status${this.manager.active ? ' is-recording' : ''}"><i class="fa-solid fa-circle"></i> ${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.${statusKey}`))}</span>`;
         return {
             appId: this.id,
             bodyContent,
             showToolBar: true,
-            toolBarLeft: `<span class="cartographer-mapping-status"><i class="fa-solid fa-circle"></i> ${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.${statusKey}`))}</span>`,
+            toolBarLeft: `${status}${this._buildTopActions(model)}`,
             toolBarRight: `<span class="cartographer-mapping-token">${foundry.utils.escapeHTML(this.manager.getTrackedTokenName())}</span>`,
             showToolFooter: true,
-            toolFooterLeft: `<span>${model.exploredCount} ${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.cellsMapped`))}</span>`,
-            toolFooterRight: `<span>${Math.round(this.zoom * 100)}%</span>`
+            toolFooterLeft: `<span>${foundry.utils.escapeHTML(footerLeft)}</span>`,
+            toolFooterRight: this._buildFooterActions(model)
         };
+    }
+
+    _buildTopActions(model) {
+        const buttons = [];
+        if (this.viewMode === 'list') {
+            buttons.push(this._chromeButton({
+                action: 'toggle-list',
+                icon: 'fa-solid fa-map',
+                label: model.viewMapLabel
+            }));
+            if (model.canAdd) {
+                buttons.push(this._chromeButton({
+                    action: 'add-map',
+                    icon: 'fa-solid fa-plus',
+                    label: model.addMapLabel
+                }));
+            }
+        } else {
+            buttons.push(this._chromeButton({
+                action: 'toggle-list',
+                icon: 'fa-solid fa-list',
+                label: model.listLabel
+            }));
+            buttons.push(this._chromeButton({
+                action: 'toggle-recording',
+                icon: this.manager.active ? 'fa-solid fa-stop' : 'fa-solid fa-circle',
+                label: model.recordLabel,
+                className: `cartographer-mapping-record${this.manager.active ? ' is-recording' : ''}`,
+                disabled: !model.canRecord && !this.manager.active
+            }));
+            if (model.canReset) {
+                buttons.push(this._chromeButton({
+                    action: 'reset-map',
+                    icon: 'fa-solid fa-trash-can',
+                    label: model.resetLabel,
+                    className: 'is-critical'
+                }));
+            }
+        }
+        return `<span class="cartographer-mapping-chrome-actions is-primary">${buttons.join('')}</span>`;
+    }
+
+    _buildFooterActions(model) {
+        if (this.viewMode !== 'map') return '';
+        const buttons = [
+            this._chromeButton({ action: 'zoom-out', icon: 'fa-solid fa-minus', label: model.zoomOutLabel }),
+            this._chromeButton({ action: 'center-view', icon: 'fa-solid fa-crosshairs', label: model.centerPartyLabel }),
+            this._chromeButton({ action: 'zoom-in', icon: 'fa-solid fa-plus', label: model.zoomInLabel })
+        ];
+        return `<span class="cartographer-mapping-chrome-actions is-navigation">${buttons.join('')}</span><span class="cartographer-mapping-zoom-readout">${Math.round(this.zoom * 100)}%</span>`;
+    }
+
+    _chromeButton({ action, icon, label, className = '', disabled = false }) {
+        const safeAction = foundry.utils.escapeHTML(action);
+        const safeLabel = foundry.utils.escapeHTML(label ?? '');
+        const classes = className ? ` class="${foundry.utils.escapeHTML(className)}"` : '';
+        return `<button type="button"${classes} data-action="${safeAction}" data-tooltip="${safeLabel}" aria-label="${safeLabel}"${disabled ? ' disabled' : ''}><i class="${icon}"></i></button>`;
+    }
+
+    _buildModel() {
+        const maps = this.manager.getMapList().map(record => ({
+            id: record.id,
+            name: record.name,
+            actorName: record.actorName,
+            sceneName: record.sceneName,
+            updated: record.updatedAt ? new Date(record.updatedAt).toLocaleString() : '',
+            feetMapped: record.explored.length * (record.gridDistance || 5),
+            isCurrent: record.id === this.manager.currentMapId,
+            canManage: this.manager.canManageRecord(record),
+            canRecord: record.sceneId === canvas?.scene?.id && this.manager.canManageRecord(record)
+        }));
+        if (this.viewMode === 'list') {
+            return {
+                isListView: true,
+                maps,
+                canAdd: this.manager.canRecordCurrentMap(),
+                listEmpty: maps.length === 0,
+                listEmptyMessage: game.i18n.localize(`${MODULE.ID}.mapping.noMaps`),
+                addMapLabel: game.i18n.localize(`${MODULE.ID}.mapping.addMap`),
+                viewMapLabel: game.i18n.localize(`${MODULE.ID}.mapping.viewMap`),
+                renameLabel: game.i18n.localize(`${MODULE.ID}.mapping.rename`),
+                deleteLabel: game.i18n.localize(`${MODULE.ID}.mapping.deleteMap`),
+                feetMappedLabel: game.i18n.localize(`${MODULE.ID}.mapping.feetMapped`),
+                feetMapped: this.manager.state.explored.length * (this.manager.state.gridDistance || 5)
+            };
+        }
+        return { ...this._buildMapModel(), isListView: false, maps };
     }
 
     _buildMapModel() {
@@ -90,20 +194,22 @@ export class MappingWindow extends ToolWindowBase {
         const newTiles = animateNewTiles
             ? new Set([...explored].filter(key => !this._renderedExplored.has(key)))
             : new Set();
-        const tracked = this.manager._getTrackedToken();
-        const trackedPosition = tracked ? this.manager._gridPosition(tracked.document) : null;
-        const mappedSegments = this._getMappedTileSegments(explored);
+        const trackedPosition = this.manager.getTrackedPositionForCurrentMap();
+        const mappedGeometry = this._getMappedTileGeometry(explored, this.manager.state.features);
+        const canRecord = this.manager.canRecordCurrentMap();
         const common = {
-            canReset: game.user.isGM,
+            canReset: this.manager.canManageRecord() && Boolean(this.manager.currentMapId),
+            canRecord,
             isRecording: this.manager.active,
             zoom: this.zoom,
-            recordLabel: game.i18n.localize(
-                `${MODULE.ID}.mapping.${this.manager.active ? 'stopRecording' : 'startRecording'}`
-            ),
+            recordLabel: game.i18n.localize(`${MODULE.ID}.mapping.${this.manager.active ? 'stopRecording' : 'startRecording'}`),
+            listLabel: game.i18n.localize(`${MODULE.ID}.mapping.showMaps`),
             resetLabel: game.i18n.localize(`${MODULE.ID}.mapping.resetMap`),
             zoomInLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomIn`),
             zoomOutLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomOut`),
-            centerPartyLabel: game.i18n.localize(`${MODULE.ID}.mapping.centerParty`)
+            centerPartyLabel: game.i18n.localize(
+                `${MODULE.ID}.mapping.${trackedPosition ? 'centerParty' : 'centerMap'}`
+            )
         };
         if (!explored.size) {
             this._hasBuiltMap = true;
@@ -112,237 +218,209 @@ export class MappingWindow extends ToolWindowBase {
                 ...common,
                 empty: true,
                 emptyMessage: game.i18n.localize(`${MODULE.ID}.mapping.emptyMap`),
-                exploredCount: 0
+                feetMapped: 0
             };
         }
 
         const coordinates = [...explored].map(key => key.split(',').map(Number));
         const maxExploredColumn = Math.max(...coordinates.map(([column]) => column));
         const maxExploredRow = Math.max(...coordinates.map(([, row]) => row));
-        const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
-        const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
-        const columnCount = Math.max(Math.ceil(canvas.dimensions.width / sizeX), maxExploredColumn + 1);
-        const rowCount = Math.max(Math.ceil(canvas.dimensions.height / sizeY), maxExploredRow + 1);
+        const columnCount = Math.max(this.manager.state.columns || 0, maxExploredColumn + 1);
+        const rowCount = Math.max(this.manager.state.rows || 0, maxExploredRow + 1);
         const cells = coordinates.map(([column, row]) => {
             const key = `${column},${row}`;
             const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
             const isNew = newTiles.has(key);
-            const segments = mappedSegments.get(key) ?? [];
             return {
                 key,
                 gridColumn: column + 1,
                 gridRow: row + 1,
                 className: `is-explored${isNew ? ' is-new' : ''}${isParty ? ' is-party' : ''}`,
-                segments,
+                segments: mappedGeometry.segmentsByCell.get(key) ?? [],
+                doorSymbols: mappedGeometry.doorSymbolsByCell.get(key) ?? [],
+                hasLinework: mappedGeometry.segmentsByCell.has(key) || mappedGeometry.doorSymbolsByCell.has(key),
                 isParty
             };
         });
         this._hasBuiltMap = true;
         this._renderedExplored = explored;
-
         return {
             ...common,
             empty: false,
             cells,
             columnCount,
             rowCount,
-            exploredCount: explored.size
+            feetMapped: explored.size * (this.manager.state.gridDistance || 5)
         };
     }
 
-    _getMappedTileSegments(explored) {
-        const legsByCell = new Map();
-        const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
-        const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
-        const priorities = { wall: 1, window: 2, door: 3 };
-
-        for (const wall of canvas.walls?.placeables ?? []) {
-            const feature = this._classifyWall(wall.document);
-            if (!feature) continue;
-            const coordinates = wall.document?.c ?? wall.document?._source?.c;
-            if (!Array.isArray(coordinates) || coordinates.length < 4) continue;
-            const [x1, y1, x2, y2] = coordinates.map(Number);
-            if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
-
-            const startOffset = canvas.grid.getOffset({ x: x1, y: y1 });
-            const endOffset = canvas.grid.getOffset({ x: x2, y: y2 });
-            const start = {
-                column: Number(startOffset.j ?? startOffset.x),
-                row: Number(startOffset.i ?? startOffset.y)
-            };
-            const end = {
-                column: Number(endOffset.j ?? endOffset.x),
-                row: Number(endOffset.i ?? endOffset.y)
-            };
-            if (![start.column, start.row, end.column, end.row].every(Number.isInteger)) continue;
-
-            const path = this._orthogonalPath(start, end);
-            if (path.length === 1) {
-                const horizontal = Math.abs(x2 - x1) >= Math.abs(y2 - y1);
-                const directions = horizontal ? ['west', 'east'] : ['north', 'south'];
-                for (const direction of directions) {
-                    this._addTileLeg(legsByCell, explored, path[0], direction, feature, priorities[feature]);
-                }
-                continue;
-            }
-
-            for (let index = 1; index < path.length; index++) {
-                const previous = path[index - 1];
-                const current = path[index];
-                const direction = this._directionBetween(previous, current);
-                if (!direction) continue;
-                this._addTileLeg(legsByCell, explored, previous, direction, feature, priorities[feature]);
-                this._addTileLeg(
-                    legsByCell,
-                    explored,
-                    current,
-                    this._oppositeDirection(direction),
-                    feature,
-                    priorities[feature]
-                );
-            }
-        }
-
+    _getMappedTileGeometry(explored, features) {
         const segmentsByCell = new Map();
-        for (const [key, legs] of legsByCell) {
-            const segments = [...legs.values()];
-            segments.sort((a, b) => a.priority - b.priority);
-            segmentsByCell.set(key, segments);
+        const doorSymbolsByCell = new Map();
+        const priorities = { wall: 1, window: 2 };
+        const doorDirections = new Map();
+        const consumedDoorLegs = new Set();
+
+        for (const [key, codes] of Object.entries(features ?? {})) {
+            if (!explored.has(key)) continue;
+            const directions = new Set(codes
+                .filter(code => code.startsWith('door:'))
+                .map(code => code.split(':')[1]));
+            if (directions.size) doorDirections.set(key, directions);
         }
-        return segmentsByCell;
-    }
 
-    _addTileLeg(legsByCell, explored, cell, direction, feature, priority) {
-        const key = `${cell.column},${cell.row}`;
-        if (!explored.has(key)) return;
-        const cellLegs = legsByCell.get(key) ?? new Map();
-        const legKey = `${feature}:${direction}`;
-        if (!cellLegs.has(legKey)) {
-            const endpoints = {
-                north: { x1: 50, y1: 50, x2: 50, y2: 0 },
-                east: { x1: 50, y1: 50, x2: 100, y2: 50 },
-                south: { x1: 50, y1: 50, x2: 50, y2: 100 },
-                west: { x1: 50, y1: 50, x2: 0, y2: 50 }
-            }[direction];
-            if (!endpoints) return;
-            const horizontal = endpoints.y1 === endpoints.y2;
-            const bend = {
-                north: -1.8,
-                east: 1.4,
-                south: 1.8,
-                west: -1.4
-            }[direction];
-            const midpoint = {
-                x: (endpoints.x1 + endpoints.x2) / 2,
-                y: (endpoints.y1 + endpoints.y2) / 2
-            };
-            const mainMidpoint = {
-                x: midpoint.x + (horizontal ? 0 : bend),
-                y: midpoint.y + (horizontal ? bend : 0)
-            };
-            const echoMidpoint = {
-                x: midpoint.x - (horizontal ? 0 : bend * 0.7),
-                y: midpoint.y - (horizontal ? bend * 0.7 : 0)
-            };
-            cellLegs.set(legKey, {
-                className: `is-${feature}`,
-                priority,
-                points: `${endpoints.x1},${endpoints.y1} ${mainMidpoint.x},${mainMidpoint.y} ${endpoints.x2},${endpoints.y2}`,
-                echoPoints: `${endpoints.x1},${endpoints.y1} ${echoMidpoint.x},${echoMidpoint.y} ${endpoints.x2},${endpoints.y2}`
-            });
-            legsByCell.set(key, cellLegs);
+        const neighborFor = (key, direction) => {
+            const [column, row] = key.split(',').map(Number);
+            const offsets = { east: [1, 0], south: [0, 1] }[direction];
+            return offsets ? `${column + offsets[0]},${row + offsets[1]}` : null;
+        };
+        const opposite = { east: 'west', south: 'north' };
+
+        // A normal Foundry door is represented by two matching half-legs in
+        // neighboring map cells. Replace the pair with one guide-style symbol
+        // centered on their shared edge.
+        for (const [key, directions] of doorDirections) {
+            for (const direction of ['east', 'south']) {
+                if (!directions.has(direction)) continue;
+                const neighborKey = neighborFor(key, direction);
+                if (!neighborKey || !doorDirections.get(neighborKey)?.has(opposite[direction])) continue;
+                doorSymbolsByCell.set(key, [
+                    ...(doorSymbolsByCell.get(key) ?? []),
+                    this._doorSymbol(direction === 'east' ? 'horizontal-edge' : 'vertical-edge')
+                ]);
+                consumedDoorLegs.add(`${key}:door:${direction}`);
+                consumedDoorLegs.add(`${neighborKey}:door:${opposite[direction]}`);
+            }
         }
-    }
 
-    _orthogonalPath(start, end) {
-        const path = [{ ...start }];
-        let current = { ...start };
-        const lineDx = end.column - start.column;
-        const lineDy = end.row - start.row;
-        let preferHorizontal = Math.abs(lineDx) >= Math.abs(lineDy);
-
-        while (current.column !== end.column || current.row !== end.row) {
-            const candidates = [];
-            if (current.column !== end.column) {
-                candidates.push({
-                    column: current.column + Math.sign(end.column - current.column),
-                    row: current.row,
-                    horizontal: true
-                });
+        // Very short doors can resolve wholly inside one abstract cell.
+        for (const [key, directions] of doorDirections) {
+            if (directions.has('east') && directions.has('west')
+                && !consumedDoorLegs.has(`${key}:door:east`)
+                && !consumedDoorLegs.has(`${key}:door:west`)) {
+                doorSymbolsByCell.set(key, [
+                    ...(doorSymbolsByCell.get(key) ?? []),
+                    this._doorSymbol('horizontal-center')
+                ]);
+                consumedDoorLegs.add(`${key}:door:east`);
+                consumedDoorLegs.add(`${key}:door:west`);
             }
-            if (current.row !== end.row) {
-                candidates.push({
-                    column: current.column,
-                    row: current.row + Math.sign(end.row - current.row),
-                    horizontal: false
-                });
+            if (directions.has('north') && directions.has('south')
+                && !consumedDoorLegs.has(`${key}:door:north`)
+                && !consumedDoorLegs.has(`${key}:door:south`)) {
+                doorSymbolsByCell.set(key, [
+                    ...(doorSymbolsByCell.get(key) ?? []),
+                    this._doorSymbol('vertical-center')
+                ]);
+                consumedDoorLegs.add(`${key}:door:north`);
+                consumedDoorLegs.add(`${key}:door:south`);
             }
-
-            if (candidates.length === 1) current = candidates[0];
-            else {
-                const scored = candidates.map(candidate => ({
-                    candidate,
-                    score: Math.abs(
-                        (lineDy * (candidate.column - start.column))
-                        - (lineDx * (candidate.row - start.row))
-                    )
-                }));
-                scored.sort((a, b) => {
-                    if (a.score !== b.score) return a.score - b.score;
-                    return a.candidate.horizontal === preferHorizontal ? -1 : 1;
-                });
-                current = scored[0].candidate;
-                preferHorizontal = !preferHorizontal;
-            }
-            path.push({ column: current.column, row: current.row });
         }
-        return path;
+
+        for (const [key, codes] of Object.entries(features ?? {})) {
+            if (!explored.has(key)) continue;
+            const cellSegments = new Map();
+            for (const code of codes) {
+                const [feature, direction] = code.split(':');
+                if (feature === 'door' && consumedDoorLegs.has(`${key}:${code}`)) continue;
+                const renderedFeature = feature === 'door' ? 'wall' : feature;
+                const segment = this._tileSegment(renderedFeature, direction, priorities[renderedFeature]);
+                if (segment) cellSegments.set(`${renderedFeature}:${direction}`, segment);
+            }
+            const segments = [...cellSegments.values()].sort((left, right) => left.priority - right.priority);
+            if (segments.length) segmentsByCell.set(key, segments);
+        }
+        return { segmentsByCell, doorSymbolsByCell };
     }
 
-    _directionBetween(from, to) {
-        if (to.column === from.column + 1 && to.row === from.row) return 'east';
-        if (to.column === from.column - 1 && to.row === from.row) return 'west';
-        if (to.row === from.row + 1 && to.column === from.column) return 'south';
-        if (to.row === from.row - 1 && to.column === from.column) return 'north';
-        return null;
+    _doorSymbol(type) {
+        const symbols = {
+            'horizontal-edge': {
+                lines: [
+                    { points: '50,50 88,50', echoPoints: '50,48.8 88,50.8' },
+                    { points: '112,50 150,50', echoPoints: '112,49.1 150,51' }
+                ],
+                boxPoints: '88,36 112,37.5 111,64 89,63 88,36',
+                echoBoxPoints: '89,37 111,36.5 112,63 88,64 89,37'
+            },
+            'vertical-edge': {
+                lines: [
+                    { points: '50,50 50,88', echoPoints: '48.8,50 50.8,88' },
+                    { points: '50,112 50,150', echoPoints: '49.1,112 51,150' }
+                ],
+                boxPoints: '36,88 63,89 64,111 37.5,112 36,88',
+                echoBoxPoints: '37,89 64,88 63,112 36.5,111 37,89'
+            },
+            'horizontal-center': {
+                lines: [
+                    { points: '0,50 38,50', echoPoints: '0,48.8 38,50.8' },
+                    { points: '62,50 100,50', echoPoints: '62,49.1 100,51' }
+                ],
+                boxPoints: '38,36 62,37.5 61,64 39,63 38,36',
+                echoBoxPoints: '39,37 61,36.5 62,63 38,64 39,37'
+            },
+            'vertical-center': {
+                lines: [
+                    { points: '50,0 50,38', echoPoints: '48.8,0 50.8,38' },
+                    { points: '50,62 50,100', echoPoints: '49.1,62 51,100' }
+                ],
+                boxPoints: '36,38 63,39 64,61 37.5,62 36,38',
+                echoBoxPoints: '37,39 64,38 63,62 36.5,61 37,39'
+            }
+        };
+        return symbols[type];
     }
 
-    _oppositeDirection(direction) {
+    _tileSegment(feature, direction, priority) {
+        const endpoints = {
+            north: { x1: 50, y1: 50, x2: 50, y2: 0 },
+            east: { x1: 50, y1: 50, x2: 100, y2: 50 },
+            south: { x1: 50, y1: 50, x2: 50, y2: 100 },
+            west: { x1: 50, y1: 50, x2: 0, y2: 50 }
+        }[direction];
+        if (!endpoints || !priority) return null;
+        const horizontal = endpoints.y1 === endpoints.y2;
+        const bend = { north: -1.8, east: 1.4, south: 1.8, west: -1.4 }[direction];
+        const midpoint = { x: (endpoints.x1 + endpoints.x2) / 2, y: (endpoints.y1 + endpoints.y2) / 2 };
+        const mainMidpoint = {
+            x: midpoint.x + (horizontal ? 0 : bend),
+            y: midpoint.y + (horizontal ? bend : 0)
+        };
+        const echoMidpoint = {
+            x: midpoint.x - (horizontal ? 0 : bend * 0.7),
+            y: midpoint.y - (horizontal ? bend * 0.7 : 0)
+        };
         return {
-            north: 'south',
-            east: 'west',
-            south: 'north',
-            west: 'east'
-        }[direction] ?? null;
+            className: `is-${feature}`,
+            priority,
+            points: `${endpoints.x1},${endpoints.y1} ${mainMidpoint.x},${mainMidpoint.y} ${endpoints.x2},${endpoints.y2}`,
+            echoPoints: `${endpoints.x1},${endpoints.y1} ${echoMidpoint.x},${echoMidpoint.y} ${endpoints.x2},${endpoints.y2}`
+        };
     }
 
-    _classifyWall(document) {
-        const source = document?._source ?? document;
-        if (!source) return null;
+    async toggleList() {
+        this.viewMode = this.viewMode === 'list' ? 'map' : 'list';
+        await this.manager.renderWindow();
+    }
 
-        const doorTypes = CONST.WALL_DOOR_TYPES ?? {};
-        const senseTypes = CONST.WALL_SENSE_TYPES ?? {};
-        const movementTypes = CONST.WALL_MOVEMENT_TYPES ?? {};
-        const door = Number(source.door ?? doorTypes.NONE ?? 0);
-        const move = Number(source.move);
-        const sight = Number(source.sight);
-        const light = Number(source.light);
+    async showMap() {
+        if (this.viewMode === 'map') return;
+        this.viewMode = 'map';
+        await this.manager.renderWindow();
+    }
 
-        if (door === doorTypes.DOOR) return 'door';
-        if (door === doorTypes.SECRET) return 'wall';
-
-        const isTerrain = sight === senseTypes.LIMITED
-            && light === senseTypes.LIMITED;
-        if (isTerrain) return null;
-
-        const isWindow = move === movementTypes.NORMAL
-            && sight === senseTypes.PROXIMITY
-            && light === senseTypes.PROXIMITY;
-        if (isWindow) return 'window';
-
-        const isPhysicalWall = move === movementTypes.NORMAL
-            && (sight === senseTypes.NORMAL || light === senseTypes.NORMAL);
-        return isPhysicalWall ? 'wall' : null;
+    async selectMap(mapId) {
+        if (!this.manager.selectMap(mapId, { render: false })) return;
+        this.viewMode = 'map';
+        this._hasBuiltMap = false;
+        this._renderedExplored = new Set();
+        this._mapScroll = { left: 0, top: 0, gridMargin: '' };
+        const hasParty = Boolean(this.manager.getTrackedPositionForCurrentMap());
+        await this.manager.renderWindow({ centerOnParty: hasParty });
+        if (!hasParty) {
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            this.centerOnMap();
+        }
     }
 
     setZoom(value, { anchor = null } = {}) {
@@ -353,13 +431,10 @@ export class MappingWindow extends ToolWindowBase {
             .then(async () => {
                 this.zoom = zoom;
                 await this.manager.renderWindow({
-                    centerOnParty: !anchor && Boolean(this.manager._getTrackedToken())
+                    centerOnParty: !anchor && Boolean(this.manager.getTrackedPositionForCurrentMap())
                 });
                 if (!anchor) return;
-
                 this._ensureScrollMargin();
-                // Blacksmith restores the pre-render scroll on its queued
-                // animation frame. Apply the cursor anchor afterward.
                 await new Promise(resolve => requestAnimationFrame(resolve));
                 this._restoreZoomAnchor(anchor);
             });
@@ -412,10 +487,9 @@ export class MappingWindow extends ToolWindowBase {
     _handleWheelZoom(event) {
         event.preventDefault();
         const direction = event.deltaY < 0 ? 1 : -1;
-        this._pendingWheelZoom = Math.max(
-            0.4,
-            Math.min(2.5, (this._pendingWheelZoom ?? this._targetZoom ?? this.zoom) + (direction * 0.1))
-        );
+        this._pendingWheelZoom = Math.max(0.4, Math.min(2.5,
+            (this._pendingWheelZoom ?? this._targetZoom ?? this.zoom) + (direction * 0.1)
+        ));
         this._pendingWheelAnchor = this._captureZoomAnchor(event);
         if (this._wheelZoomTimer) clearTimeout(this._wheelZoomTimer);
         this._wheelZoomTimer = setTimeout(() => {
@@ -432,9 +506,7 @@ export class MappingWindow extends ToolWindowBase {
         const grid = this.element?.querySelector('.cartographer-mapping-grid');
         if (!grid) return null;
         const gridRect = grid.getBoundingClientRect();
-        const renderedZoom = Number.parseFloat(
-            grid.style.getPropertyValue('--cartographer-map-zoom')
-        ) || this.zoom;
+        const renderedZoom = Number.parseFloat(grid.style.getPropertyValue('--cartographer-map-zoom')) || this.zoom;
         return {
             clientX: event.clientX,
             clientY: event.clientY,
@@ -460,34 +532,56 @@ export class MappingWindow extends ToolWindowBase {
         return { viewport, grid };
     }
 
-    centerOnParty() {
+    centerOnParty({ behavior = 'auto' } = {}) {
         const elements = this._ensureScrollMargin();
         const partyCell = this.element?.querySelector('.cartographer-mapping-cell.is-party');
         if (!elements || !partyCell) return;
         const { viewport } = elements;
-
-        // The extra margin is scrollable breathing room. Without it a cell near
-        // a scene edge cannot physically reach the middle of the viewport.
         const viewportRect = viewport.getBoundingClientRect();
         const partyRect = partyCell.getBoundingClientRect();
         viewport.scrollTo({
-            left: viewport.scrollLeft
-                + partyRect.left - viewportRect.left
+            left: viewport.scrollLeft + partyRect.left - viewportRect.left
                 + (partyRect.width / 2) - (viewport.clientWidth / 2),
-            top: viewport.scrollTop
-                + partyRect.top - viewportRect.top
+            top: viewport.scrollTop + partyRect.top - viewportRect.top
                 + (partyRect.height / 2) - (viewport.clientHeight / 2),
-            behavior: 'auto'
+            behavior
+        });
+    }
+
+    centerView() {
+        if (this.manager.getTrackedPositionForCurrentMap()) this.centerOnParty();
+        else this.centerOnMap();
+    }
+
+    centerOnMap({ behavior = 'auto' } = {}) {
+        const elements = this._ensureScrollMargin();
+        const cells = [...(this.element?.querySelectorAll('.cartographer-mapping-cell.is-explored') ?? [])];
+        if (!elements || !cells.length) return;
+        const { viewport } = elements;
+        const viewportRect = viewport.getBoundingClientRect();
+        const bounds = cells.reduce((result, cell) => {
+            const rect = cell.getBoundingClientRect();
+            result.left = Math.min(result.left, rect.left);
+            result.top = Math.min(result.top, rect.top);
+            result.right = Math.max(result.right, rect.right);
+            result.bottom = Math.max(result.bottom, rect.bottom);
+            return result;
+        }, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+        viewport.scrollTo({
+            left: viewport.scrollLeft + ((bounds.left + bounds.right) / 2)
+                - viewportRect.left - (viewport.clientWidth / 2),
+            top: viewport.scrollTop + ((bounds.top + bounds.bottom) / 2)
+                - viewportRect.top - (viewport.clientHeight / 2),
+            behavior
         });
     }
 
     followParty(position) {
-        if (!this.rendered || !position) return;
+        if (!this.rendered || !position || this.viewMode !== 'map') return;
         const key = `${position.column},${position.row}`;
         const selector = `.cartographer-mapping-cell[data-cell="${CSS.escape(key)}"]`;
         const partyCell = this.element?.querySelector(selector);
         if (!partyCell) return;
-
         const previousCell = this.element?.querySelector('.cartographer-mapping-cell.is-party');
         if (previousCell !== partyCell) {
             previousCell?.classList.remove('is-party');
@@ -498,27 +592,42 @@ export class MappingWindow extends ToolWindowBase {
             marker.setAttribute('aria-hidden', 'true');
             partyCell.append(marker);
         }
-
         if (this._followFrame) cancelAnimationFrame(this._followFrame);
         this._followFrame = requestAnimationFrame(() => {
             this._followFrame = null;
-            this.centerOnParty();
+            this.centerOnParty({ behavior: 'smooth' });
         });
     }
 
     _saveScrollPositions() {
         const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
+        const grid = this.element?.querySelector('.cartographer-mapping-grid');
+        const list = this.element?.querySelector('.cartographer-mapping-list');
+        if (viewport) {
+            this._mapScroll = {
+                left: viewport.scrollLeft,
+                top: viewport.scrollTop,
+                gridMargin: grid?.style.margin ?? ''
+            };
+        }
+        if (list) this._listScrollTop = list.scrollTop;
         return {
-            left: viewport?.scrollLeft ?? 0,
-            top: viewport?.scrollTop ?? 0
+            ...this._mapScroll,
+            listTop: this._listScrollTop
         };
     }
 
     _restoreScrollPositions(saved) {
         const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
-        if (!viewport || !saved) return;
-        viewport.scrollLeft = saved.left ?? 0;
-        viewport.scrollTop = saved.top ?? 0;
+        if (!saved) return;
+        const grid = this.element?.querySelector('.cartographer-mapping-grid');
+        if (grid) grid.style.margin = saved.gridMargin ?? '';
+        if (viewport) {
+            viewport.scrollLeft = saved.left ?? 0;
+            viewport.scrollTop = saved.top ?? 0;
+        }
+        const list = this.element?.querySelector('.cartographer-mapping-list');
+        if (list) list.scrollTop = saved.listTop ?? 0;
     }
 
     _onClose(options) {

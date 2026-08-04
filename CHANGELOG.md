@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Old-school party mapper**: Added a Mapping tool for square-grid scenes. It opens a separate Glass-themed Blacksmith Tool window where recording permanently maps the 5×5 grid area surrounding one controlled token as it moves.
-- **Shared persistent maps**: Mapped cells are stored per scene and synchronized to connected users. Player reveal requests are validated and persisted by the active GM; players never receive undiscovered scene geometry.
-- **Map window controls**: Added zoom, center-on-token, remembered pan position, mapped-cell status, tracked-token status, and a confirmed GM-only map reset.
+- **Shared persistent maps**: Maps are stored as party-visible Actor+Scene records and synchronized to connected users. The Recorded Maps view lists maps from every scene, while recording remains limited to the current scene.
+- **Map ownership controls**: Everyone can view the party's maps. An Actor owner or GM can add, continue, rename, reset, or delete that Actor's maps.
+- **Map window controls**: Added Map/List views, zoom, center-on-token, remembered pan position, mapped-distance status, tracked-token status, and confirmed map-management actions.
 - **Mapping configuration**: Added world settings to enable the mapper and allow or deny player mapping.
 - **Placeholder map presentation**: Added theme-aware grid tiles and a party marker using Blacksmith's Tool content-surface variables, ready for later hand-drawn asset replacement.
 
@@ -34,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Selected-token map context**: Opening Mapping with one selected token now loads the existing scene map with that token marked and centered before recording begins. Record adds its movement; Stop retains the selected-token view, and changing selection while viewing updates the map context.
 - **Cursor-centered wheel zoom**: The mouse wheel now zooms the map around the tile beneath the cursor like the Foundry canvas. Rapid wheel input is batched and serialized instead of scrolling the hidden viewport or launching overlapping renders.
 - **Tile reveal animation**: Newly discovered floor and linework tiles fade and settle into place without replaying the animation on existing tiles during zoom, pan, wall updates, or ordinary rerenders. Reduced-motion preferences disable the effect.
+- **Smooth movement recentering**: After manual map panning, token movement now scrolls the map smoothly back beneath the centered party marker instead of snapping there instantly.
+- **Stable Record/Stop viewport**: The mapper now preserves its dynamic centering margin along with scroll coordinates, so stopping recording no longer shifts the map into the upper-left corner.
+- **Distance mapped**: The map footer now reports feet mapped at five feet per discovered grid square instead of displaying the raw cell count.
+- **Exploration-aware features**: Maps now persist only the abstract wall, window, and door strokes the recorded token could experience from each 5×5 reveal. Sight-blocking geometry prevents walls behind walls from leaking onto the party map, terrain walls remain ignored, and viewing an old map never rescans its live scene.
+- **Reliable experienced-wall detection**: Structural discovery now uses Foundry's authoritative sight-collision backend instead of depending on a rendered token vision polygon on the GM client. Nearby corridor walls, windows, and doors are retained while intervening walls still hide geometry behind them.
+- **Map window chrome**: Removed the floating control palette from the map surface. Map/List, Record/Stop, Add, and Reset now use the existing top toolbar; zoom out, center, zoom in, and the zoom readout use the footer beside mapped distance.
+- **Queued path mapping**: Long and rapid token moves are now reconstructed as an ordered path through every crossed grid square. The mapper reveals and samples structure as if the token paused at each step, periodically yields for UI responsiveness, and keeps the party marker on the last completed map step until the drawing catches up.
+- **Old-school door glyph**: Regular doors now use the guide's black wall-and-centered-box symbol, rotated to match horizontal or vertical placement, instead of an orange wall stroke. The glyph keeps the mapper's slightly hand-drawn line treatment.
+- **Hover controls**: Cartographer's map controls now fade away when the pointer leaves the Tool window and return on window hover or keyboard focus. Status, map identity, distance, and zoom readouts remain visible, and list-item management controls appear only on their row.
+- **Actor-and-scene map identity**: Replaced the single shared scene map with one map per Actor per Scene, including migration of the legacy scene map into the first Actor map continued on that scene.
 
 
 

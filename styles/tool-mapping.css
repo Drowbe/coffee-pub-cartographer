@@ -6,7 +6,6 @@
     --cartographer-map-cell-size: 22.4px;
     --cartographer-map-wall: #000;
     --cartographer-map-window: #4c93cc;
-    --cartographer-map-door: #db820c;
     --cartographer-map-floor-grid: color-mix(in srgb, var(--blacksmith-tool-divider) 28%, transparent);
 }
 
@@ -22,47 +21,6 @@
     min-height: 240px;
     background: var(--blacksmith-tool-surface-sunken);
     color: var(--blacksmith-tool-text);
-}
-
-.cartographer-mapping-controls {
-    position: absolute;
-    z-index: 2;
-    top: 8px;
-    right: 8px;
-    display: flex;
-    gap: 4px;
-    padding: 4px;
-    border: 1px solid var(--blacksmith-tool-divider);
-    border-radius: 6px;
-    background: var(--blacksmith-tool-scrim);
-}
-
-.cartographer-mapping-controls button {
-    width: 28px;
-    height: 28px;
-    margin: 0;
-    padding: 0;
-    border: 1px solid var(--blacksmith-tool-field-border);
-    border-radius: 4px;
-    background: var(--blacksmith-tool-field-background);
-    color: var(--blacksmith-tool-field-text);
-}
-
-.cartographer-mapping-controls button:hover {
-    background: var(--blacksmith-tool-surface-hover);
-}
-
-.cartographer-mapping-controls button.is-critical {
-    color: var(--blacksmith-status-danger);
-}
-
-.cartographer-mapping-controls button.cartographer-mapping-record {
-    color: var(--blacksmith-status-danger);
-}
-
-.cartographer-mapping-controls button.cartographer-mapping-record.is-recording {
-    border-color: var(--blacksmith-status-danger);
-    background: color-mix(in srgb, var(--blacksmith-status-danger) 18%, var(--blacksmith-tool-field-background));
 }
 
 .cartographer-mapping-viewport {
@@ -139,11 +97,11 @@
 
 .cartographer-mapping-segments {
     position: absolute;
-    z-index: 1;
+    z-index: 2;
     inset: 0;
     width: 100%;
     height: 100%;
-    overflow: hidden;
+    overflow: visible;
     pointer-events: none;
 }
 
@@ -160,11 +118,6 @@
     stroke-width: 13;
 }
 
-.cartographer-mapping-segment.is-door {
-    stroke: var(--cartographer-map-door);
-    stroke-width: 15;
-}
-
 .cartographer-mapping-segment.is-sketch-echo {
     opacity: 0.28;
     stroke-width: 7;
@@ -174,12 +127,33 @@
     stroke-width: 8;
 }
 
-.cartographer-mapping-segment.is-door.is-sketch-echo {
+
+.cartographer-mapping-door-line,
+.cartographer-mapping-door-box {
+    stroke: var(--cartographer-map-wall);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.cartographer-mapping-door-line {
+    fill: none;
+    stroke-width: 12;
+}
+
+.cartographer-mapping-door-box {
+    fill: var(--blacksmith-tool-scrim);
     stroke-width: 9;
 }
 
+.cartographer-mapping-door-line.is-sketch-echo,
+.cartographer-mapping-door-box.is-sketch-echo {
+    fill: none;
+    opacity: 0.25;
+    stroke-width: 5;
+}
+
 .cartographer-mapping-party {
-    z-index: 2;
+    z-index: 3;
     pointer-events: none;
     color: var(--blacksmith-tool-accent);
     font-size: calc(18px * var(--cartographer-map-zoom));
@@ -211,6 +185,182 @@
     font-size: 8px;
 }
 
+.cartographer-mapping-status.is-recording i {
+    color: var(--blacksmith-status-danger);
+}
+
 .cartographer-mapping-token {
+    color: var(--blacksmith-tool-text-muted);
+}
+
+.cartographer-mapping-window .blacksmith-window-tool-bar-left {
+    flex: 1 1 auto;
+}
+
+.cartographer-mapping-chrome-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease;
+}
+
+.cartographer-mapping-window:hover .cartographer-mapping-chrome-actions,
+.cartographer-mapping-window:has(.cartographer-mapping-chrome-actions button:focus-visible) .cartographer-mapping-chrome-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.cartographer-mapping-chrome-actions.is-primary {
+    margin-left: 4px;
+    padding-left: 8px;
+    border-left: 1px solid var(--blacksmith-tool-divider);
+}
+
+.cartographer-mapping-chrome-actions button {
+    display: inline-grid;
+    width: 24px;
+    height: 24px;
+    margin: 0;
+    padding: 0;
+    place-items: center;
+    border: 1px solid var(--blacksmith-tool-field-border);
+    border-radius: 4px;
+    background: var(--blacksmith-tool-field-background);
+    color: var(--blacksmith-tool-field-text);
+    line-height: 1;
+}
+
+.cartographer-mapping-chrome-actions button:hover {
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-mapping-chrome-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
+}
+
+.cartographer-mapping-chrome-actions button.is-critical,
+.cartographer-mapping-chrome-actions button.cartographer-mapping-record {
+    color: var(--blacksmith-status-danger);
+}
+
+.cartographer-mapping-chrome-actions button.cartographer-mapping-record.is-recording {
+    border-color: var(--blacksmith-status-danger);
+    background: color-mix(in srgb, var(--blacksmith-status-danger) 18%, var(--blacksmith-tool-field-background));
+}
+
+.cartographer-mapping-zoom-readout {
+    min-width: 38px;
+    text-align: right;
+}
+
+.cartographer-mapping-root.is-list-view {
+    display: flex;
+    box-sizing: border-box;
+    flex-direction: column;
+    padding: 12px;
+    gap: 10px;
+}
+
+.cartographer-mapping-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex: 0 0 auto;
+}
+
+.cartographer-mapping-list-header h2 {
+    margin: 0;
+    border: 0;
+    font-size: 1.05rem;
+}
+
+.cartographer-mapping-item-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease;
+}
+
+.cartographer-mapping-list-item:hover .cartographer-mapping-item-actions,
+.cartographer-mapping-list-item:has(.cartographer-mapping-item-actions button:focus-visible) .cartographer-mapping-item-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.cartographer-mapping-item-actions button {
+    width: 30px;
+    height: 30px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--blacksmith-tool-field-border);
+    border-radius: 4px;
+    background: var(--blacksmith-tool-field-background);
+    color: var(--blacksmith-tool-field-text);
+}
+
+.cartographer-mapping-item-actions button:hover {
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-mapping-item-actions button.is-critical {
+    color: var(--blacksmith-status-danger);
+}
+
+.cartographer-mapping-list {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+}
+
+.cartographer-mapping-list-item {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--blacksmith-tool-divider);
+    border-radius: 6px;
+    background: var(--blacksmith-tool-surface);
+    cursor: pointer;
+}
+
+.cartographer-mapping-list-item:hover,
+.cartographer-mapping-list-item.is-current {
+    border-color: var(--blacksmith-tool-accent);
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-mapping-list-icon {
+    display: grid;
+    place-items: center;
+    color: var(--blacksmith-tool-accent);
+    font-size: 1.2rem;
+}
+
+.cartographer-mapping-list-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cartographer-mapping-list-copy strong,
+.cartographer-mapping-list-copy span,
+.cartographer-mapping-list-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cartographer-mapping-list-copy span,
+.cartographer-mapping-list-copy small {
     color: var(--blacksmith-tool-text-muted);
 }

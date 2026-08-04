@@ -1,24 +1,39 @@
-<div class="cartographer-mapping-root">
-    <div class="cartographer-mapping-controls" role="toolbar">
-        <button type="button" class="cartographer-mapping-record{{#if isRecording}} is-recording{{/if}}" data-action="toggle-recording" data-tooltip="{{recordLabel}}" aria-label="{{recordLabel}}">
-            {{#if isRecording}}<i class="fa-solid fa-stop"></i>{{else}}<i class="fa-solid fa-circle"></i>{{/if}}
-        </button>
-        <button type="button" data-action="zoom-out" data-tooltip="{{zoomOutLabel}}" aria-label="{{zoomOutLabel}}">
-            <i class="fa-solid fa-minus"></i>
-        </button>
-        <button type="button" data-action="center-party" data-tooltip="{{centerPartyLabel}}" aria-label="{{centerPartyLabel}}">
-            <i class="fa-solid fa-crosshairs"></i>
-        </button>
-        <button type="button" data-action="zoom-in" data-tooltip="{{zoomInLabel}}" aria-label="{{zoomInLabel}}">
-            <i class="fa-solid fa-plus"></i>
-        </button>
-        {{#if canReset}}
-        <button type="button" class="is-critical" data-action="reset-map" data-tooltip="{{resetLabel}}" aria-label="{{resetLabel}}">
-            <i class="fa-solid fa-trash-can"></i>
-        </button>
-        {{/if}}
+<div class="cartographer-mapping-root{{#if isListView}} is-list-view{{/if}}">
+    {{#if isListView}}
+    <div class="cartographer-mapping-list-header">
+        <h2>{{localize "coffee-pub-cartographer.mapping.recordedMaps"}}</h2>
     </div>
 
+    <div class="cartographer-mapping-list">
+        {{#if listEmpty}}
+        <div class="cartographer-mapping-empty">
+            <i class="fa-solid fa-map"></i>
+            <span>{{listEmptyMessage}}</span>
+        </div>
+        {{else}}
+        {{#each maps}}
+        <article class="cartographer-mapping-list-item{{#if isCurrent}} is-current{{/if}}" data-action="select-map" data-map-id="{{id}}">
+            <div class="cartographer-mapping-list-icon"><i class="fa-solid fa-map"></i></div>
+            <div class="cartographer-mapping-list-copy">
+                <strong>{{name}}</strong>
+                <span>{{actorName}} · {{sceneName}}</span>
+                <small>{{feetMapped}} {{../feetMappedLabel}}{{#if updated}} · {{updated}}{{/if}}</small>
+            </div>
+            {{#if canManage}}
+            <div class="cartographer-mapping-item-actions">
+                <button type="button" data-action="rename-map" data-map-id="{{id}}" data-tooltip="{{../renameLabel}}" aria-label="{{../renameLabel}}">
+                    <i class="fa-solid fa-pen"></i>
+                </button>
+                <button type="button" class="is-critical" data-action="delete-map" data-map-id="{{id}}" data-tooltip="{{../deleteLabel}}" aria-label="{{../deleteLabel}}">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            </div>
+            {{/if}}
+        </article>
+        {{/each}}
+        {{/if}}
+    </div>
+    {{else}}
     <div class="cartographer-mapping-viewport">
         {{#if empty}}
         <div class="cartographer-mapping-empty">
@@ -29,11 +44,21 @@
         <div class="cartographer-mapping-grid" style="--cartographer-map-columns: {{columnCount}}; --cartographer-map-rows: {{rowCount}}; --cartographer-map-zoom: {{zoom}};">
             {{#each cells}}
             <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}};">
-                {{#if segments.length}}
+                {{#if hasLinework}}
                 <svg class="cartographer-mapping-segments" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                     {{#each segments}}
                     <polyline class="cartographer-mapping-segment {{className}} is-sketch-echo" points="{{echoPoints}}"></polyline>
                     <polyline class="cartographer-mapping-segment {{className}}" points="{{points}}"></polyline>
+                    {{/each}}
+                    {{#each doorSymbols}}
+                    <g class="cartographer-mapping-door-symbol">
+                        {{#each lines}}
+                        <polyline class="cartographer-mapping-door-line is-sketch-echo" points="{{echoPoints}}"></polyline>
+                        <polyline class="cartographer-mapping-door-line" points="{{points}}"></polyline>
+                        {{/each}}
+                        <polygon class="cartographer-mapping-door-box is-sketch-echo" points="{{echoBoxPoints}}"></polygon>
+                        <polygon class="cartographer-mapping-door-box" points="{{boxPoints}}"></polygon>
+                    </g>
                     {{/each}}
                 </svg>
                 {{/if}}
@@ -43,4 +68,5 @@
         </div>
         {{/if}}
     </div>
+    {{/if}}
 </div>

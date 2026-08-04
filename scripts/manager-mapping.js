@@ -5,33 +5,60 @@
 import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
 import { socketManager } from './manager-sockets.js';
+import { gridTravelPath, mergeFeatures, normalizeFeatures, observeVisibleFeatures } from './utils-mapping.js';
 import { notify } from './utils-toast.js';
 
 const FLAG_KEY = 'mapping';
 const TOOL_ID = `${MODULE.ID}-mapping`;
 const WINDOW_ID = `${MODULE.ID}-mapper`;
-const STATE_VERSION = 1;
+const STATE_VERSION = 2;
 
 class MappingManager {
     constructor() {
         this.services = null;
         this.active = false;
         this.trackedTokenId = null;
+        this.currentMapId = null;
         this.lastGridKey = null;
-        this.state = this._emptyState();
+        this.state = this._emptyRecord();
+        this.records = new Map();
+        this.legacyByScene = new Map();
         this.window = null;
         this._hooks = [];
         this._saveQueue = Promise.resolve();
         this._renderQueue = Promise.resolve();
+        this._outgoingRevealQueue = Promise.resolve();
+        this._revealProcessingQueue = Promise.resolve();
+        this._authoritativePositions = new Map();
+        this._recentTokenPositions = new Map();
         this._selectionFrame = null;
         this._closingWindow = false;
     }
 
-    _emptyState() {
+    _recordId(actorId, sceneId) {
+        return `${actorId}::${sceneId}`;
+    }
+
+    _emptyRecord({ actor = null, scene = null } = {}) {
+        const actorId = actor?.id ?? null;
+        const sceneId = scene?.id ?? null;
         return {
             version: STATE_VERSION,
+            id: actorId && sceneId ? this._recordId(actorId, sceneId) : null,
+            actorId,
+            actorName: actor?.name ?? '',
+            sceneId,
+            sceneName: scene?.name ?? '',
+            name: actor && scene ? `${actor.name} — ${scene.name}` : '',
             gridType: 'square',
+            columns: 0,
+            rows: 0,
+            gridDistance: 5,
             explored: [],
+            features: {},
+            symbols: [],
+            lastPosition: null,
+            createdAt: 0,
             updatedAt: 0,
             updatedBy: null
         };
@@ -43,7 +70,8 @@ class MappingManager {
         this._registerToolbarTool();
         this._registerHooks();
         this._registerSocketHandlers();
-        this.loadSceneState();
+        this.loadMapRecords();
+        this._seedRecentTokenPositions();
         console.log(`${MODULE.NAME}: Mapping tool initialized`);
     }
 
@@ -52,7 +80,10 @@ class MappingManager {
         this._hooks = [];
         this.active = false;
         this.trackedTokenId = null;
+        this.currentMapId = null;
         this.lastGridKey = null;
+        this._authoritativePositions.clear();
+        this._recentTokenPositions.clear();
         if (this._selectionFrame) cancelAnimationFrame(this._selectionFrame);
         this._selectionFrame = null;
         this.window = null;
@@ -64,7 +95,6 @@ class MappingManager {
             console.warn(`${MODULE.NAME}: Blacksmith Window API unavailable; Mapper window not registered`);
             return false;
         }
-
         api.registerWindow(WINDOW_ID, {
             moduleId: MODULE.ID,
             title: game.i18n.localize(`${MODULE.ID}.mapping.windowTitle`),
@@ -86,23 +116,29 @@ class MappingManager {
 
     _registerHooks() {
         const updateToken = Hooks.on('updateToken', (tokenDocument, changes) => {
+            if (game.user.isGM && this._isSquareGrid()) {
+                this._rememberTokenPosition(tokenDocument.id, this._gridPosition(tokenDocument));
+            }
             if (tokenDocument.id !== this.trackedTokenId) return;
-            if (!('x' in changes) && !('y' in changes)) return;
+            const moved = ('x' in changes) || ('y' in changes);
+            const visionChanged = ('rotation' in changes) || ('sight' in changes);
+            if (!moved && !visionChanged) return;
             const position = this._gridPosition(tokenDocument);
-            this.window?.followParty(position);
+            if (moved && !this.active) this.window?.followParty(position);
             if (!this.active) return;
-            void this._requestReveal(tokenDocument, position).catch(error => {
+            void this._requestReveal(tokenDocument, position, { force: visionChanged }).catch(error => {
                 console.error(`${MODULE.NAME}: Failed to map token movement`, error);
             });
         });
         this._hooks.push({ name: 'updateToken', id: updateToken });
 
         const updateScene = Hooks.on('updateScene', (scene, changes) => {
-            if (scene.id !== canvas?.scene?.id || !changes?.flags?.[MODULE.ID]?.[FLAG_KEY]) return;
-            const incoming = this._normalizeState(scene.getFlag(MODULE.ID, FLAG_KEY));
-            const isReset = incoming.explored.length === 0 && incoming.updatedAt === 0;
-            if (!this._applyIncomingState(incoming, { replace: isReset })) return;
-            void this.renderWindow({ centerOnParty: this.active });
+            if (!changes?.flags?.[MODULE.ID]?.[FLAG_KEY]) return;
+            this._replaceSceneRecords(scene, scene.getFlag(MODULE.ID, FLAG_KEY));
+            void this.renderWindow({
+                centerOnParty: this.active,
+                centerBehavior: this.active ? 'smooth' : 'auto'
+            });
         });
         this._hooks.push({ name: 'updateScene', id: updateScene });
 
@@ -128,14 +164,20 @@ class MappingManager {
         const canvasReady = Hooks.on('canvasReady', () => {
             if (this.active) void this.stopMapping();
             this.trackedTokenId = null;
-            this.loadSceneState();
+            this._recentTokenPositions.clear();
+            this._seedRecentTokenPositions();
+            this.loadMapRecords();
+            const selected = this._getSingleControlledToken();
+            if (selected) this._selectMapForToken(selected);
             void this.renderWindow();
         });
         this._hooks.push({ name: 'canvasReady', id: canvasReady });
 
-        for (const hookName of ['createWall', 'updateWall', 'deleteWall']) {
+        for (const hookName of ['createWall', 'updateWall']) {
             const hookId = Hooks.on(hookName, () => {
-                void this.renderWindow({ centerOnParty: this.active });
+                const token = this._getTrackedToken();
+                if (!this.active || !token) return;
+                void this._requestReveal(token.document, this._gridPosition(token.document), { force: true });
             });
             this._hooks.push({ name: hookName, id: hookId });
         }
@@ -143,10 +185,144 @@ class MappingManager {
 
     _registerSocketHandlers() {
         socketManager.registerToolHandlers('mapping', {
-            'reveal-request': (data) => this._handleRevealRequest(data),
-            'state-updated': (data) => this._handleStateUpdated(data),
-            'reset': (data) => this._handleStateUpdated(data, { replace: true })
+            'reveal-request': data => this._handleRevealRequest(data),
+            'mutation-request': data => this._handleMutationRequest(data),
+            'registry-updated': data => this._handleRegistryUpdated(data)
         });
+    }
+
+    loadMapRecords() {
+        const selectedId = this.currentMapId;
+        this.records.clear();
+        this.legacyByScene.clear();
+        for (const scene of game.scenes ?? []) this._replaceSceneRecords(scene, scene.getFlag(MODULE.ID, FLAG_KEY));
+
+        if (selectedId && this.records.has(selectedId)) this.selectMap(selectedId, { render: false });
+        else {
+            const selected = this._getSingleControlledToken();
+            if (selected) this._selectMapForToken(selected);
+            else {
+                const latest = this.getMapList()[0];
+                if (latest) this.selectMap(latest.id, { render: false });
+                else {
+                    this.currentMapId = null;
+                    this.state = this._emptyRecord();
+                }
+            }
+        }
+        return this.records;
+    }
+
+    _replaceSceneRecords(scene, raw) {
+        for (const [id, record] of this.records) {
+            if (record.sceneId === scene.id) this.records.delete(id);
+        }
+        this.legacyByScene.delete(scene.id);
+
+        if (Number(raw?.version) >= STATE_VERSION && raw.maps && typeof raw.maps === 'object') {
+            for (const value of Object.values(raw.maps)) {
+                const record = this._normalizeRecord(value, scene);
+                if (record.id) this.records.set(record.id, record);
+            }
+        } else if (Array.isArray(raw?.explored)) {
+            this.legacyByScene.set(scene.id, raw);
+        }
+
+        if (this.currentMapId) {
+            const current = this.records.get(this.currentMapId);
+            if (current) this.state = current;
+            else if (this.state.sceneId === scene.id && this.state.updatedAt) {
+                this.currentMapId = null;
+                this.state = this._emptyRecord();
+            }
+        }
+    }
+
+    _normalizeRecord(raw, scene = game.scenes?.get(raw?.sceneId)) {
+        if (!raw || typeof raw !== 'object') return this._emptyRecord();
+        const actorId = typeof raw.actorId === 'string' ? raw.actorId : null;
+        const sceneId = scene?.id ?? (typeof raw.sceneId === 'string' ? raw.sceneId : null);
+        if (!actorId || !sceneId) return this._emptyRecord();
+        const actor = game.actors?.get(actorId);
+        const explored = Array.isArray(raw.explored)
+            ? [...new Set(raw.explored.filter(key => /^-?\d+,-?\d+$/.test(key)))]
+            : [];
+        return {
+            version: STATE_VERSION,
+            id: this._recordId(actorId, sceneId),
+            actorId,
+            actorName: String(raw.actorName || actor?.name || ''),
+            sceneId,
+            sceneName: String(raw.sceneName || scene?.name || ''),
+            name: String(raw.name || `${raw.actorName || actor?.name || 'Map'} — ${raw.sceneName || scene?.name || ''}`),
+            gridType: 'square',
+            columns: Math.max(0, Number(raw.columns) || 0),
+            rows: Math.max(0, Number(raw.rows) || 0),
+            gridDistance: 5,
+            explored,
+            features: normalizeFeatures(raw.features),
+            symbols: Array.isArray(raw.symbols) ? foundry.utils.deepClone(raw.symbols) : [],
+            lastPosition: this._normalizePosition(raw.lastPosition),
+            createdAt: Number(raw.createdAt) || Number(raw.updatedAt) || 0,
+            updatedAt: Number(raw.updatedAt) || 0,
+            updatedBy: typeof raw.updatedBy === 'string' ? raw.updatedBy : null
+        };
+    }
+
+    _newRecord(actor, scene) {
+        const record = this._emptyRecord({ actor, scene });
+        const legacy = this.legacyByScene.get(scene.id);
+        if (legacy) {
+            record.explored = [...new Set((legacy.explored ?? []).filter(key => /^-?\d+,-?\d+$/.test(key)))];
+            record.createdAt = Number(legacy.updatedAt) || Date.now();
+            record.updatedAt = Number(legacy.updatedAt) || 0;
+            record.updatedBy = typeof legacy.updatedBy === 'string' ? legacy.updatedBy : null;
+        }
+        const dimensions = this._sceneGridDimensions(scene);
+        record.columns = dimensions.columns;
+        record.rows = dimensions.rows;
+        return record;
+    }
+
+    _sceneGridDimensions(scene) {
+        const size = Number(scene?.grid?.size) || Number(canvas?.grid?.size) || 100;
+        const width = scene?.id === canvas?.scene?.id ? canvas.dimensions?.width : scene?.width;
+        const height = scene?.id === canvas?.scene?.id ? canvas.dimensions?.height : scene?.height;
+        return {
+            columns: Math.max(1, Math.ceil((Number(width) || size) / size)),
+            rows: Math.max(1, Math.ceil((Number(height) || size) / size))
+        };
+    }
+
+    getMapList() {
+        return [...this.records.values()].sort((left, right) => {
+            if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
+            return left.name.localeCompare(right.name);
+        });
+    }
+
+    selectMap(mapId, { render = true } = {}) {
+        const record = this.records.get(mapId);
+        if (!record) return false;
+        this.currentMapId = record.id;
+        this.state = record;
+        if (this.active && record.id !== this._mapIdForToken(this._getTrackedToken())) void this.stopMapping();
+        if (render) void this.renderWindow();
+        return true;
+    }
+
+    _mapIdForToken(token) {
+        const actorId = token?.actor?.id ?? token?.document?.actorId;
+        return actorId && canvas?.scene?.id ? this._recordId(actorId, canvas.scene.id) : null;
+    }
+
+    _selectMapForToken(token) {
+        const actor = token?.actor;
+        if (!actor || !canvas?.scene) return false;
+        const id = this._recordId(actor.id, canvas.scene.id);
+        this.currentMapId = id;
+        this.state = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
+        return true;
     }
 
     async toggleRecording() {
@@ -157,44 +333,35 @@ class MappingManager {
     async startMapping() {
         if (!game.settings.get(MODULE.ID, 'mapping.enabled')) {
             notify(game.i18n.localize(`${MODULE.ID}.mapping.disabledTitle`), {
-                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.disabledHint`),
-                type: 'warn'
+                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.disabledHint`), type: 'warn'
             });
             return false;
         }
-
         if (!game.user.isGM && !game.settings.get(MODULE.ID, 'mapping.allowPlayers')) {
             notify(game.i18n.localize(`${MODULE.ID}.mapping.notAllowedTitle`), { type: 'warn' });
             return false;
         }
-
         if (!game.user.isGM && !game.users.activeGM) {
             notify(game.i18n.localize(`${MODULE.ID}.mapping.noGmTitle`), {
-                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.noGmHint`),
-                type: 'warn'
+                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.noGmHint`), type: 'warn'
             });
             return false;
         }
-
         if (!this._isSquareGrid()) {
             notify(game.i18n.localize(`${MODULE.ID}.mapping.unsupportedGridTitle`), {
-                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.unsupportedGridHint`),
-                type: 'warn'
+                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.unsupportedGridHint`), type: 'warn'
             });
             return false;
         }
 
-        const controlled = canvas?.tokens?.controlled ?? [];
-        if (controlled.length !== 1) {
+        const token = this._getSingleControlledToken();
+        if (!token) {
             notify(game.i18n.localize(`${MODULE.ID}.mapping.selectTokenTitle`), {
-                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.selectTokenHint`),
-                type: 'warn'
+                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.selectTokenHint`), type: 'warn'
             });
             return false;
         }
-
-        const token = controlled[0];
-        if (!game.user.isGM && !token.document.testUserPermission(game.user, CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER)) {
+        if (!this._canManageActor(token.actor, game.user)) {
             notify(game.i18n.localize(`${MODULE.ID}.mapping.notOwnerTitle`), { type: 'warn' });
             return false;
         }
@@ -202,17 +369,29 @@ class MappingManager {
         this.active = true;
         this.trackedTokenId = token.id;
         this.lastGridKey = null;
+        this._selectMapForToken(token);
         await this.openWindow();
-        await this._requestReveal(token.document);
+        this.window?.showMap?.();
+        await this._requestReveal(token.document, this._gridPosition(token.document), {
+            force: true,
+            resetPath: true
+        });
         await this.renderWindow({ centerOnParty: true });
         return true;
     }
 
     async stopMapping({ closeWindow = false } = {}) {
+        // Finish every queued path before dropping the recording session. This
+        // keeps Stop (and window close) from jumping the marker ahead of map
+        // linework which is still catching up.
+        if (this.active) {
+            await this._outgoingRevealQueue.catch(error => {
+                console.error(`${MODULE.NAME}: Failed while finishing the recorded map path`, error);
+            });
+        }
         this.active = false;
         this.lastGridKey = null;
         this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
-
         if (closeWindow && this.window?.rendered) {
             this._closingWindow = true;
             try {
@@ -221,9 +400,7 @@ class MappingManager {
                 this._closingWindow = false;
                 this.window = null;
             }
-        } else if (this.window?.rendered) {
-            await this.renderWindow();
-        }
+        } else if (this.window?.rendered) await this.renderWindow();
         return true;
     }
 
@@ -233,38 +410,40 @@ class MappingManager {
     }
 
     async openWindow() {
-        if (!this.active) this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
-        this.loadSceneState();
+        if (!this.active) {
+            this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
+            this.loadMapRecords();
+        }
         if (this.window?.rendered) {
             this.window.bringToFront?.();
-            await this.renderWindow({ centerOnParty: Boolean(this.trackedTokenId) });
+            await this.renderWindow({ centerOnParty: Boolean(this.getTrackedPositionForCurrentMap()) });
             return this.window;
         }
         const { MappingWindow } = await import('./window-mapping.js');
         this.window = await MappingWindow.open(this);
-        if (this.trackedTokenId) {
-            await new Promise(resolve => requestAnimationFrame(resolve));
-            this.window?.centerOnParty();
-        }
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        if (this.getTrackedPositionForCurrentMap()) this.window?.centerOnParty();
+        else this.window?.centerOnMap?.();
         return this.window;
     }
 
     async _handleTokenSelectionChanged() {
         const selected = this._getSingleControlledToken();
         if (this.active) {
-            if (!selected || selected.id !== this.trackedTokenId) {
-                await this.stopMapping({ closeWindow: false });
-            }
+            if (!selected || selected.id !== this.trackedTokenId) await this.stopMapping({ closeWindow: false });
             return;
         }
-
         const nextTokenId = selected?.id ?? null;
         if (nextTokenId === this.trackedTokenId) return;
         this.trackedTokenId = nextTokenId;
-        await this.renderWindow({ centerOnParty: Boolean(nextTokenId) });
+        if (selected) {
+            this._selectMapForToken(selected);
+            await this.window?.showMap?.();
+        }
+        await this.renderWindow({ centerOnParty: Boolean(selected) });
     }
 
-    async renderWindow({ centerOnParty = false } = {}) {
+    async renderWindow({ centerOnParty = false, centerBehavior = 'auto' } = {}) {
         this._renderQueue = this._renderQueue
             .catch(error => console.error(`${MODULE.NAME}: Failed to render mapping window`, error))
             .then(async () => {
@@ -272,70 +451,19 @@ class MappingManager {
                 if (!window?.rendered) return;
                 await window.render(false);
                 if (centerOnParty && this.window === window && window.rendered) {
-                    // Blacksmith restores saved scroll positions on its first
-                    // post-render frame. Our callback is registered afterward,
-                    // so tracked-token centering wins over that stale scroll.
                     await new Promise(resolve => requestAnimationFrame(resolve));
-                    if (this.window === window && window.rendered) window.centerOnParty();
+                    if (this.window === window && window.rendered) window.centerOnParty({ behavior: centerBehavior });
                 }
             });
         return this._renderQueue;
-    }
-
-    loadSceneState() {
-        const raw = canvas?.scene?.getFlag(MODULE.ID, FLAG_KEY);
-        this.state = this._normalizeState(raw);
-        return this.state;
-    }
-
-    _normalizeState(raw) {
-        if (!raw || typeof raw !== 'object') return this._emptyState();
-        const explored = Array.isArray(raw.explored)
-            ? [...new Set(raw.explored.filter(key => /^-?\d+,-?\d+$/.test(key)))]
-            : [];
-        return {
-            version: STATE_VERSION,
-            gridType: 'square',
-            explored,
-            updatedAt: Number(raw.updatedAt) || 0,
-            updatedBy: typeof raw.updatedBy === 'string' ? raw.updatedBy : null
-        };
-    }
-
-    _applyIncomingState(incoming, { replace = false } = {}) {
-        const next = replace ? incoming : this._mergeState(incoming);
-        if (this._statesEqual(next, this.state)) return false;
-        this.state = next;
-        return true;
-    }
-
-    _mergeState(incoming) {
-        const incomingIsNewer = incoming.updatedAt >= this.state.updatedAt;
-        return {
-            version: Math.max(this.state.version, incoming.version),
-            gridType: 'square',
-            explored: [...new Set([...this.state.explored, ...incoming.explored])],
-            updatedAt: incomingIsNewer ? incoming.updatedAt : this.state.updatedAt,
-            updatedBy: incomingIsNewer ? incoming.updatedBy : this.state.updatedBy
-        };
-    }
-
-    _statesEqual(left, right) {
-        return left.version === right.version
-            && left.gridType === right.gridType
-            && left.updatedAt === right.updatedAt
-            && left.updatedBy === right.updatedBy
-            && left.explored.length === right.explored.length
-            && left.explored.every((key, index) => key === right.explored[index]);
     }
 
     _isSquareGrid() {
         if (!canvas?.ready || !canvas.grid) return false;
         const type = canvas.grid.type ?? canvas.scene?.grid?.type;
         const gridTypes = CONST.GRID_TYPES ?? {};
-        const squareTypes = [gridTypes.SQUARE, gridTypes.SQUARE_DIAGONAL_1, gridTypes.SQUARE_DIAGONAL_2]
-            .filter(value => value !== undefined);
-        return squareTypes.includes(type);
+        return [gridTypes.SQUARE, gridTypes.SQUARE_DIAGONAL_1, gridTypes.SQUARE_DIAGONAL_2]
+            .filter(value => value !== undefined).includes(type);
     }
 
     _getTrackedToken() {
@@ -347,16 +475,26 @@ class MappingManager {
         return controlled.length === 1 ? controlled[0] : null;
     }
 
+    getTrackedPositionForCurrentMap() {
+        const token = this._getTrackedToken();
+        if (!token || this._mapIdForToken(token) !== this.currentMapId) return null;
+        const mappedPosition = this._normalizePosition(this.state.lastPosition);
+        if (this.active && mappedPosition) return mappedPosition;
+        const livePosition = this._gridPosition(token.document);
+        if (this.state.explored.includes(`${livePosition.column},${livePosition.row}`)) return livePosition;
+        return mappedPosition ?? livePosition;
+    }
+
     getTrackedTokenName() {
-        return this._getTrackedToken()?.name ?? game.i18n.localize(`${MODULE.ID}.mapping.noToken`);
+        return this.state.actorName || this._getTrackedToken()?.name || game.i18n.localize(`${MODULE.ID}.mapping.noToken`);
     }
 
     _gridPosition(tokenDocument) {
         const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
         const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
         const center = {
-            x: tokenDocument.x + ((tokenDocument.width ?? 1) * sizeX) / 2,
-            y: tokenDocument.y + ((tokenDocument.height ?? 1) * sizeY) / 2
+            x: tokenDocument.x + (((tokenDocument.width ?? 1) * sizeX) / 2),
+            y: tokenDocument.y + (((tokenDocument.height ?? 1) * sizeY) / 2)
         };
         const offset = canvas.grid.getOffset(center);
         const column = Number(offset.j ?? offset.x);
@@ -367,86 +505,249 @@ class MappingManager {
         return { column, row };
     }
 
+    _normalizePosition(position) {
+        const column = Number(position?.column);
+        const row = Number(position?.row);
+        return Number.isInteger(column) && Number.isInteger(row) ? { column, row } : null;
+    }
+
+    _seedRecentTokenPositions() {
+        if (!game.user?.isGM || !this._isSquareGrid()) return;
+        for (const token of canvas.tokens?.placeables ?? []) {
+            this._rememberTokenPosition(token.id, this._gridPosition(token.document));
+        }
+    }
+
+    _rememberTokenPosition(tokenId, position) {
+        if (!tokenId || !position || !canvas?.scene?.id) return;
+        const key = `${canvas.scene.id}:${tokenId}`;
+        const history = this._recentTokenPositions.get(key) ?? [];
+        const gridKey = `${position.column},${position.row}`;
+        if (history.at(-1) !== gridKey) history.push(gridKey);
+        if (history.length > 100) history.splice(0, history.length - 100);
+        this._recentTokenPositions.set(key, history);
+    }
+
+    _isTrustedReportedPosition(sceneId, tokenId, position, currentPosition) {
+        if (!position) return false;
+        const gridKey = `${position.column},${position.row}`;
+        if (gridKey === `${currentPosition.column},${currentPosition.row}`) return true;
+        return this._recentTokenPositions.get(`${sceneId}:${tokenId}`)?.includes(gridKey) ?? false;
+    }
+
+    _tokenAtGridPosition(tokenDocument, position) {
+        const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
+        const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
+        const center = typeof canvas.grid.getCenterPoint === 'function'
+            ? canvas.grid.getCenterPoint({ i: position.row, j: position.column })
+            : { x: (position.column + 0.5) * sizeX, y: (position.row + 0.5) * sizeY };
+        const width = Number(tokenDocument.width) || 1;
+        const height = Number(tokenDocument.height) || 1;
+        return {
+            id: tokenDocument.id,
+            x: center.x - ((width * sizeX) / 2),
+            y: center.y - ((height * sizeY) / 2),
+            width,
+            height
+        };
+    }
+
     _revealKeys(position) {
         const keys = [];
+        const dimensions = this._sceneGridDimensions(canvas?.scene);
         for (let rowOffset = -2; rowOffset <= 2; rowOffset++) {
             for (let columnOffset = -2; columnOffset <= 2; columnOffset++) {
                 const column = position.column + columnOffset;
                 const row = position.row + rowOffset;
-                if (column < 0 || row < 0) continue;
-                keys.push(`${column},${row}`);
+                if (column >= 0 && row >= 0 && column < dimensions.columns && row < dimensions.rows) {
+                    keys.push(`${column},${row}`);
+                }
             }
         }
         return keys;
     }
 
-    async _requestReveal(tokenDocument, position = this._gridPosition(tokenDocument)) {
+    async _requestReveal(
+        tokenDocument,
+        position = this._gridPosition(tokenDocument),
+        { force = false, resetPath = false } = {}
+    ) {
         const gridKey = `${position.column},${position.row}`;
-        if (gridKey === this.lastGridKey) return;
+        if (!force && gridKey === this.lastGridKey) return;
         this.lastGridKey = gridKey;
-
         const request = {
             userId: game.user.id,
             sceneId: canvas.scene.id,
-            tokenId: tokenDocument.id
+            tokenId: tokenDocument.id,
+            actorId: tokenDocument.actor?.id ?? tokenDocument.actorId,
+            position: { column: position.column, row: position.row },
+            resetPath
         };
-
-        if (game.user.isGM) await this._handleRevealRequest(request, { allowLocalGM: true });
-        else await socketManager.broadcast('mapping', 'reveal-request', request);
+        this._outgoingRevealQueue = this._outgoingRevealQueue
+            .catch(error => console.error(`${MODULE.NAME}: Failed to send an earlier map step`, error))
+            .then(() => game.user.isGM
+                ? this._handleRevealRequest(request, { allowLocalGM: true })
+                : socketManager.broadcast('mapping', 'reveal-request', request));
+        return this._outgoingRevealQueue;
     }
 
-    async _handleRevealRequest(data, { allowLocalGM = false } = {}) {
-        if (!game.user.isGM) return;
-        if (!allowLocalGM && !game.users.activeGM?.isSelf) return;
-        if (!data || data.sceneId !== canvas?.scene?.id) return;
+    _handleRevealRequest(data, { allowLocalGM = false } = {}) {
+        this._revealProcessingQueue = this._revealProcessingQueue
+            .catch(error => console.error(`${MODULE.NAME}: Failed to process an earlier map path`, error))
+            .then(() => this._processRevealRequest(data, { allowLocalGM }));
+        return this._revealProcessingQueue;
+    }
 
+    async _processRevealRequest(data, { allowLocalGM = false } = {}) {
+        if (!game.user.isGM || (!allowLocalGM && !game.users.activeGM?.isSelf)) return;
+        if (!data || data.sceneId !== canvas?.scene?.id) return;
         const user = game.users.get(data.userId);
         const tokenDocument = canvas.scene.tokens.get(data.tokenId);
-        if (!user?.active || !tokenDocument) return;
+        const actor = tokenDocument?.actor;
+        if (!user?.active || !tokenDocument || !actor || actor.id !== data.actorId) return;
         if (!user.isGM && !game.settings.get(MODULE.ID, 'mapping.allowPlayers')) return;
-        if (!user.isGM && !tokenDocument.testUserPermission(user, CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER)) return;
+        if (!this._canManageActor(actor, user)) return;
 
-        const position = this._gridPosition(tokenDocument);
-        const explored = new Set(this.state.explored);
-        const before = explored.size;
-        for (const key of this._revealKeys(position)) explored.add(key);
-        if (explored.size === before) return;
+        const currentPosition = this._gridPosition(tokenDocument);
+        // Retain the endpoint captured by its update hook even if a later move
+        // happens while an earlier path is still being drawn. A local GM is
+        // authoritative. A remote endpoint is accepted only when the GM saw
+        // that token occupy the same cell in its bounded movement history.
+        const reportedPosition = this._normalizePosition(data.position);
+        const position = allowLocalGM || this._isTrustedReportedPosition(
+            data.sceneId,
+            data.tokenId,
+            reportedPosition,
+            currentPosition
+        )
+            ? (reportedPosition ?? currentPosition)
+            : currentPosition;
+        const id = this._recordId(actor.id, canvas.scene.id);
+        const existing = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
+        const sessionKey = `${data.userId}:${data.sceneId}:${data.tokenId}`;
+        const authoritative = this._authoritativePositions.get(sessionKey);
+        const previous = data.resetPath
+            ? position
+            : (authoritative?.mapId === id ? authoritative.position : existing.lastPosition) ?? position;
+        const path = gridTravelPath(previous, position);
+        this._authoritativePositions.set(sessionKey, { mapId: id, position });
+        const explored = new Set(existing.explored);
+        const observedAlongPath = {};
 
-        this.state = {
-            version: STATE_VERSION,
-            gridType: 'square',
+        for (let index = 0; index < path.length; index++) {
+            const step = path[index];
+            const revealKeys = new Set(this._revealKeys(step));
+            for (const key of revealKeys) explored.add(key);
+            const sampleToken = this._tokenAtGridPosition(tokenDocument, step);
+            const observed = observeVisibleFeatures(sampleToken, revealKeys);
+            for (const [key, codes] of Object.entries(observed)) {
+                observedAlongPath[key] ??= [];
+                for (const code of codes) {
+                    if (!observedAlongPath[key].includes(code)) observedAlongPath[key].push(code);
+                }
+            }
+
+            // Very long drags are intentionally allowed to lag like a person
+            // catching up on a paper map, but yield periodically so Foundry's
+            // UI and socket processing remain responsive.
+            if (index > 0 && index % 8 === 0) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+        }
+
+        const features = mergeFeatures(existing.features, observedAlongPath);
+        const dimensions = this._sceneGridDimensions(canvas.scene);
+        const next = {
+            ...existing,
+            columns: dimensions.columns,
+            rows: dimensions.rows,
             explored: [...explored],
+            features,
+            lastPosition: position,
+            createdAt: existing.createdAt || Date.now(),
             updatedAt: Date.now(),
             updatedBy: data.userId
         };
-        void this.renderWindow({ centerOnParty: this.active });
-        await this._persistState('state-updated');
+        this.records.set(id, next);
+        this.currentMapId = id;
+        this.state = next;
+        void this.renderWindow({ centerOnParty: this.active, centerBehavior: 'smooth' });
+        await this._persistSceneRecords(canvas.scene.id);
     }
 
-    async _persistState(eventName) {
-        const scene = canvas?.scene;
-        if (!scene || !game.user.isGM) return;
-        const snapshot = foundry.utils.deepClone(this.state);
-        this._saveQueue = this._saveQueue
-            .then(() => scene.setFlag(MODULE.ID, FLAG_KEY, snapshot))
-            .then(() => socketManager.broadcast('mapping', eventName, {
-                userId: game.user.id,
-                sceneId: scene.id,
-                state: snapshot
-            }))
-            .catch(error => console.error(`${MODULE.NAME}: Failed to persist mapping state`, error));
-        return this._saveQueue;
+    _canManageActor(actor, user = game.user) {
+        if (!user) return false;
+        if (user.isGM) return true;
+        if (!actor) return false;
+        return actor.testUserPermission(user, CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER);
     }
 
-    _handleStateUpdated(data, { replace = false } = {}) {
-        if (!data || data.sceneId !== canvas?.scene?.id) return;
-        const incoming = this._normalizeState(data.state);
-        if (!this._applyIncomingState(incoming, { replace })) return;
-        void this.renderWindow({ centerOnParty: this.active });
+    canManageRecord(record = this.state, user = game.user) {
+        if (!record?.actorId) return false;
+        return this._canManageActor(game.actors?.get(record.actorId), user);
+    }
+
+    canRecordCurrentMap() {
+        const token = this._getSingleControlledToken();
+        return Boolean(token && this._isSquareGrid() && this._canManageActor(token.actor));
+    }
+
+    async createMapForSelection() {
+        const token = this._getSingleControlledToken();
+        if (!token || !this._isSquareGrid()) {
+            notify(game.i18n.localize(`${MODULE.ID}.mapping.selectTokenTitle`), {
+                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.selectTokenHint`), type: 'warn'
+            });
+            return false;
+        }
+        if (!this._canManageActor(token.actor)) {
+            notify(game.i18n.localize(`${MODULE.ID}.mapping.notOwnerTitle`), { type: 'warn' });
+            return false;
+        }
+        this.trackedTokenId = token.id;
+        this._selectMapForToken(token);
+        if (!this.records.has(this.currentMapId)) {
+            await this._requestMutation({ action: 'create', actorId: token.actor.id, sceneId: canvas.scene.id });
+        }
+        this.window?.showMap?.();
+        await this.renderWindow({ centerOnParty: true });
+        return true;
+    }
+
+    async renameMap(mapId) {
+        const record = this.records.get(mapId);
+        if (!record || !this.canManageRecord(record)) return false;
+        const result = await foundry.applications.api.DialogV2.input({
+            window: { title: game.i18n.localize(`${MODULE.ID}.mapping.renameTitle`) },
+            content: `<div class="form-group"><label>${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.mapName`))}</label><div class="form-fields"><input type="text" name="name" value="${foundry.utils.escapeHTML(record.name)}" required></div></div>`,
+            ok: { label: game.i18n.localize(`${MODULE.ID}.mapping.rename`) },
+            rejectClose: false,
+            modal: true
+        });
+        const name = String(result?.name ?? '').trim();
+        if (!name || name === record.name) return false;
+        await this._requestMutation({ action: 'rename', mapId, name });
+        return true;
+    }
+
+    async deleteMap(mapId) {
+        const record = this.records.get(mapId);
+        if (!record || !this.canManageRecord(record)) return false;
+        const confirmed = await foundry.applications.api.DialogV2.confirm({
+            window: { title: game.i18n.localize(`${MODULE.ID}.mapping.deleteTitle`) },
+            content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.mapping.deleteConfirm`, { name: record.name }))}</p>`,
+            rejectClose: false,
+            modal: true
+        });
+        if (!confirmed) return false;
+        if (this.active && mapId === this.currentMapId) await this.stopMapping();
+        await this._requestMutation({ action: 'delete', mapId });
+        return true;
     }
 
     async resetMap() {
-        if (!game.user.isGM) return false;
+        const record = this.records.get(this.currentMapId);
+        if (!record || !this.canManageRecord(record)) return false;
         const confirmed = await foundry.applications.api.DialogV2.confirm({
             window: { title: game.i18n.localize(`${MODULE.ID}.mapping.resetTitle`) },
             content: `<p>${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.resetConfirm`))}</p>`,
@@ -454,13 +755,107 @@ class MappingManager {
             modal: true
         });
         if (!confirmed) return false;
-        this.state = this._emptyState();
-        void this.renderWindow();
-        await this._persistState('reset');
-        notify(game.i18n.localize(`${MODULE.ID}.mapping.resetDone`), { type: 'info' });
+        await this._requestMutation({ action: 'reset', mapId: record.id });
         return true;
     }
 
+    async _requestMutation(mutation) {
+        const data = { ...mutation, userId: game.user.id };
+        if (game.user.isGM) await this._handleMutationRequest(data, { allowLocalGM: true });
+        else await socketManager.broadcast('mapping', 'mutation-request', data);
+    }
+
+    async _handleMutationRequest(data, { allowLocalGM = false } = {}) {
+        if (!game.user.isGM || (!allowLocalGM && !game.users.activeGM?.isSelf) || !data) return;
+        const user = game.users.get(data.userId);
+        if (!user?.active) return;
+
+        let record = data.mapId ? this.records.get(data.mapId) : null;
+        if (data.action === 'create') {
+            if (data.sceneId !== canvas?.scene?.id) return;
+            const actor = game.actors?.get(data.actorId) ?? canvas.tokens?.placeables
+                ?.find(token => token.actor?.id === data.actorId)?.actor;
+            if (!this._canManageActor(actor, user)) return;
+            const id = this._recordId(actor.id, data.sceneId);
+            record = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
+            const now = Date.now();
+            record = { ...record, createdAt: record.createdAt || now, updatedAt: now, updatedBy: user.id };
+            this.records.set(id, record);
+            if (this.currentMapId === id) this.state = record;
+            void this.renderWindow();
+            await this._persistSceneRecords(data.sceneId);
+            return;
+        }
+
+        if (!record || !this._canManageActor(game.actors?.get(record.actorId), user)) return;
+        if (data.action === 'rename') {
+            const name = String(data.name ?? '').trim().slice(0, 100);
+            if (!name) return;
+            record = { ...record, name, updatedAt: Date.now(), updatedBy: user.id };
+            this.records.set(record.id, record);
+        } else if (data.action === 'reset') {
+            record = {
+                ...record,
+                explored: [],
+                features: {},
+                symbols: [],
+                lastPosition: null,
+                updatedAt: Date.now(),
+                updatedBy: user.id
+            };
+            this.records.set(record.id, record);
+        } else if (data.action === 'delete') {
+            this.records.delete(record.id);
+        } else return;
+
+        if (this.currentMapId === record.id) {
+            if (data.action === 'delete') {
+                this.currentMapId = null;
+                this.state = this._emptyRecord();
+            } else this.state = record;
+        }
+        if (data.action === 'reset' || data.action === 'delete') {
+            for (const [key, value] of this._authoritativePositions) {
+                if (value.mapId === record.id) this._authoritativePositions.delete(key);
+            }
+        }
+        void this.renderWindow();
+        await this._persistSceneRecords(record.sceneId);
+        if (data.action === 'reset') notify(game.i18n.localize(`${MODULE.ID}.mapping.resetDone`), { type: 'info' });
+    }
+
+    async _persistSceneRecords(sceneId) {
+        const scene = game.scenes?.get(sceneId);
+        if (!scene || !game.user.isGM) return;
+        const maps = {};
+        for (const record of this.records.values()) {
+            if (record.sceneId === sceneId) maps[record.actorId] = foundry.utils.deepClone(record);
+        }
+        const container = { version: STATE_VERSION, maps };
+        this._saveQueue = this._saveQueue
+            .then(() => scene.setFlag(MODULE.ID, FLAG_KEY, container))
+            .then(() => socketManager.broadcast('mapping', 'registry-updated', {
+                userId: game.user.id,
+                sceneId,
+                container
+            }))
+            .catch(error => console.error(`${MODULE.NAME}: Failed to persist mapping records`, error));
+        return this._saveQueue;
+    }
+
+    _handleRegistryUpdated(data) {
+        const scene = game.scenes?.get(data?.sceneId);
+        if (!scene || !data.container) return;
+        this._replaceSceneRecords(scene, data.container);
+        if (!this.currentMapId) {
+            const latest = this.getMapList()[0];
+            if (latest) this.selectMap(latest.id, { render: false });
+        }
+        void this.renderWindow({
+            centerOnParty: this.active,
+            centerBehavior: this.active ? 'smooth' : 'auto'
+        });
+    }
 }
 
 const mappingManager = new MappingManager();
