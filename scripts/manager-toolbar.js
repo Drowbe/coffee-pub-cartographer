@@ -234,6 +234,7 @@ class CartographerToolbar {
                 onClick: () => {
                     self.toggleSecondaryBar();
                 },
+                contextMenuItems: () => self.getContextMenuItems(),
                 zone: "middle",
                 group: "party",
                 groupOrder: null,
@@ -341,6 +342,76 @@ class CartographerToolbar {
                 console.error(`${MODULE.NAME}: Error toggling secondary bar:`, error);
             }
         }
+    }
+
+    /**
+     * Invoke one of Cartographer's registered secondary-bar tools. Keeping
+     * quick actions routed through their original handlers means permissions,
+     * notifications, and active-state updates stay identical in both places.
+     * @param {string} toolId
+     * @returns {*|false}
+     */
+    invokeTool(toolId) {
+        const onClick = this.tools.get(toolId)?.config?.onClick;
+        return typeof onClick === 'function' ? onClick() : false;
+    }
+
+    /**
+     * Build the Cartographer menubar button's dynamic right-click menu.
+     * @returns {Array<object>}
+     */
+    getContextMenuItems() {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.contextMenu.${key}`);
+        const drawingModes = [
+            { id: 'sketch', name: 'sketch', icon: 'fa-solid fa-pen' },
+            { id: 'line', name: 'line', icon: 'fa-solid fa-slash-forward' },
+            { id: 'box', name: 'box', icon: 'fa-regular fa-square' },
+            { id: 'ellipse', name: 'ellipse', icon: 'fa-regular fa-circle' },
+            { id: 'stamp', name: 'stamp', icon: 'fa-solid fa-stamp' }
+        ].map(mode => ({
+            name: localize(mode.name),
+            icon: mode.icon,
+            onClick: () => this.invokeTool(`${MODULE.ID}-mode-${mode.id}`)
+        }));
+
+        const clearOwn = {
+            name: localize('clearOwn'),
+            icon: 'fa-solid fa-eraser',
+            onClick: () => this.invokeTool(`${MODULE.ID}-clear`)
+        };
+        const clearDrawings = game.user.isGM
+            ? {
+                name: localize('clearDrawings'),
+                icon: 'fa-solid fa-eraser',
+                submenu: [
+                    clearOwn,
+                    {
+                        name: localize('clearAll'),
+                        icon: 'fa-solid fa-trash-can',
+                        onClick: () => this.invokeTool(`${MODULE.ID}-clear-all`)
+                    }
+                ]
+            }
+            : {
+                name: localize('clearDrawings'),
+                icon: 'fa-solid fa-eraser',
+                onClick: clearOwn.onClick
+            };
+
+        return [
+            {
+                name: localize('partyMaps'),
+                icon: 'fa-solid fa-street-view',
+                onClick: () => this.invokeTool(`${MODULE.ID}-mapping`)
+            },
+            {
+                name: localize('drawingMode'),
+                icon: 'fa-solid fa-pencil-ruler',
+                submenu: drawingModes
+            },
+            { separator: true },
+            clearDrawings
+        ];
     }
     
     /**

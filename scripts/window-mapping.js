@@ -44,8 +44,7 @@ export class MappingWindow extends ToolWindowBase {
         },
         'zoom-in': (_event, _target, app) => app.setZoom(app.zoom + 0.15),
         'zoom-out': (_event, _target, app) => app.setZoom(app.zoom - 0.15),
-        'center-view': (_event, _target, app) => app.centerView(),
-        'reset-map': (_event, _target, app) => void app.manager.resetMap()
+        'center-view': (_event, _target, app) => app.centerView()
     };
 
     constructor(manager, options = {}) {
@@ -129,14 +128,6 @@ export class MappingWindow extends ToolWindowBase {
                 className: `cartographer-mapping-record${this.manager.active ? ' is-recording' : ''}`,
                 disabled: !model.canRecord && !this.manager.active
             }));
-            if (model.canReset) {
-                buttons.push(this._chromeButton({
-                    action: 'reset-map',
-                    icon: 'fa-solid fa-trash-can',
-                    label: model.resetLabel,
-                    className: 'is-critical'
-                }));
-            }
         }
         return `<span class="cartographer-mapping-chrome-actions is-primary">${buttons.join('')}</span>`;
     }
@@ -198,13 +189,11 @@ export class MappingWindow extends ToolWindowBase {
         const mappedGeometry = this._getMappedTileGeometry(explored, this.manager.state.features);
         const canRecord = this.manager.canRecordCurrentMap();
         const common = {
-            canReset: this.manager.canManageRecord() && Boolean(this.manager.currentMapId),
             canRecord,
             isRecording: this.manager.active,
             zoom: this.zoom,
             recordLabel: game.i18n.localize(`${MODULE.ID}.mapping.${this.manager.active ? 'stopRecording' : 'startRecording'}`),
             listLabel: game.i18n.localize(`${MODULE.ID}.mapping.showMaps`),
-            resetLabel: game.i18n.localize(`${MODULE.ID}.mapping.resetMap`),
             zoomInLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomIn`),
             zoomOutLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomOut`),
             centerPartyLabel: game.i18n.localize(

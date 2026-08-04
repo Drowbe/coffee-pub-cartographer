@@ -14,6 +14,44 @@
     padding: 0;
 }
 
+.cartographer-mapping-window .blacksmith-window-tool-root {
+    position: relative;
+}
+
+.cartographer-mapping-window .blacksmith-window-tool-bar,
+.cartographer-mapping-window .blacksmith-window-tool-footer {
+    position: absolute;
+    z-index: 10;
+    right: 0;
+    left: 0;
+    box-sizing: border-box;
+    background: color-mix(in srgb, var(--blacksmith-tool-scrim) 88%, transparent);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.cartographer-mapping-window .blacksmith-window-tool-bar {
+    top: 0;
+    transform: translateY(-4px);
+}
+
+.cartographer-mapping-window .blacksmith-window-tool-footer {
+    bottom: 0;
+    transform: translateY(4px);
+}
+
+.cartographer-mapping-window:hover .blacksmith-window-tool-bar,
+.cartographer-mapping-window:hover .blacksmith-window-tool-footer,
+.cartographer-mapping-window:has(.blacksmith-window-tool-bar :focus-visible) .blacksmith-window-tool-bar,
+.cartographer-mapping-window:has(.blacksmith-window-tool-footer :focus-visible) .blacksmith-window-tool-footer {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
 .cartographer-mapping-root {
     position: relative;
     width: 100%;
@@ -201,15 +239,6 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 140ms ease;
-}
-
-.cartographer-mapping-window:hover .cartographer-mapping-chrome-actions,
-.cartographer-mapping-window:has(.cartographer-mapping-chrome-actions button:focus-visible) .cartographer-mapping-chrome-actions {
-    opacity: 1;
-    pointer-events: auto;
 }
 
 .cartographer-mapping-chrome-actions.is-primary {
@@ -281,13 +310,6 @@
 .cartographer-mapping-item-actions {
     display: flex;
     gap: 4px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 140ms ease;
-}
-
-.cartographer-mapping-list-item:hover .cartographer-mapping-item-actions,
-.cartographer-mapping-list-item:has(.cartographer-mapping-item-actions button:focus-visible) .cartographer-mapping-item-actions {
     opacity: 1;
     pointer-events: auto;
 }

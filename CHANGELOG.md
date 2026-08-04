@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Menubar quick actions**: Right-clicking Cartographer's menubar button now opens a native quick menu for Party Maps, every drawing mode, and role-appropriate drawing cleanup without opening the full secondary toolbar.
 - **Old-school party mapper**: Added a Mapping tool for square-grid scenes. It opens a separate Glass-themed Blacksmith Tool window where recording permanently maps the 5×5 grid area surrounding one controlled token as it moves.
 - **Shared persistent maps**: Maps are stored as party-visible Actor+Scene records and synchronized to connected users. The Recorded Maps view lists maps from every scene, while recording remains limited to the current scene.
 - **Map ownership controls**: Everyone can view the party's maps. An Actor owner or GM can add, continue, rename, reset, or delete that Actor's maps.
@@ -43,7 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Map window chrome**: Removed the floating control palette from the map surface. Map/List, Record/Stop, Add, and Reset now use the existing top toolbar; zoom out, center, zoom in, and the zoom readout use the footer beside mapped distance.
 - **Queued path mapping**: Long and rapid token moves are now reconstructed as an ordered path through every crossed grid square. The mapper reveals and samples structure as if the token paused at each step, periodically yields for UI responsiveness, and keeps the party marker on the last completed map step until the drawing catches up.
 - **Old-school door glyph**: Regular doors now use the guide's black wall-and-centered-box symbol, rotated to match horizontal or vertical placement, instead of an orange wall stroke. The glyph keeps the mapper's slightly hand-drawn line treatment.
-- **Hover controls**: Cartographer's map controls now fade away when the pointer leaves the Tool window and return on window hover or keyboard focus. Status, map identity, distance, and zoom readouts remain visible, and list-item management controls appear only on their row.
+- **Hover window chrome**: The complete Cartographer toolbar and footer now disappear when the pointer leaves the Tool window and return as theme-aware, slightly translucent overlays on hover or keyboard focus. The hidden bars reserve no empty space and their return does not resize or shift the map. List-item management controls appear only on their row.
+- **Persistent map-row actions**: Rename and Delete remain visible on every manageable map entry in Recorded Maps instead of appearing only while that row is hovered. The window toolbar retains its hover-only overlay behavior.
+- **Line-of-sight floor mapping**: The mapper now visibility-checks every candidate floor square before adding it to the recorded map. The 5×5 sampling neighborhood no longer reveals rooms or corridors hidden behind walls, and structural symbols remain limited to the same visible area.
+- **Settled-movement catch-up**: Token destinations are now read directly from Foundry's update payload, followed by a short catch-up pass after movement settles. The queued map always finishes at the token's real grid cell instead of remaining one move behind.
+- **Recording-only party marker**: The token marker is now shown only while recording. Viewing a completed or paused map presents the map by itself and centers on its explored drawing rather than a live token position.
+- **Map-view control cleanup**: Removed the destructive clear/reset button from the map view. Destructive map management remains in the Recorded Maps list, where the target map is explicit.
 - **Actor-and-scene map identity**: Replaced the single shared scene map with one map per Actor per Scene, including migration of the legacy scene map into the first Actor map continued on that scene.
 
 

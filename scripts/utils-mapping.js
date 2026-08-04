@@ -198,15 +198,17 @@ function tokenCenter(tokenDocument) {
     };
 }
 
-function visibleFromToken(tokenDocument, wallPoint) {
+function visibleFromToken(tokenDocument, point, { insetTarget = true } = {}) {
     const origin = tokenCenter(tokenDocument);
-    const dx = origin.x - wallPoint.x;
-    const dy = origin.y - wallPoint.y;
+    const dx = origin.x - point.x;
+    const dy = origin.y - point.y;
     const distance = Math.hypot(dx, dy);
-    const inset = Math.min(6, Math.max(2, (canvas.grid.size ?? 100) * 0.04));
+    const inset = insetTarget
+        ? Math.min(6, Math.max(2, (canvas.grid.size ?? 100) * 0.04))
+        : 0;
     const target = distance > 0
-        ? { x: wallPoint.x + ((dx / distance) * inset), y: wallPoint.y + ((dy / distance) * inset) }
-        : wallPoint;
+        ? { x: point.x + ((dx / distance) * inset), y: point.y + ((dy / distance) * inset) }
+        : point;
     const token = canvas.tokens?.get(tokenDocument.id);
     const vision = token?.vision;
 
@@ -232,6 +234,18 @@ function visibleFromToken(tokenDocument, wallPoint) {
     if (typeof vision?.shape?.contains === 'function') return vision.shape.contains(target.x, target.y);
     if (typeof vision?.los?.contains === 'function') return vision.los.contains(target.x, target.y);
     return true;
+}
+
+function visibleRevealKeys(tokenDocument, revealKeys) {
+    const candidates = revealKeys instanceof Set ? revealKeys : new Set(revealKeys ?? []);
+    const visible = new Set();
+    for (const key of candidates) {
+        const [column, row] = key.split(',').map(Number);
+        if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
+        const target = cellCenter({ column, row });
+        if (visibleFromToken(tokenDocument, target, { insetTarget: false })) visible.add(key);
+    }
+    return visible;
 }
 
 function observeVisibleFeatures(tokenDocument, revealKeys) {
@@ -278,5 +292,6 @@ export {
     normalizeFeatures,
     observeVisibleFeatures,
     oppositeDirection,
-    orthogonalPath
+    orthogonalPath,
+    visibleRevealKeys
 };

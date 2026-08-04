@@ -114,7 +114,8 @@ Rules:
 - Require exactly one controlled token when Record is pressed; otherwise leave recording stopped and explain what is needed.
 - Reveal the starting 5×5 area as soon as Record is pressed.
 - Long drags are interpolated through every crossed grid square. Each queued square receives the same 5×5 reveal and visibility-filtered structural sampling as a normal one-cell move.
-- The party marker follows the last completed mapping step while queued drawing catches up to the live token.
+- While recording, the party marker follows the last completed mapping step while queued drawing catches up to the live token. A settled-movement pass guarantees the final mapped step reaches the token's real cell.
+- The party marker is hidden whenever recording is stopped.
 - Each active user contributes discoveries from their own controlled token to the shared party map.
 - An active GM client is authoritative for validating contributors, calculating discoveries, and persisting the map.
 

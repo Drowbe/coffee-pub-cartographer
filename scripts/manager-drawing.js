@@ -282,6 +282,7 @@ class DrawingTool {
                 onClick: () => {
                     self.setDrawingMode('sketch');
                     self.updateModeButtons();
+                    if (!self.state.active) self.activate();
                 }
             });
 
