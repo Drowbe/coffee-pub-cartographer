@@ -95,7 +95,7 @@ class MappingManager {
         const updateScene = Hooks.on('updateScene', (scene, changes) => {
             if (scene.id !== canvas?.scene?.id || !changes?.flags?.[MODULE.ID]?.[FLAG_KEY]) return;
             this.loadSceneState();
-            this.renderWindow();
+            void this.renderWindow({ centerOnParty: this.active });
         });
         this._hooks.push({ name: 'updateScene', id: updateScene });
 
@@ -112,9 +112,16 @@ class MappingManager {
         const canvasReady = Hooks.on('canvasReady', () => {
             if (this.active) void this.stopMapping();
             this.loadSceneState();
-            this.renderWindow();
+            void this.renderWindow();
         });
         this._hooks.push({ name: 'canvasReady', id: canvasReady });
+
+        for (const hookName of ['createWall', 'updateWall', 'deleteWall']) {
+            const hookId = Hooks.on(hookName, () => {
+                void this.renderWindow({ centerOnParty: this.active });
+            });
+            this._hooks.push({ name: hookName, id: hookId });
+        }
     }
 
     _registerSocketHandlers() {
@@ -336,7 +343,7 @@ class MappingManager {
             updatedAt: Date.now(),
             updatedBy: data.userId
         };
-        this.renderWindow();
+        void this.renderWindow({ centerOnParty: this.active });
         await this._persistState('state-updated');
     }
 
@@ -358,7 +365,7 @@ class MappingManager {
     _handleStateUpdated(data) {
         if (!data || data.sceneId !== canvas?.scene?.id) return;
         this.state = this._normalizeState(data.state);
-        this.renderWindow();
+        void this.renderWindow({ centerOnParty: this.active });
     }
 
     async resetMap() {
@@ -371,7 +378,7 @@ class MappingManager {
         });
         if (!confirmed) return false;
         this.state = this._emptyState();
-        this.renderWindow();
+        void this.renderWindow();
         await this._persistState('reset');
         notify(game.i18n.localize(`${MODULE.ID}.mapping.resetDone`), { type: 'info' });
         return true;

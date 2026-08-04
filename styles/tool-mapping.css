@@ -79,21 +79,25 @@
 
 .cartographer-mapping-cell {
     position: relative;
-    display: grid;
-    place-items: center;
-    border: 1px solid var(--blacksmith-tool-divider);
 }
 
 .cartographer-mapping-cell.is-explored {
-    background:
-        radial-gradient(circle at 35% 30%, transparent 0 45%, rgb(0 0 0 / 4%) 46% 48%, transparent 49%),
-        var(--blacksmith-tool-surface-raised);
-    box-shadow: inset 0 0 0 1px var(--blacksmith-tool-surface-selected);
+    background: var(--blacksmith-tool-scrim);
+}
+
+.cartographer-mapping-cell.is-wall {
+    background: #000;
 }
 
 .cartographer-mapping-party {
+    position: absolute;
+    z-index: 3;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
     color: var(--blacksmith-tool-accent);
-    font-size: calc(18px * var(--cartographer-map-zoom));
+    font-size: 18px;
     filter: drop-shadow(0 1px 1px rgb(0 0 0 / 55%));
 }
 

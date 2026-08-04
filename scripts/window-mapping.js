@@ -79,6 +79,7 @@ export class MappingWindow extends ToolWindowBase {
         const explored = new Set(this.manager.state.explored);
         const tracked = this.manager._getTrackedToken();
         const trackedPosition = tracked ? this.manager._gridPosition(tracked.document) : null;
+        const wallCells = this._getWallCellKeys();
         const common = {
             canReset: game.user.isGM,
             zoom: this.zoom,
@@ -105,12 +106,12 @@ export class MappingWindow extends ToolWindowBase {
         const rowCount = Math.max(Math.ceil(canvas.dimensions.height / sizeY), maxExploredRow + 1);
         const cells = coordinates.map(([column, row]) => {
             const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
+            const isWall = wallCells.has(`${column},${row}`);
             return {
                 key: `${column},${row}`,
                 gridColumn: column + 1,
                 gridRow: row + 1,
-                className: isParty ? 'is-explored is-party' : 'is-explored',
-                isParty
+                className: `is-explored${isWall ? ' is-wall' : ''}${isParty ? ' is-party' : ''}`
             };
         });
 
@@ -120,20 +121,53 @@ export class MappingWindow extends ToolWindowBase {
             cells,
             columnCount,
             rowCount,
+            hasParty: Boolean(trackedPosition),
             exploredCount: explored.size
         };
     }
 
-    setZoom(value) {
+    _getWallCellKeys() {
+        const keys = new Set();
+        const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
+        const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
+        const sampleSize = Math.max(1, Math.min(sizeX, sizeY) / 3);
+
+        for (const wall of canvas.walls?.placeables ?? []) {
+            const coordinates = wall.document?.c ?? wall.document?._source?.c;
+            if (!Array.isArray(coordinates) || coordinates.length < 4) continue;
+            const [x1, y1, x2, y2] = coordinates.map(Number);
+            const distance = Math.hypot(x2 - x1, y2 - y1);
+            const steps = Math.max(1, Math.ceil(distance / sampleSize));
+
+            for (let step = 0; step <= steps; step++) {
+                const ratio = step / steps;
+                const offset = canvas.grid.getOffset({
+                    x: x1 + ((x2 - x1) * ratio),
+                    y: y1 + ((y2 - y1) * ratio)
+                });
+                const column = Number(offset.j ?? offset.x);
+                const row = Number(offset.i ?? offset.y);
+                if (Number.isInteger(column) && Number.isInteger(row)) keys.add(`${column},${row}`);
+            }
+        }
+        return keys;
+    }
+
+    async setZoom(value) {
         this.zoom = Math.max(0.4, Math.min(2.5, Number(value) || 1));
-        return this.render(false);
+        await this.render(false);
+        if (this.manager.active) requestAnimationFrame(() => this.centerOnParty());
+        return this;
     }
 
     centerOnParty() {
-        this.element?.querySelector('.cartographer-mapping-cell.is-party')?.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center',
-            inline: 'center'
+        const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
+        const partyCell = this.element?.querySelector('.cartographer-mapping-cell.is-party');
+        if (!viewport || !partyCell) return;
+        viewport.scrollTo({
+            left: partyCell.offsetLeft + (partyCell.offsetWidth / 2) - (viewport.clientWidth / 2),
+            top: partyCell.offsetTop + (partyCell.offsetHeight / 2) - (viewport.clientHeight / 2),
+            behavior: 'smooth'
         });
     }
 

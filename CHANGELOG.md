@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mapping from secondary GM clients**: A GM now applies and persists discoveries from their own controlled token locally instead of being blocked when another connected GM is Foundry's designated `activeGM`. Player-originated discoveries still require active-GM validation.
 - **Foundry v13 grid coordinates**: Mapping now calls `getOffset({x, y})` and reads its `{i, j}` row/column result. The former legacy-shaped call produced `NaN,NaN` cell keys, which were discarded by state validation and left the map visually empty.
 - **Single-grid map presentation**: Removed the second floating map grid and its white border. The Glass window's grid is now the map itself: each square represents one scene grid cell, unexplored squares remain dark, and explored squares fill in directly for future floor, wall, and doorway tile layers.
+- **Simplified map tiles**: Explored floor tiles are now borderless solid fills with no decorative texture or inset outline.
+- **Centered party tracking**: The party marker stays fixed in the middle of the Tool window while the map recenters beneath it after movement and zoom changes.
+- **Prototype wall tiles**: Wall segments crossing explored scene cells now render those cells as solid black tiles. This deliberately simple representation establishes the floor/wall tile distinction before doorway and final artwork support.
 
 
 

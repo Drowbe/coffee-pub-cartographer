@@ -26,10 +26,12 @@
         <div class="cartographer-mapping-grid" style="--cartographer-map-columns: {{columnCount}}; --cartographer-map-rows: {{rowCount}}; --cartographer-map-zoom: {{zoom}};">
             {{#each cells}}
             <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}};">
-                {{#if isParty}}<i class="fa-solid fa-location-dot cartographer-mapping-party"></i>{{/if}}
             </div>
             {{/each}}
         </div>
+        {{#if hasParty}}
+        <i class="fa-solid fa-location-dot cartographer-mapping-party" aria-hidden="true"></i>
+        {{/if}}
         {{/if}}
     </div>
 </div>
