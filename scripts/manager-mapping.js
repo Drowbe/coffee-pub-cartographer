@@ -86,7 +86,9 @@ class MappingManager {
         const updateToken = Hooks.on('updateToken', (tokenDocument, changes) => {
             if (!this.active || tokenDocument.id !== this.trackedTokenId) return;
             if (!('x' in changes) && !('y' in changes)) return;
-            void this._requestReveal(tokenDocument);
+            void this._requestReveal(tokenDocument).catch(error => {
+                console.error(`${MODULE.NAME}: Failed to map token movement`, error);
+            });
         });
         this._hooks.push({ name: 'updateToken', id: updateToken });
 
@@ -144,7 +146,7 @@ class MappingManager {
             return false;
         }
 
-        if (!game.users.activeGM) {
+        if (!game.user.isGM && !game.users.activeGM) {
             notify(game.i18n.localize(`${MODULE.ID}.mapping.noGmTitle`), {
                 subtitle: game.i18n.localize(`${MODULE.ID}.mapping.noGmHint`),
                 type: 'warn'
@@ -299,12 +301,13 @@ class MappingManager {
             tokenId: tokenDocument.id
         };
 
-        if (game.users.activeGM?.isSelf) await this._handleRevealRequest(request);
+        if (game.user.isGM) await this._handleRevealRequest(request, { allowLocalGM: true });
         else await socketManager.broadcast('mapping', 'reveal-request', request);
     }
 
-    async _handleRevealRequest(data) {
-        if (!game.users.activeGM?.isSelf) return;
+    async _handleRevealRequest(data, { allowLocalGM = false } = {}) {
+        if (!game.user.isGM) return;
+        if (!allowLocalGM && !game.users.activeGM?.isSelf) return;
         if (!data || data.sceneId !== canvas?.scene?.id) return;
 
         const user = game.users.get(data.userId);
@@ -332,7 +335,7 @@ class MappingManager {
 
     async _persistState(eventName) {
         const scene = canvas?.scene;
-        if (!scene || !game.users.activeGM?.isSelf) return;
+        if (!scene || !game.user.isGM) return;
         const snapshot = foundry.utils.deepClone(this.state);
         this._saveQueue = this._saveQueue
             .then(() => scene.setFlag(MODULE.ID, FLAG_KEY, snapshot))
@@ -352,7 +355,7 @@ class MappingManager {
     }
 
     async resetMap() {
-        if (!game.user.isGM || !game.users.activeGM?.isSelf) return false;
+        if (!game.user.isGM) return false;
         const confirmed = await foundry.applications.api.DialogV2.confirm({
             window: { title: game.i18n.localize(`${MODULE.ID}.mapping.resetTitle`) },
             content: `<p>${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.resetConfirm`))}</p>`,

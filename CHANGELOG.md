@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Mapper initialization order**: The Mapping window is now imported lazily when opened, after Blacksmith's ready-time API is available, instead of reading `game.modules` during Foundry's early ES module loading phase.
+- **Mapping from secondary GM clients**: A GM now applies and persists discoveries from their own controlled token locally instead of being blocked when another connected GM is Foundry's designated `activeGM`. Player-originated discoveries still require active-GM validation.
 
 
 

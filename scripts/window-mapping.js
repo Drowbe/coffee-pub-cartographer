@@ -80,7 +80,7 @@ export class MappingWindow extends ToolWindowBase {
         const tracked = this.manager._getTrackedToken();
         const trackedPosition = tracked ? this.manager._gridPosition(tracked.document) : null;
         const common = {
-            canReset: game.users.activeGM?.isSelf ?? false,
+            canReset: game.user.isGM,
             zoom: this.zoom,
             resetLabel: game.i18n.localize(`${MODULE.ID}.mapping.resetMap`),
             zoomInLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomIn`),
