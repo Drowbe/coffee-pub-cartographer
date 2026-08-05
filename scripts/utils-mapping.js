@@ -137,6 +137,7 @@ function wallSegment(document) {
         document,
         start: { x: x1, y: y1 },
         end: { x: x2, y: y2 },
+        midpoint: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
         length,
         unit: { x: (x2 - x1) / length, y: (y2 - y1) / length }
     };
@@ -167,17 +168,34 @@ function farthestEndpointPair(segments) {
  * first/last extent before grid snapping so one doorway yields one glyph.
  */
 function normalizedDoorSpans(documents) {
-    const segments = documents.map(wallSegment).filter(Boolean);
+    const segments = documents.map(wallSegment).filter(Boolean).map(segment => ({
+        ...segment,
+        cell: gridCellAt(segment.midpoint)
+    }));
     const gridSize = Math.min(
         canvas.grid.sizeX ?? canvas.grid.size,
         canvas.grid.sizeY ?? canvas.grid.size
     );
-    const joinDistance = gridSize * 0.25;
-    const maxSpan = gridSize * 1.6;
+    const joinDistance = gridSize * 0.75;
+    const maxSpan = gridSize * 2.6;
     const clusters = [];
 
     for (const segment of segments) {
         const cluster = clusters.find(candidate => {
+            // A doorway is frequently authored from several short fragments
+            // inside one Foundry square. Those fragments may turn slightly at
+            // a curve or decorative jamb, so alignment alone is not a useful
+            // test. Treat the square as the doorway's footprint and normalize
+            // its first/last extrema to one span.
+            const sharesDoorCell = segment.cell && candidate.some(existing => (
+                existing.cell
+                && existing.cell.column === segment.cell.column
+                && existing.cell.row === segment.cell.row
+            ));
+            if (sharesDoorCell) {
+                return farthestEndpointPair([...candidate, segment]).distance <= maxSpan;
+            }
+
             const aligned = candidate.some(existing => (
                 Math.abs((existing.unit.x * segment.unit.x) + (existing.unit.y * segment.unit.y)) >= 0.7
             ));
@@ -240,7 +258,7 @@ function wallBoundaryObservations(
     document,
     tokenDocument,
     allowed,
-    { featureOverride = null, requireVisibility = true } = {}
+    { featureOverride = null, requireVisibility = true, midpointOnly = false } = {}
 ) {
     const feature = featureOverride ?? classifyWall(document);
     if (!feature || !canvas?.grid) return [];
@@ -258,7 +276,7 @@ function wallBoundaryObservations(
         canvas.grid.sizeX ?? canvas.grid.size,
         canvas.grid.sizeY ?? canvas.grid.size
     );
-    const sampleCount = ['door', 'secret-door'].includes(feature)
+    const sampleCount = midpointOnly || ['door', 'secret-door'].includes(feature)
         ? 1
         : Math.max(1, Math.ceil(length / (gridSize * 0.25)));
     const observations = [];
@@ -463,7 +481,12 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
     const allowed = revealKeys instanceof Set ? revealKeys : new Set(revealKeys ?? []);
     const observed = {};
     const doorDocuments = [];
+    const secretDocuments = [];
     for (const wall of canvas.walls?.placeables ?? []) {
+        if (isSecretDoor(wall.document)) {
+            secretDocuments.push(wall.document);
+            continue;
+        }
         if (classifyWall(wall.document) === 'door') {
             doorDocuments.push(wall.document);
             continue;
@@ -481,6 +504,23 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             tokenDocument,
             allowed,
             { featureOverride: 'door' }
+        )) {
+            observed[observation.key] ??= [];
+            if (!observed[observation.key].includes(observation.code)) {
+                observed[observation.key].push(observation.code);
+            }
+        }
+    }
+    // Until crossed, a secret door is still drawn as an ordinary wall—but it
+    // must use the exact same normalized midpoint span that will later carry
+    // the S. This lets discovery replace the wall on one canonical edge rather
+    // than leaving sampled wall fragments beside the revealed symbol.
+    for (const span of normalizedDoorSpans(secretDocuments)) {
+        for (const observation of wallBoundaryObservations(
+            span.document,
+            tokenDocument,
+            allowed,
+            { featureOverride: 'wall', midpointOnly: true }
         )) {
             observed[observation.key] ??= [];
             if (!observed[observation.key].includes(observation.code)) {
@@ -518,14 +558,37 @@ function featureEdgeKey(key, code) {
     }[direction] ?? null;
 }
 
+function parsedFeatureEdge(key, code) {
+    const edgeKey = featureEdgeKey(key, code);
+    if (!edgeKey) return null;
+    const [orientation, first, second] = edgeKey.split(':');
+    const coordinate = Number(first);
+    const span = Number(second);
+    if (!['h', 'v'].includes(orientation) || !Number.isInteger(coordinate) || !Number.isInteger(span)) {
+        return null;
+    }
+    return { key: edgeKey, orientation, coordinate, span };
+}
+
+function isOpposingEdge(first, second) {
+    return first.orientation === second.orientation
+        && first.span === second.span
+        && Math.abs(first.coordinate - second.coordinate) === 1;
+}
+
 function mergeFeatures(left, right) {
     const merged = normalizeFeatures(left);
     const incoming = normalizeFeatures(right);
     const observedEdges = new Set();
+    const incomingDoorEdges = [];
     for (const [key, codes] of Object.entries(incoming)) {
         for (const code of codes) {
             const edgeKey = featureEdgeKey(key, code);
             if (edgeKey) observedEdges.add(edgeKey);
+            if (code.startsWith('door:') || code.startsWith('secret-door:')) {
+                const edge = parsedFeatureEdge(key, code);
+                if (edge) incomingDoorEdges.push(edge);
+            }
         }
     }
 
@@ -550,6 +613,35 @@ function mergeFeatures(left, right) {
         });
         if (retained.length) merged[key] = retained;
         else delete merged[key];
+    }
+
+    // Earlier mapper builds could snap the fragments of one doorway to the
+    // two opposing, parallel edges of a single square. Once the normalized
+    // doorway is observed again, discard that stale opposing door edge. A
+    // revealed secret door also replaces an old ordinary-wall observation on
+    // the opposing edge, while collinear corridor walls remain untouched.
+    if (incomingDoorEdges.length) {
+        const incomingDoorKeys = new Set(incomingDoorEdges.map(edge => edge.key));
+        const incomingSecretDoorEdges = incomingDoorEdges
+            .filter(edge => incomingSecretEdges.has(edge.key));
+        for (const [key, codes] of Object.entries(merged)) {
+            const retained = codes.filter(code => {
+                const isDoor = code.startsWith('door:') || code.startsWith('secret-door:');
+                const isWallBesideRevealedSecret = code.startsWith('wall:')
+                    && incomingSecretDoorEdges.length > 0;
+                if (!isDoor && !isWallBesideRevealedSecret) return true;
+                const edge = parsedFeatureEdge(key, code);
+                // If this opposing edge was also observed now, it is real
+                // current structure—not stale doorway residue.
+                if (!edge || incomingDoorKeys.has(edge.key) || observedEdges.has(edge.key)) return true;
+                const candidates = isWallBesideRevealedSecret
+                    ? incomingSecretDoorEdges
+                    : incomingDoorEdges;
+                return !candidates.some(incomingEdge => isOpposingEdge(edge, incomingEdge));
+            });
+            if (retained.length) merged[key] = retained;
+            else delete merged[key];
+        }
     }
 
     for (const [key, codes] of Object.entries(incoming)) {
