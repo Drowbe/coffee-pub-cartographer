@@ -27,6 +27,8 @@ const WINDOW_ID = `${MODULE.ID}-mapper`;
 const STATE_VERSION = 2;
 /** How long an optimistic local deletion suppresses a map before it is reconciled. */
 const DELETE_TOMBSTONE_MS = 15000;
+/** Passes allowed to drive the mapped position onto the token's settled cell. */
+const SETTLE_ATTEMPTS = 4;
 
 class MappingManager {
     constructor() {
@@ -741,14 +743,45 @@ class MappingManager {
         if (this._catchUpTimer) clearTimeout(this._catchUpTimer);
         this._catchUpTimer = setTimeout(() => {
             this._catchUpTimer = null;
-            if (!this.active || this.paused || tokenId !== this.trackedTokenId) return;
-            const token = this._getTrackedToken();
-            if (!token) return;
-            const position = this._gridPosition(token.document);
-            void this._requestReveal(token.document, position, { force: true }).catch(error => {
+            void this._settleToToken(tokenId).catch(error => {
                 console.error(`${MODULE.NAME}: Failed to catch the map up to the token`, error);
             });
         }, 180);
+    }
+
+    /**
+     * Drive the mapped position onto the token's real cell.
+     *
+     * A single catch-up pass is not enough for a drag. The reveal pipeline is
+     * asynchronous and a long drag can still be drawing when the pass runs, so
+     * one shot can report progress that is already stale and leave the party
+     * marker short of where the token actually stopped. This waits for the
+     * queue to drain and then re-checks, repeating until the mapped cell and
+     * the token cell agree.
+     */
+    async _settleToToken(tokenId, attempt = 0) {
+        if (!this._isSettleable(tokenId)) return;
+        // Let everything already queued finish before judging progress.
+        await this._outgoingRevealQueue.catch(() => {});
+        if (!this._isSettleable(tokenId)) return;
+        const token = this._getTrackedToken();
+        if (!token) return;
+        const live = this._gridPosition(token.document);
+        const mapped = this._normalizePosition(this.state.lastPosition);
+        if (mapped && mapped.column === live.column && mapped.row === live.row) return;
+        if (attempt >= SETTLE_ATTEMPTS) {
+            console.warn(
+                `${MODULE.NAME}: Mapping stopped short of the token after ${SETTLE_ATTEMPTS} settle passes`,
+                { mapped, live, tokenId }
+            );
+            return;
+        }
+        await this._requestReveal(token.document, live, { force: true });
+        return this._settleToToken(tokenId, attempt + 1);
+    }
+
+    _isSettleable(tokenId) {
+        return this.active && !this.paused && tokenId === this.trackedTokenId;
     }
 
     async _flushCatchUp() {
@@ -759,6 +792,7 @@ class MappingManager {
         const token = this._getTrackedToken();
         if (!token) return;
         await this._requestReveal(token.document, this._gridPosition(token.document), { force: true });
+        await this._settleToToken(this.trackedTokenId);
     }
 
     _revealKeys(position) {

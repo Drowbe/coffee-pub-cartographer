@@ -41,7 +41,7 @@
             <span>{{emptyMessage}}</span>
         </div>
         {{else}}
-        <div class="cartographer-mapping-grid" style="--cartographer-map-columns: {{columnCount}}; --cartographer-map-rows: {{rowCount}};">
+        <div class="cartographer-mapping-grid" data-origin-column="{{originColumn}}" data-origin-row="{{originRow}}" style="--cartographer-map-columns: {{columnCount}}; --cartographer-map-rows: {{rowCount}};">
             {{#each cells}}
             <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}};">
                 {{#if hasLinework}}
@@ -80,6 +80,12 @@
             </div>
             {{/each}}
         </div>
+        {{#if showParty}}
+        {{! Pinned twin of the party marker. While following, the viewport shows
+            this one and hides the in-grid marker, so the party stays exactly at
+            the centre and the map slides beneath it. }}
+        <i class="fa-solid fa-street-view cartographer-mapping-party is-pinned" aria-hidden="true"></i>
+        {{/if}}
         {{/if}}
     </div>
     {{/if}}

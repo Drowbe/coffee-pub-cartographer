@@ -14,6 +14,8 @@ const APP_ID = `${MODULE.ID}-mapper`;
 const MAP_CELL_SIZE = 36;
 /** Fraction of the remaining distance the camera covers each frame. */
 const CAMERA_EASING = 0.28;
+/** Blank cells drawn beyond the explored bounds on the endless canvas. */
+const MAP_MARGIN_CELLS = 3;
 
 export class MappingWindow extends ToolWindowBase {
     static DEFAULT_OPTIONS = foundry.utils.mergeObject(
@@ -229,11 +231,23 @@ export class MappingWindow extends ToolWindowBase {
             };
         }
 
+        // Endless canvas: the grid spans only the drawn bounds plus a margin,
+        // wherever those bounds happen to sit, rather than the whole scene. It
+        // grows on its own as exploration reaches an edge. Cells are placed
+        // relative to the origin, while the camera stays in absolute map space.
         const coordinates = [...explored].map(key => key.split(',').map(Number));
-        const maxExploredColumn = Math.max(...coordinates.map(([column]) => column));
-        const maxExploredRow = Math.max(...coordinates.map(([, row]) => row));
-        const columnCount = Math.max(this.manager.state.columns || 0, maxExploredColumn + 1);
-        const rowCount = Math.max(this.manager.state.rows || 0, maxExploredRow + 1);
+        // Single pass rather than Math.min(...spread), which overflows the
+        // stack once a map grows past roughly a hundred thousand cells.
+        const bounds = coordinates.reduce((result, [column, row]) => ({
+            minColumn: Math.min(result.minColumn, column),
+            minRow: Math.min(result.minRow, row),
+            maxColumn: Math.max(result.maxColumn, column),
+            maxRow: Math.max(result.maxRow, row)
+        }), { minColumn: Infinity, minRow: Infinity, maxColumn: -Infinity, maxRow: -Infinity });
+        const originColumn = bounds.minColumn - MAP_MARGIN_CELLS;
+        const originRow = bounds.minRow - MAP_MARGIN_CELLS;
+        const columnCount = (bounds.maxColumn + MAP_MARGIN_CELLS) - originColumn + 1;
+        const rowCount = (bounds.maxRow + MAP_MARGIN_CELLS) - originRow + 1;
         const cells = coordinates.map(([column, row]) => {
             const key = `${column},${row}`;
             const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
@@ -242,8 +256,8 @@ export class MappingWindow extends ToolWindowBase {
             const symbolDefinition = symbol ? getMappingSymbol(symbol.type) : null;
             return {
                 key,
-                gridColumn: column + 1,
-                gridRow: row + 1,
+                gridColumn: column - originColumn + 1,
+                gridRow: row - originRow + 1,
                 className: `is-explored${isNew ? ' is-new' : ''}${isParty ? ' is-party' : ''}`,
                 segments: mappedGeometry.segmentsByCell.get(key) ?? [],
                 doorSymbols: mappedGeometry.doorSymbolsByCell.get(key) ?? [],
@@ -266,6 +280,9 @@ export class MappingWindow extends ToolWindowBase {
             cells,
             columnCount,
             rowCount,
+            originColumn,
+            originRow,
+            showParty: Boolean(trackedPosition),
             feetMapped: explored.size * (this.manager.state.gridDistance || 5)
         };
     }
@@ -477,6 +494,7 @@ export class MappingWindow extends ToolWindowBase {
         // A manual pan takes over the view until the party moves again.
         this._stopCameraAnimation();
         this._followArmed = false;
+        this._applyCamera();
         this._pan = {
             pointerId: event.pointerId,
             x: event.clientX,
@@ -587,9 +605,17 @@ export class MappingWindow extends ToolWindowBase {
         const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
         const grid = this.element?.querySelector('.cartographer-mapping-grid');
         if (!viewport || !grid) return false;
-        const offsetX = (viewport.clientWidth / 2) - (this.camera.x * this.zoom);
-        const offsetY = (viewport.clientHeight / 2) - (this.camera.y * this.zoom);
+        // The camera is in absolute map space, but the endless-canvas grid
+        // starts at its own origin, so convert into the grid's local space.
+        const originX = (Number(grid.dataset.originColumn) || 0) * this._cellSize;
+        const originY = (Number(grid.dataset.originRow) || 0) * this._cellSize;
+        const offsetX = (viewport.clientWidth / 2) - ((this.camera.x - originX) * this.zoom);
+        const offsetY = (viewport.clientHeight / 2) - ((this.camera.y - originY) * this.zoom);
         grid.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${this.zoom})`;
+        // While following, the pinned marker is shown and the in-grid one is
+        // hidden, so the party never drifts off centre during a camera glide.
+        viewport.classList.toggle('is-following', this._followArmed && Boolean(this.manager.active));
+        viewport.style.setProperty('--cartographer-map-zoom', this.zoom);
         return true;
     }
 
@@ -642,7 +668,9 @@ export class MappingWindow extends ToolWindowBase {
      * step, so that a manual pan is honoured until the party moves again.
      */
     armFollow() {
+        if (this._followArmed) return;
         this._followArmed = true;
+        this._applyCamera();
     }
 
     /** Centre on the party marker, which renders at the last mapped step. */

@@ -285,6 +285,28 @@
     filter: drop-shadow(0 1px 1px rgb(0 0 0 / 55%));
 }
 
+/* The pinned marker sits at the exact centre of the viewport rather than in a
+   grid cell, so the party holds still and the map slides beneath it. It is
+   swapped in only while following; a manual pan falls back to the in-grid
+   marker, which keeps showing where the party actually is. */
+.cartographer-mapping-party.is-pinned {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 5;
+    display: none;
+    font-size: calc(18px * var(--cartographer-map-zoom, 1));
+    transform: translate(-50%, -50%);
+}
+
+.cartographer-mapping-viewport.is-following .cartographer-mapping-party.is-pinned {
+    display: block;
+}
+
+.cartographer-mapping-viewport.is-following .cartographer-mapping-cell .cartographer-mapping-party {
+    visibility: hidden;
+}
+
 .cartographer-mapping-empty {
     display: grid;
     place-content: center;
