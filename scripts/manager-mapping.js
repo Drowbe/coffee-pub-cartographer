@@ -38,6 +38,8 @@ const DELETE_TOMBSTONE_MS = 15000;
 const SETTLE_ATTEMPTS = 4;
 /** The mutually exclusive states the mapper can be in. */
 const MAPPING_MODES = ['view', 'follow', 'record'];
+/** Mutations any party member may make, rather than only the Actor's owner. */
+const ANNOTATION_ACTIONS = ['place-symbol', 'remove-symbol'];
 
 class MappingManager {
     constructor() {
@@ -1120,6 +1122,19 @@ class MappingManager {
         return this._canManageActor(game.actors?.get(record.actorId), user);
     }
 
+    /**
+     * Whether a user may annotate a map with symbols and notes.
+     *
+     * Deliberately looser than management. Recording is what must stay tied to
+     * a token the user owns, because it decides what the party is held to have
+     * experienced. Marking up the result is a shared activity: any party member
+     * can add or clear a symbol on any map they can see, while renaming,
+     * resetting, deleting and surfacing floors stay with the Actor's owner.
+     */
+    canAnnotateRecord(record = this.state, user = game.user) {
+        return Boolean(record?.actorId && user);
+    }
+
     /** Whether a map this user could record into already exists on this scene. */
     hasManageableMapForCurrentScene() {
         const sceneId = canvas?.scene?.id;
@@ -1217,7 +1232,7 @@ class MappingManager {
         if (!MAPPING_SYMBOL_TYPES.has(type)) return false;
         const record = this.records.get(this.currentMapId);
         const cellKey = `${Number(column)},${Number(row)}`;
-        if (!record || !record.explored.includes(cellKey) || !this.canManageRecord(record)) return false;
+        if (!record || !record.explored.includes(cellKey) || !this.canAnnotateRecord(record)) return false;
 
         let text = '';
         if (MAPPING_ANNOTATED_SYMBOLS.has(type)) {
@@ -1245,9 +1260,16 @@ class MappingManager {
         return true;
     }
 
+    getMapNote(column, row) {
+        return this.state.symbols
+            ?.find(symbol => symbol.column === Number(column)
+                && symbol.row === Number(row)
+                && symbol.type === 'note') ?? null;
+    }
+
     async removeMapSymbol(column, row) {
         const record = this.records.get(this.currentMapId);
-        if (!record || !this.canManageRecord(record)) return false;
+        if (!record || !this.canAnnotateRecord(record)) return false;
         await this._requestMutation({
             action: 'remove-symbol',
             mapId: record.id,
@@ -1261,6 +1283,7 @@ class MappingManager {
         if (!MAPPING_FLOOR_TYPE_IDS.has(type)) return false;
         const record = this.records.get(this.currentMapId);
         const cellKey = `${Number(column)},${Number(row)}`;
+        // A surface restyles a whole area, so it stays with the Actor's owner.
         if (!record || !record.explored.includes(cellKey) || !this.canManageRecord(record)) return false;
         await this._requestMutation({
             action: 'set-floor',
@@ -1339,7 +1362,11 @@ class MappingManager {
             return;
         }
 
-        if (!record || !this._canManageActor(game.actors?.get(record.actorId), user)) return;
+        if (!record) return;
+        // Marking a map up is open to the whole party; changing what it is, or
+        // what it says was explored, stays with the Actor's owner.
+        if (!ANNOTATION_ACTIONS.includes(data.action)
+            && !this._canManageActor(game.actors?.get(record.actorId), user)) return;
         if (data.action === 'rename') {
             const name = String(data.name ?? '').trim().slice(0, 100);
             if (!name) return;

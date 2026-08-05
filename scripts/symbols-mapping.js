@@ -5,7 +5,14 @@
 const frame = '<rect class="symbol-frame" x="7" y="9" width="86" height="82"></rect>';
 const text = (value, x = 50, y = 53, className = '') =>
     `<text class="symbol-text ${className}" x="${x}" y="${y}">${value}</text>`;
-const boxed = content => `${frame}${content}`;
+/**
+ * Every symbol paints its own opaque backing before anything else, so a floor
+ * surface underneath cannot show through the open parts of the glyph. The
+ * backing takes the symbol's own outline — a card for the boxed features, a
+ * disc for the round markers — rather than a square behind everything.
+ */
+const boxed = content =>
+    `<rect class="symbol-backing" x="7" y="9" width="86" height="82" rx="3"></rect>${frame}${content}`;
 const line = (x1, y1, x2, y2, className = '') =>
     `<line class="${className}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
 const circle = (cx, cy, r, className = '') =>
@@ -47,7 +54,8 @@ function ladder(direction = 'up') {
  * are drawn as a bare disc instead of the boxed card the built features use.
  */
 const disc = (value, className = 'symbol-medium') =>
-    `${circle(50, 50, 30)}${text(value, 50, 54, className)}`;
+    `<circle class="symbol-backing" cx="50" cy="50" r="30"></circle>`
+    + `${circle(50, 50, 30)}${text(value, 50, 54, className)}`;
 
 const symbol = (labelKey, markup) => Object.freeze({ labelKey, markup });
 
@@ -154,7 +162,6 @@ export const MAPPING_SYMBOL_CATEGORIES = Object.freeze([
     { labelKey: 'mapping.categoryAccess', icon: 'fa-solid fa-stairs', types: ['stairs-up', 'stairs-down', 'spiral-stairs-up', 'spiral-stairs-down', 'ladder-up', 'ladder-down', 'slide', 'tunnel-subterranean'] },
     { labelKey: 'mapping.categoryArcane', icon: 'fa-solid fa-wand-sparkles', types: ['magic-circle', 'teleport'] },
     { labelKey: 'mapping.categoryHazards', icon: 'fa-solid fa-triangle-exclamation', types: ['trap', 'trap-door-floor', 'trap-door-ceiling', 'secret-trap-door', 'stairs-slide-trap', 'trigger', 'lever', 'contraption', 'open-pit-square', 'covered-pit-square', 'open-pit-round', 'covered-pit-round', 'hole-ceiling', 'hole-floor'] },
-    { labelKey: 'mapping.categoryMarkers', icon: 'fa-solid fa-bookmark', types: ['point-of-interest', 'mystery', 'quest', 'codex', 'note'] },
     { labelKey: 'mapping.categoryStructures', icon: 'fa-solid fa-landmark', types: ['dais', 'altar', 'pillar-square', 'pillar-round', 'statue-small-medium', 'statue-large'] },
     { labelKey: 'mapping.categoryWaterFire', icon: 'fa-solid fa-fire-flame-curved', types: ['pool', 'fountain', 'well-square', 'well-round', 'fire-pit', 'fireplace'] },
     { labelKey: 'mapping.categoryFurnishings', icon: 'fa-solid fa-couch', types: ['chair', 'padded-chair', 'throne', 'stool', 'bench', 'hammock', 'desk', 'table', 'bookcase-cupboard', 'chest', 'cask', 'sack', 'bed', 'curtain', 'stove', 'cage', 'treasure'] }
@@ -170,6 +177,16 @@ export function getMappingSymbol(type) {
  * part worth capturing now.
  */
 export const MAPPING_ANNOTATED_SYMBOLS = new Set(['note']);
+
+/**
+ * Markers annotate the map rather than describing anything built, so they sit
+ * at the top level of the context menu instead of among the placeables.
+ */
+export const MAPPING_MARKERS = Object.freeze({
+    labelKey: 'mapping.categoryMarkers',
+    icon: 'fa-solid fa-bookmark',
+    types: ['point-of-interest', 'mystery', 'quest', 'codex']
+});
 /** Longest note text kept on a symbol. */
 export const MAPPING_SYMBOL_TEXT_LIMIT = 240;
 

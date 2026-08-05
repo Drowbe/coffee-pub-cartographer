@@ -3,7 +3,12 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
-import { getMappingSymbol, MAPPING_FLOOR_TYPES, MAPPING_SYMBOL_CATEGORIES } from './symbols-mapping.js';
+import {
+    getMappingSymbol,
+    MAPPING_FLOOR_TYPES,
+    MAPPING_MARKERS,
+    MAPPING_SYMBOL_CATEGORIES
+} from './symbols-mapping.js';
 
 const ToolWindowBase = game.modules.get('coffee-pub-blacksmith')?.api?.BlacksmithToolWindowBaseV2 ?? class {
     static DEFAULT_OPTIONS = {};
@@ -43,6 +48,8 @@ const THUMBNAIL_INK = {
     dark: 'rgba(236, 227, 208, 0.78)',
     glass: 'rgba(242, 234, 217, 0.72)'
 };
+/** Window width below which chrome buttons drop their captions. */
+const COMPACT_CHROME_WIDTH = 460;
 /** Rings of hatching drawn outward from the explored edge. Must fit the margin. */
 const HATCH_RINGS = MAP_MARGIN_CELLS;
 /** Neighbour offsets used to grow the hatch band outward. */
@@ -377,7 +384,10 @@ export class MappingWindow extends ToolWindowBase {
             isRecording: this.manager.active,
             isPaused: this.manager.paused,
             zoom: this.zoom,
-            modes: MAPPING_MODE_BUTTONS.map(mode => ({
+            // Following and recording both track a token on this scene, so a
+            // map belonging to another scene can only be viewed.
+            modes: MAPPING_MODE_BUTTONS.filter(mode => mode.id === 'view'
+                || this.manager.state.sceneId === canvas?.scene?.id).map(mode => ({
                 id: mode.id,
                 icon: mode.icon,
                 label: game.i18n.localize(`${MODULE.ID}.mapping.mode${mode.key}Hint`),
@@ -831,10 +841,12 @@ export class MappingWindow extends ToolWindowBase {
         // token stays put under the resized window.
         this._resizeObserver?.disconnect();
         this._resizeObserver = new ResizeObserver(() => {
+            this._applyCompactChrome();
             if (this._followArmed && this.manager.getTrackedPositionForCurrentMap()) this.centerOnParty();
             else this._applyCamera();
         });
         this._resizeObserver.observe(viewport);
+        this._applyCompactChrome();
 
         // The grid element is brand new on every render. Re-establish the view
         // before the browser paints, otherwise the map flashes at the origin.
@@ -908,7 +920,7 @@ export class MappingWindow extends ToolWindowBase {
         event.preventDefault();
         if (this._suppressContextMenu || this.viewMode !== 'map') return;
         const cell = event.target.closest('.cartographer-mapping-cell.is-explored');
-        if (!cell || !this.manager.canManageRecord()) return;
+        if (!cell || !this.manager.canAnnotateRecord()) return;
         const [column, row] = String(cell.dataset.cell ?? '').split(',').map(Number);
         if (!Number.isInteger(column) || !Number.isInteger(row)) return;
 
@@ -938,14 +950,35 @@ export class MappingWindow extends ToolWindowBase {
             });
             items.push({ separator: true });
         }
+        // A note is its own action rather than one placeable among many,
+        // because it carries the player's words rather than a map convention.
+        items.push({
+            name: localize(this.manager.getMapNote(column, row) ? 'mapping.editNote' : 'mapping.addNote'),
+            icon: 'fa-solid fa-pen-to-square',
+            callback: place('note')
+        });
+        items.push({ separator: true });
+        // Markers annotate rather than describe anything built, so they sit
+        // alongside the placeables rather than inside them.
+        items.push({
+            name: localize(MAPPING_MARKERS.labelKey),
+            icon: MAPPING_MARKERS.icon,
+            submenu: MAPPING_MARKERS.types
+                .map(type => ({ name: localize(getMappingSymbol(type).labelKey), callback: place(type) }))
+                .sort(byName)
+        });
         items.push({
             name: localize('mapping.placeables'),
             icon: 'fa-solid fa-shapes',
             submenu: categories
         });
 
-        // Floor surfaces apply to a whole area rather than one square, so they
-        // sit last, apart from the per-square actions above.
+        // Floor surfaces restyle a whole area, so unlike the markings above
+        // they stay with the Actor's owner.
+        if (!this.manager.canManageRecord()) {
+            this._showCellMenu(event, items);
+            return;
+        }
         const currentFloor = this.manager.getFloorType(column, row);
         items.push({ separator: true });
         items.push({
@@ -957,12 +990,17 @@ export class MappingWindow extends ToolWindowBase {
                 callback: () => this.manager.setFloorType(floor.type, column, row)
             }))
         });
-        const root = this.element?.ownerDocument?.body ?? document.body;
+        this._showCellMenu(event, items);
+    }
+
+    _showCellMenu(event, items) {
+        const contextMenu = game.modules.get('coffee-pub-blacksmith')?.api?.uiContextMenu;
+        if (typeof contextMenu?.show !== 'function') return;
         contextMenu.show({
             id: `${MODULE.ID}-mapping-cell-context`,
             x: event.clientX,
             y: event.clientY,
-            root,
+            root: this.element?.ownerDocument?.body ?? document.body,
             zones: { module: items },
             className: 'cartographer-mapping-cell-context'
         });
@@ -983,6 +1021,16 @@ export class MappingWindow extends ToolWindowBase {
     // _saveScrollPositions equivalent (that is ApplicationV1 only), so there
     // is nothing to restore it. Keeping the camera outside the DOM and
     // re-applying it after each render is what makes the view survive.
+
+    /**
+     * Drop button captions once the window is too narrow to carry them, so the
+     * top bar degrades to icons rather than overflowing.
+     */
+    _applyCompactChrome() {
+        const root = this.element;
+        if (!root) return;
+        root.classList.toggle('is-compact', root.clientWidth < COMPACT_CHROME_WIDTH);
+    }
 
     /** Map-space centre of a grid cell, in unzoomed pixels. */
     _cellCenter(position) {

@@ -422,10 +422,6 @@
     width: 80%;
     height: 80%;
     overflow: visible;
-    /* Solid paper behind the glyph, so a floor surface underneath cannot show
-       through its open areas and muddle the linework. */
-    border-radius: 3px;
-    background: var(--cartographer-map-paper);
     /* Hit-testable so the symbol can carry a tooltip naming it. Pan and the
        cell context menu both still work: they listen on the viewport and
        resolve the cell with closest(), so events bubbling from here land the
@@ -436,6 +432,13 @@
     stroke-width: 4.5;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+/* Painted first, in the symbol's own outline, so a round marker sits on a
+   round backing rather than a square one. */
+.cartographer-mapping-placeable .symbol-backing {
+    fill: var(--cartographer-map-paper);
+    stroke: none;
 }
 
 .cartographer-mapping-placeable .symbol-frame {
@@ -699,6 +702,21 @@
     font-weight: 600;
     letter-spacing: 0.2px;
     white-space: nowrap;
+}
+
+/* Too narrow to carry captions: fall back to icons, which the tooltips already
+   explain, rather than letting the bar overflow. */
+.cartographer-mapping-window.is-compact .cartographer-mapping-chrome-actions button.is-labelled {
+    width: 24px;
+    padding: 0;
+}
+
+.cartographer-mapping-window.is-compact .cartographer-mapping-chrome-actions button.is-labelled span {
+    display: none;
+}
+
+.cartographer-mapping-window.is-compact .cartographer-mapping-zoom-readout {
+    display: none;
 }
 
 .cartographer-mapping-zoom-readout {

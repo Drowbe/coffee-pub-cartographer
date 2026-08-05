@@ -24,6 +24,7 @@
 ### Next
 
 - [ ] Organize the Recorded Maps list: filter and sort by player, actor, and scene. The list is flat today and grows one entry per actor per scene.
+- [ ] Export a map as an image, to the clipboard and to a PNG file. Screen capture covers this for now. Worth staging: the linework and symbols are already SVG and can be assembled and rasterised nearly as-is, while floor surfaces and the rock hatching are CSS masks and gradients that would each need an SVG `<pattern>` equivalent kept in step with the CSS. Note also that `navigator.clipboard.write()` needs a secure context — a GM on `localhost` can copy, but a player on a LAN IP over plain http cannot, so a PNG download has to be offered alongside it.
 - [ ] Distinguish one-way doors. Detection is trivial (`Wall#dir`), but the official glyph is a directional arrow and Foundry stores direction as LEFT/RIGHT relative to the wall's own vector rather than as a compass bearing. That has to be mapped through edge snapping first, or the arrow points the wrong way half the time.
 - [ ] Expand the remaining official key symbols that have no Foundry equivalent and must be author-placed: false door, trapped door, revolving door, portcullis, gate, arrow slit, illusory wall.
 
