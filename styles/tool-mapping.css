@@ -604,6 +604,25 @@
     background: color-mix(in srgb, var(--blacksmith-status-danger) 18%, var(--blacksmith-tool-field-background));
 }
 
+.cartographer-mapping-chrome-actions button.cartographer-mapping-follow.is-active {
+    border-color: var(--blacksmith-tool-accent);
+    background: var(--blacksmith-tool-surface-selected);
+    color: var(--blacksmith-tool-accent);
+}
+
+.cartographer-mapping-status.is-following i {
+    color: var(--blacksmith-tool-accent);
+}
+
+/* The create card leads the list, so it reads as an action rather than a map. */
+.cartographer-mapping-list-item.is-create {
+    border-style: dashed;
+}
+
+.cartographer-mapping-list-item.is-create .cartographer-mapping-list-icon {
+    background: var(--blacksmith-tool-surface-sunken);
+}
+
 .cartographer-mapping-chrome-actions button.cartographer-mapping-record.is-paused {
     border-color: var(--blacksmith-status-warning);
     background: color-mix(in srgb, var(--blacksmith-status-warning) 18%, var(--blacksmith-tool-field-background));

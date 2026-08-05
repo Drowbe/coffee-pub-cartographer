@@ -36,6 +36,12 @@ class MappingManager {
         this.services = null;
         this.active = false;
         this.paused = false;
+        // Following is a third state: the camera and marker track the token
+        // without recording anything, so it can safely be pointed at a map
+        // this user does not own.
+        this.following = false;
+        this._unexploredPromptSuppressed = false;
+        this._unexploredPromptOpen = false;
         this.trackedTokenId = null;
         this.currentMapId = null;
         this.lastGridKey = null;
@@ -107,6 +113,7 @@ class MappingManager {
         this._hooks = [];
         this.active = false;
         this.paused = false;
+        this.following = false;
         this.trackedTokenId = null;
         this.currentMapId = null;
         this.lastGridKey = null;
@@ -170,6 +177,18 @@ class MappingManager {
             if (tokenDocument.id !== this.trackedTokenId) return;
             const visionChanged = ('rotation' in changes) || ('sight' in changes);
             if (!moved && !visionChanged) return;
+
+            // Following moves the view and nothing else. It deliberately runs
+            // before the recording gate, so a user can follow along on a map
+            // they have no permission to write to.
+            if (this.following && !this.active) {
+                if (moved) {
+                    this.window?.armFollow();
+                    void this.renderWindow();
+                    void this._considerUnexplored(position);
+                }
+                return;
+            }
             if (!this.active || this.paused) return;
             // Recording and viewport following must originate from updateToken,
             // which is emitted on the controlling player's client. Movement
@@ -512,10 +531,13 @@ class MappingManager {
             return this.window;
         }
         const { MappingWindow } = await import('./window-mapping.js');
-        this.window = await MappingWindow.open(this);
+        // With nothing recorded here yet there is no map worth showing, so open
+        // on the list, where the create card offers the obvious next step.
+        const viewMode = !this.active && !this.hasManageableMapForCurrentScene() ? 'list' : 'map';
+        this.window = await MappingWindow.open(this, { viewMode });
         // centerOnMap works from the record rather than element rectangles, so
         // it can run immediately and the map never paints at the origin first.
-        if (!this.active) this.window?.centerOnMap?.();
+        if (!this.active && viewMode === 'map') this.window?.centerOnMap?.();
         return this.window;
     }
 
@@ -600,11 +622,57 @@ class MappingManager {
     }
 
     getTrackedPositionForCurrentMap() {
-        if (!this.active) return null;
         const token = this._getTrackedToken();
-        if (!token || this._mapIdForToken(token) !== this.currentMapId) return null;
-        const mappedPosition = this._normalizePosition(this.state.lastPosition);
-        return mappedPosition ?? this._gridPosition(token.document);
+        if (!token || !this._isSquareGrid()) return null;
+        if (this.active) {
+            // While recording the marker sits on the last mapped step, so it
+            // never runs ahead of the linework still being drawn.
+            if (this._mapIdForToken(token) !== this.currentMapId) return null;
+            return this._normalizePosition(this.state.lastPosition) ?? this._gridPosition(token.document);
+        }
+        // Following shows the live position on whichever map is open, including
+        // another character's, because following never writes to it.
+        return this.following ? this._gridPosition(token.document) : null;
+    }
+
+    async toggleFollow() {
+        // Recording already follows, so the toggle is meaningless during it.
+        if (this.active) return this.following;
+        this.following = !this.following;
+        this._unexploredPromptSuppressed = false;
+        if (this.following) {
+            this.trackedTokenId = this._getSingleControlledToken()?.id ?? this.trackedTokenId;
+        }
+        await this.renderWindow({ centerOnParty: this.following });
+        return this.following;
+    }
+
+    /**
+     * Offer to start mapping when a followed token walks off the edge of what
+     * this map covers. Asked at most once per follow session: declining
+     * suppresses it until following is toggled again, so walking a long
+     * unmapped corridor cannot turn into a stream of dialogs.
+     */
+    async _considerUnexplored(position) {
+        if (!this.following || this.active || this.paused) return;
+        if (this._unexploredPromptSuppressed || this._unexploredPromptOpen) return;
+        if (!this.currentMapId || !this._normalizePosition(position)) return;
+        if (this.state.explored?.includes(`${position.column},${position.row}`)) return;
+        if (!this.canRecordCurrentMap()) return;
+
+        this._unexploredPromptOpen = true;
+        try {
+            const confirmed = await foundry.applications.api.DialogV2.confirm({
+                window: { title: game.i18n.localize(`${MODULE.ID}.mapping.unexploredTitle`) },
+                content: `<p>${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.unexploredHint`))}</p>`,
+                rejectClose: false,
+                modal: false
+            });
+            if (confirmed) await this.startMapping();
+            else this._unexploredPromptSuppressed = true;
+        } finally {
+            this._unexploredPromptOpen = false;
+        }
     }
 
     /** Portrait for the status bar. Falls back to the token art, then nothing. */
@@ -1003,6 +1071,16 @@ class MappingManager {
     canManageRecord(record = this.state, user = game.user) {
         if (!record?.actorId) return false;
         return this._canManageActor(game.actors?.get(record.actorId), user);
+    }
+
+    /** Whether a map this user could record into already exists on this scene. */
+    hasManageableMapForCurrentScene() {
+        const sceneId = canvas?.scene?.id;
+        if (!sceneId) return false;
+        for (const record of this.records.values()) {
+            if (record.sceneId === sceneId && this.canManageRecord(record)) return true;
+        }
+        return false;
     }
 
     canRecordCurrentMap() {

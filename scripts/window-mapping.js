@@ -86,7 +86,8 @@ export class MappingWindow extends ToolWindowBase {
         },
         'zoom-in': (_event, _target, app) => app.setZoom((app._targetZoom ?? app.zoom) + 0.15),
         'zoom-out': (_event, _target, app) => app.setZoom((app._targetZoom ?? app.zoom) - 0.15),
-        'center-view': (_event, _target, app) => app.centerView()
+        'center-view': (_event, _target, app) => app.centerView(),
+        'toggle-follow': (_event, _target, app) => void app.manager.toggleFollow()
     };
 
     constructor(manager, options = {}) {
@@ -112,7 +113,7 @@ export class MappingWindow extends ToolWindowBase {
         this._handleMapContextMenu = this._handleMapContextMenu.bind(this);
     }
 
-    static async open(manager) {
+    static async open(manager, { viewMode = 'map' } = {}) {
         const existing = foundry.applications?.instances?.get(APP_ID);
         if (existing) {
             existing.manager = manager;
@@ -120,6 +121,7 @@ export class MappingWindow extends ToolWindowBase {
             return existing;
         }
         const window = new MappingWindow(manager);
+        window.viewMode = viewMode;
         await window.render({ force: true });
         return window;
     }
@@ -133,10 +135,12 @@ export class MappingWindow extends ToolWindowBase {
             ? 'mapping.statusMaps'
             : (this.manager.paused
                 ? 'mapping.statusPaused'
-                : (this.manager.active ? 'mapping.statusActive' : 'mapping.statusViewing'));
+                : (this.manager.active
+                    ? 'mapping.statusActive'
+                    : (this.manager.following ? 'mapping.statusFollowing' : 'mapping.statusViewing')));
         const statusClass = this.manager.paused
             ? ' is-paused'
-            : (this.manager.active ? ' is-recording' : '');
+            : (this.manager.active ? ' is-recording' : (this.manager.following ? ' is-following' : ''));
         const status = `<span class="cartographer-mapping-status${statusClass}"><i class="fa-solid fa-circle"></i> ${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.${statusKey}`))}</span>`;
         return {
             appId: this.id,
@@ -194,6 +198,13 @@ export class MappingWindow extends ToolWindowBase {
                 action: 'toggle-list',
                 icon: 'fa-solid fa-list',
                 label: model.listLabel
+            }));
+            buttons.push(this._chromeButton({
+                action: 'toggle-follow',
+                icon: 'fa-solid fa-location-arrow',
+                label: model.followLabel,
+                className: `cartographer-mapping-follow${this.manager.following ? ' is-active' : ''}`,
+                disabled: this.manager.active
             }));
             buttons.push(this._chromeButton({
                 action: 'toggle-recording',
@@ -312,6 +323,13 @@ export class MappingWindow extends ToolWindowBase {
                 canAdd: this.manager.canRecordCurrentMap(),
                 listEmpty: maps.length === 0,
                 listEmptyMessage: game.i18n.localize(`${MODULE.ID}.mapping.noMaps`),
+                // Offered whenever this scene has no map they could record
+                // into. Shown even without a token selected, because the
+                // create action explains what is missing better than a hidden
+                // card does.
+                showCreateCard: !this.manager.hasManageableMapForCurrentScene(),
+                createTitle: game.i18n.localize(`${MODULE.ID}.mapping.createForScene`),
+                createHint: game.i18n.localize(`${MODULE.ID}.mapping.createForSceneHint`),
                 addMapLabel: game.i18n.localize(`${MODULE.ID}.mapping.addMap`),
                 viewMapLabel: game.i18n.localize(`${MODULE.ID}.mapping.viewMap`),
                 renameLabel: game.i18n.localize(`${MODULE.ID}.mapping.rename`),
@@ -342,6 +360,9 @@ export class MappingWindow extends ToolWindowBase {
             zoom: this.zoom,
             recordLabel: game.i18n.localize(`${MODULE.ID}.mapping.${this.manager.active ? 'stopRecording' : 'startRecording'}`),
             listLabel: game.i18n.localize(`${MODULE.ID}.mapping.showMaps`),
+            followLabel: game.i18n.localize(
+                `${MODULE.ID}.mapping.${this.manager.following ? 'followStop' : 'followStart'}`
+            ),
             zoomInLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomIn`),
             zoomOutLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomOut`),
             centerPartyLabel: game.i18n.localize(
@@ -468,6 +489,22 @@ export class MappingWindow extends ToolWindowBase {
         return cells;
     }
 
+    /**
+     * Pick which of the two squares flanking a boundary draws it, preferring
+     * the canonical side and falling back to its neighbour. Returns null when
+     * neither has been explored, which is what keeps a stored edge from
+     * showing up beyond the mapped area.
+     */
+    _drawableSide(edgeKey, explored) {
+        const [orientation, first, second] = edgeKey.split(':');
+        const a = Number(first);
+        const b = Number(second);
+        const sides = orientation === 'h'
+            ? [{ column: a, row: b, direction: 'north' }, { column: a, row: b - 1, direction: 'south' }]
+            : [{ column: a, row: b, direction: 'west' }, { column: a - 1, row: b, direction: 'east' }];
+        return sides.find(side => explored.has(`${side.column},${side.row}`)) ?? null;
+    }
+
     _getMappedTileGeometry(explored, features) {
         const segmentsByCell = new Map();
         const doorSymbolsByCell = new Map();
@@ -482,10 +519,15 @@ export class MappingWindow extends ToolWindowBase {
             'locked-door': 4,
             'secret-door': 5
         };
-        const edges = new Map();
+        // Collapse to lattice edges first. A boundary is one line regardless of
+        // which square it was written against, so the winner is decided per
+        // line rather than per square -- and the explored check waits until the
+        // drawing square is resolved, because a canonically stored edge can sit
+        // on the unexplored side of a frontier.
+        const latticeEdges = new Map();
         for (const [key, codes] of Object.entries(features ?? {})) {
-            if (!explored.has(key)) continue;
             const [column, row] = key.split(',').map(Number);
+            if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
             for (const code of codes) {
                 const [feature, direction] = code.split(':');
                 const edgeKey = {
@@ -495,11 +537,22 @@ export class MappingWindow extends ToolWindowBase {
                     east: `v:${column + 1}:${row}`
                 }[direction];
                 if (!edgeKey || !priorities[feature]) continue;
-                const existing = edges.get(edgeKey);
+                const existing = latticeEdges.get(edgeKey);
                 if (!existing || priorities[feature] > priorities[existing.feature]) {
-                    edges.set(edgeKey, { key, feature, direction });
+                    latticeEdges.set(edgeKey, { feature });
                 }
             }
+        }
+
+        const edges = new Map();
+        for (const [edgeKey, edge] of latticeEdges) {
+            const side = this._drawableSide(edgeKey, explored);
+            if (!side) continue;
+            edges.set(edgeKey, {
+                key: `${side.column},${side.row}`,
+                feature: edge.feature,
+                direction: side.direction
+            });
         }
 
         // Wide openings mark every square they cross, so join those marks back

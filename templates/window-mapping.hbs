@@ -5,6 +5,16 @@
     </div>
 
     <div class="cartographer-mapping-list">
+        {{#if showCreateCard}}
+        {{! Offered when this scene has no map this user could record into. }}
+        <article class="cartographer-mapping-list-item is-create" data-action="add-map">
+            <div class="cartographer-mapping-list-icon"><i class="fa-solid fa-plus"></i></div>
+            <div class="cartographer-mapping-list-copy">
+                <strong>{{createTitle}}</strong>
+                <span>{{createHint}}</span>
+            </div>
+        </article>
+        {{/if}}
         {{#if listEmpty}}
         <div class="cartographer-mapping-empty">
             <i class="fa-solid fa-map"></i>

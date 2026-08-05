@@ -324,9 +324,19 @@ function normalizedDoorSpans(documents) {
 
     for (const segment of segments) {
         const cluster = clusters.find(candidate => {
+            // Fragments must at least roughly share a heading before they can
+            // be treated as one opening. Without this, two openings meeting at
+            // a corner -- one on each face of the same square -- were fused,
+            // and the normalized span then ran diagonally through open space
+            // instead of along either wall.
+            const aligned = candidate.some(existing => (
+                Math.abs((existing.unit.x * segment.unit.x) + (existing.unit.y * segment.unit.y)) >= 0.7
+            ));
+            if (!aligned) return false;
+
             // A doorway is frequently authored from several short fragments
             // inside one Foundry square. Those fragments may turn slightly at
-            // a curve or decorative jamb, so alignment alone is not a useful
+            // a curve or decorative jamb, so proximity alone is not a useful
             // test. Treat the square as the doorway's footprint and normalize
             // its first/last extrema to one span.
             const sharesDoorCell = segment.cell && candidate.some(existing => (
@@ -337,11 +347,6 @@ function normalizedDoorSpans(documents) {
             if (sharesDoorCell) {
                 return farthestEndpointPair([...candidate, segment]).distance <= maxSpan;
             }
-
-            const aligned = candidate.some(existing => (
-                Math.abs((existing.unit.x * segment.unit.x) + (existing.unit.y * segment.unit.y)) >= 0.7
-            ));
-            if (!aligned) return false;
             const connected = candidate.some(existing => Math.min(
                 pointDistance(existing.start, segment.start),
                 pointDistance(existing.start, segment.end),
@@ -419,6 +424,23 @@ function connectingBoundary(fromNodes, toNodes) {
         : { column: fromX, row: Math.min(fromY, toY), direction: 'west' };
 }
 
+/**
+ * Restate a cell boundary in its canonical form.
+ *
+ * A boundary between two squares can be written two ways -- south of the upper
+ * square, or north of the lower one -- and they mean the same line. Which one
+ * got written used to depend on which side the observer happened to be
+ * standing, so the same corridor produced different records depending on the
+ * direction it was walked. Storing one canonical form (always north or west)
+ * makes the record a function of the geometry alone. The renderer decides
+ * which adjacent square actually draws it.
+ */
+function canonicalBoundary({ column, row, direction }) {
+    if (direction === 'south') return { column, row: row + 1, direction: 'north' };
+    if (direction === 'east') return { column: column + 1, row, direction: 'west' };
+    return { column, row, direction };
+}
+
 function boundaryCandidates(wallPoint, wallDx, wallDy) {
     const cell = gridCellAt(wallPoint);
     if (!cell) return [];
@@ -485,12 +507,15 @@ function wallBoundaryObservations(
     let previousNodes = carry?.nodes ?? null;
 
     const record = (cell, direction) => {
-        const key = `${cell.column},${cell.row}`;
-        if (!allowed.has(key)) return false;
-        const observationKey = `${key}:${feature}:${direction}`;
+        // The square the party had to see is the one that was chosen; the
+        // boundary is then stored canonically, which may name its neighbour.
+        if (!allowed.has(`${cell.column},${cell.row}`)) return false;
+        const canonical = canonicalBoundary({ ...cell, direction });
+        const key = `${canonical.column},${canonical.row}`;
+        const observationKey = `${key}:${feature}:${canonical.direction}`;
         if (seen.has(observationKey)) return true;
         seen.add(observationKey);
-        observations.push({ key, code: `${feature}:${direction}` });
+        observations.push({ key, code: `${feature}:${canonical.direction}` });
         return true;
     };
 
@@ -914,6 +939,22 @@ function isOpposingEdge(first, second) {
         && Math.abs(first.coordinate - second.coordinate) === 1;
 }
 
+/** The feature name from a persisted "feature:direction" code. */
+function featureOfCode(code) {
+    return String(code ?? '').split(':')[0];
+}
+
+/** True for any doorway family member, including the locked variant. */
+function isDoorwayCode(code) {
+    const feature = featureOfCode(code);
+    return DOOR_FEATURES.includes(feature) || feature === 'secret-door';
+}
+
+/** True only for a discovered secret door. */
+function isSecretDoorCode(code) {
+    return featureOfCode(code) === 'secret-door';
+}
+
 function mergeFeatures(left, right) {
     const merged = normalizeFeatures(left);
     const incoming = normalizeFeatures(right);
@@ -923,7 +964,7 @@ function mergeFeatures(left, right) {
         for (const code of codes) {
             const edgeKey = featureEdgeKey(key, code);
             if (edgeKey) observedEdges.add(edgeKey);
-            if (code.startsWith('door:') || code.startsWith('secret-door:')) {
+            if (isDoorwayCode(code)) {
                 const edge = parsedFeatureEdge(key, code);
                 if (edge) incomingDoorEdges.push(edge);
             }
@@ -936,7 +977,7 @@ function mergeFeatures(left, right) {
     const incomingSecretEdges = new Set();
     for (const [key, codes] of Object.entries(incoming)) {
         for (const code of codes) {
-            if (!code.startsWith('secret-door:')) continue;
+            if (!isSecretDoorCode(code)) continue;
             const edgeKey = featureEdgeKey(key, code);
             if (edgeKey) incomingSecretEdges.add(edgeKey);
         }
@@ -947,7 +988,7 @@ function mergeFeatures(left, right) {
             if (!observedEdges.has(edgeKey)) return true;
             // Discovering a secret door is permanent map knowledge. A later
             // ordinary wall observation must not conceal it again.
-            return code.startsWith('secret-door:') && !incomingSecretEdges.has(edgeKey);
+            return isSecretDoorCode(code) && !incomingSecretEdges.has(edgeKey);
         });
         if (retained.length) merged[key] = retained;
         else delete merged[key];
@@ -964,8 +1005,8 @@ function mergeFeatures(left, right) {
             .filter(edge => incomingSecretEdges.has(edge.key));
         for (const [key, codes] of Object.entries(merged)) {
             const retained = codes.filter(code => {
-                const isDoor = code.startsWith('door:') || code.startsWith('secret-door:');
-                const isWallBesideRevealedSecret = code.startsWith('wall:')
+                const isDoor = isDoorwayCode(code);
+                const isWallBesideRevealedSecret = featureOfCode(code) === 'wall'
                     && incomingSecretDoorEdges.length > 0;
                 if (!isDoor && !isWallBesideRevealedSecret) return true;
                 const edge = parsedFeatureEdge(key, code);
