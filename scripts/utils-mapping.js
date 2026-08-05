@@ -874,6 +874,55 @@ function contiguousFloorRegion(exploredKeys, features, start, limit = 4000) {
     return region;
 }
 
+/**
+ * Extend a floor surface into squares that have just joined its area.
+ *
+ * Choosing a surface names the area, not the squares that happened to be
+ * mapped at the time. When exploration later fills in more of the same room,
+ * those squares adopt the surface already chosen for it, so a partly-mapped
+ * room does not end up half wood and half blank. It spreads only through
+ * openings the party has recorded, which is what stops it running out of a
+ * doorway: the next room is a new area and stays default until it is named.
+ */
+function propagateFloors(exploredKeys, features, floors, addedKeys) {
+    const explored = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
+    const next = { ...(floors ?? {}) };
+    const pending = [...new Set(addedKeys ?? [])].filter(key => explored.has(key) && !next[key]);
+    if (!pending.length) return next;
+
+    const blocked = (fromKey, from, to) => {
+        const direction = directionBetween(from, to);
+        if (!direction) return true;
+        const opposite = oppositeDirection(direction);
+        const here = features?.[fromKey] ?? [];
+        const there = features?.[`${to.column},${to.row}`] ?? [];
+        return here.some(code => code.endsWith(`:${direction}`))
+            || there.some(code => code.endsWith(`:${opposite}`));
+    };
+
+    // Repeat until nothing more adopts a surface: a run of new squares has to
+    // inherit inward from whichever end touches the already-named area.
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (const key of pending) {
+            if (next[key]) continue;
+            const [column, row] = key.split(',').map(Number);
+            const cell = { column, row };
+            for (const [columnOffset, rowOffset] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+                const neighbour = { column: column + columnOffset, row: row + rowOffset };
+                const neighbourKey = `${neighbour.column},${neighbour.row}`;
+                if (!next[neighbourKey] || !explored.has(neighbourKey)) continue;
+                if (blocked(key, cell, neighbour)) continue;
+                next[key] = next[neighbourKey];
+                changed = true;
+                break;
+            }
+        }
+    }
+    return next;
+}
+
 function normalizeFeatures(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
     const normalized = {};
@@ -1099,6 +1148,7 @@ export {
     directionBetween,
     flattenFeatureSources,
     contiguousFloorRegion,
+    propagateFloors,
     gridTravelPath,
     mergeFeatureSources,
     mergeFeatures,

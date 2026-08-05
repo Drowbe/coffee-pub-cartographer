@@ -143,6 +143,7 @@ Suggested shape:
         "12,8": ["wall:north", "door:east"]
       },
       symbols: [],
+      floors: { "12,8": "wood" },
       updatedAt: 0,
       updatedBy: "USER_ID"
     }
@@ -332,6 +333,88 @@ Mapping start and stop belong to the menubar toggle. Map reset belongs in the wi
 - Never derive or transmit undiscovered geometry.
 
 The persisted result is deliberately abstract graph-paper linework rather than a copy of the Foundry wall drawing.
+
+## Design Decisions
+
+These were settled during implementation. They are recorded here because each
+one is load-bearing and none of them is obvious from reading the code.
+
+### A map belongs to an Actor, not to the party
+
+Map identity is `actorId::sceneId`. There is exactly one map per Actor per
+Scene, and a reveal is credited to the moved token's Actor rather than to the
+user who moved it, gated on that user owning the Actor. So three players walking
+the same dungeon build three separate maps, each holding only what that
+character experienced. The Recorded Maps list is shared and everyone can view
+every map, but discoveries never pool.
+
+This is deliberate: it is what makes the visibility rules mean anything. A
+single shared party map would be a different data model, not a permissions
+change. **Follow mode is the collaboration path instead** — following never
+writes, so it is ungated by ownership, and one player can act as the party's
+cartographer while others simply follow along on that map.
+
+### Boundaries are stored canonically
+
+A boundary between two squares can be named two ways — south of the upper
+square, or north of the lower one — and they describe the same line. Which one
+got written used to depend on which side the observer was standing on, so the
+same corridor produced a different record depending on the direction it was
+walked.
+
+Boundaries are now always stored as `north` or `west`, and the renderer decides
+which adjacent square draws them, preferring whichever is explored. The
+principle: **the record is a function of which squares were experienced, not of
+the route taken through them.** Anything that reintroduces observer position
+into what gets *stored* will bring back irreproducible corner artifacts, and
+will fragment wide openings that are joined by run coalescing at draw time.
+
+### The camera lives outside the DOM
+
+The window renders a single ApplicationV2 part that inlines its whole body, so
+every render replaces the viewport and grid elements. Anything holding view
+state in the DOM — a scroll offset, an inline margin, an in-flight CSS
+transition — is destroyed on each reveal, and ApplicationV2 has no scroll
+preservation to restore it. The camera is therefore plain state on the window
+instance, re-applied after each render, and smooth motion is driven by
+`requestAnimationFrame` rather than a CSS transition, because a transition dies
+with the element running it.
+
+### Floors surface areas, not squares
+
+Choosing a floor names a contiguous area, bounded by recorded walls and
+doorways. Squares that later join that area adopt its surface, so revealing the
+rest of a room does not leave it half-surfaced; a genuinely new area stays
+default until it is named. The area is computed from the party's own record, so
+it can never spread through geometry they have not discovered.
+
+### Feature vocabulary belongs in constants
+
+Feature names have to be registered in several places — what may be persisted,
+what is drawn as a glyph, what spans multiple squares, and what prefixes a
+feature source may use. Every failure of the form "the feature works but
+silently vanishes" during development was a value added in one place and not
+another, and each failed *silently* because the guards drop unknown values
+rather than reporting them. Test against the shared constants, never against a
+string prefix; `locked-door` does not start with `door:`.
+
+### Manual map editing would be an override layer
+
+If per-square editing is ever added, it cannot be a subtraction from the
+observed set: walking past re-observes the geometry and the edit undoes itself.
+It has to be a layer that outranks observation. Erasing must also prune the
+feature *sources*, which are cumulative and never pruned — otherwise the next
+reveal anywhere on the map flattens the old source back over the erased square.
+
+### Curves are lossy by construction
+
+Approximating a curve with grid edges loses information no matter how
+deterministic the generation is. Stair-step connectors and run chaining make
+diagonal walls read correctly, but a cave — where nothing lies along a grid line
+— inverts the premise that snapping rests on. Supporting natural geometry means
+storing free-form strokes clipped to what the party saw, which is a record
+format change and should be designed together with author-placed terrain and
+any override layer rather than bolted on separately.
 
 ## Testing Checklist
 

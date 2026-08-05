@@ -73,7 +73,7 @@
                     <polyline class="cartographer-mapping-segment {{className}}" points="{{points}}"></polyline>
                     {{/each}}
                     {{#each doorSymbols}}
-                    <g class="cartographer-mapping-door-symbol" transform="{{transform}}">
+                    <g class="cartographer-mapping-door-symbol" transform="{{transform}}" data-tooltip="{{label}}">
                         {{#each lines}}
                         <polyline class="cartographer-mapping-door-line is-sketch-echo" points="{{echoPoints}}"></polyline>
                         <polyline class="cartographer-mapping-door-line" points="{{points}}"></polyline>
@@ -91,7 +91,7 @@
                     </g>
                     {{/each}}
                     {{#each windowSymbols}}
-                    <g class="cartographer-mapping-window-symbol" transform="{{transform}}">
+                    <g class="cartographer-mapping-window-symbol" transform="{{transform}}" data-tooltip="{{label}}">
                         {{#each lines}}
                         <polyline class="cartographer-mapping-window-line is-sketch-echo" points="{{echoPoints}}"></polyline>
                         <polyline class="cartographer-mapping-window-line" points="{{points}}"></polyline>
@@ -101,7 +101,7 @@
                     </g>
                     {{/each}}
                     {{#each secretDoorSymbols}}
-                    <g class="cartographer-mapping-secret-door-symbol" transform="{{transform}}">
+                    <g class="cartographer-mapping-secret-door-symbol" transform="{{transform}}" data-tooltip="{{label}}">
                         {{#each lines}}
                         <polyline class="cartographer-mapping-secret-door-line is-sketch-echo" points="{{echoPoints}}"></polyline>
                         <polyline class="cartographer-mapping-secret-door-line" points="{{points}}"></polyline>

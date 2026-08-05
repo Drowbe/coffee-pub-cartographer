@@ -14,13 +14,19 @@ import {
     normalizeFeatureSources,
     normalizeFeatures,
     contiguousFloorRegion,
+    propagateFloors,
     observeCrossedSecretDoors,
     observeVisibleFeatures,
     subtractFeatureSources,
     visibleRevealKeys
 } from './utils-mapping.js';
 import { notify } from './utils-toast.js';
-import { MAPPING_FLOOR_TYPE_IDS, MAPPING_SYMBOL_TYPES } from './symbols-mapping.js';
+import {
+    MAPPING_ANNOTATED_SYMBOLS,
+    MAPPING_FLOOR_TYPE_IDS,
+    MAPPING_SYMBOL_TEXT_LIMIT,
+    MAPPING_SYMBOL_TYPES
+} from './symbols-mapping.js';
 
 const FLAG_KEY = 'mapping';
 const TOOL_ID = `${MODULE.ID}-mapping`;
@@ -30,16 +36,17 @@ const STATE_VERSION = 2;
 const DELETE_TOMBSTONE_MS = 15000;
 /** Passes allowed to drive the mapped position onto the token's settled cell. */
 const SETTLE_ATTEMPTS = 4;
+/** The mutually exclusive states the mapper can be in. */
+const MAPPING_MODES = ['view', 'follow', 'record'];
 
 class MappingManager {
     constructor() {
         this.services = null;
-        this.active = false;
+        // Exactly one mode is in effect at a time: 'view', 'follow' or
+        // 'record'. `active` and `following` read from it so the rest of the
+        // manager can keep asking the question it cares about.
+        this.mode = 'view';
         this.paused = false;
-        // Following is a third state: the camera and marker track the token
-        // without recording anything, so it can safely be pointed at a map
-        // this user does not own.
-        this.following = false;
         this._unexploredPromptSuppressed = false;
         this._unexploredPromptOpen = false;
         this.trackedTokenId = null;
@@ -64,6 +71,16 @@ class MappingManager {
         this._selectionFrame = null;
         this._closingWindow = false;
         this._catchUpTimer = null;
+    }
+
+    /** True only while recording. */
+    get active() {
+        return this.mode === 'record';
+    }
+
+    /** True only while following without recording. */
+    get following() {
+        return this.mode === 'follow';
     }
 
     _recordId(actorId, sceneId) {
@@ -111,9 +128,8 @@ class MappingManager {
     cleanup() {
         for (const hook of this._hooks) Hooks.off(hook.name, hook.id);
         this._hooks = [];
-        this.active = false;
+        this.mode = 'view';
         this.paused = false;
-        this.following = false;
         this.trackedTokenId = null;
         this.currentMapId = null;
         this.lastGridKey = null;
@@ -425,9 +441,38 @@ class MappingManager {
         return true;
     }
 
+    /**
+     * Switch between the three mutually exclusive modes. Recording is the only
+     * one that has to be entered through its own checks, so it delegates and
+     * leaves the mode alone if those refuse.
+     */
+    async setMode(next) {
+        if (!MAPPING_MODES.includes(next) || next === this.mode) return this.mode;
+        if (this.mode === 'record') await this.stopMapping({ closeWindow: false });
+        if (next === 'record') {
+            // startMapping explains its own refusals, so stay put on failure
+            // rather than reporting a switch that did not happen.
+            if (await this.startMapping()) this._announceMode();
+            return this.mode;
+        }
+
+        this.mode = next;
+        this._unexploredPromptSuppressed = false;
+        if (next === 'follow') {
+            this.trackedTokenId = this._getSingleControlledToken()?.id ?? this.trackedTokenId;
+        }
+        await this.renderWindow({ centerOnParty: next === 'follow' });
+        this._announceMode();
+        return this.mode;
+    }
+
+    _announceMode() {
+        const key = { view: 'statusViewing', follow: 'statusFollowing', record: 'statusActive' }[this.mode];
+        if (key) notify(game.i18n.localize(`${MODULE.ID}.mapping.${key}`), { type: 'info' });
+    }
+
     async toggleRecording() {
-        if (this.active) return this.stopMapping({ closeWindow: false });
-        return this.startMapping();
+        return this.setMode(this.active ? 'view' : 'record');
     }
 
     async startMapping() {
@@ -466,7 +511,7 @@ class MappingManager {
             return false;
         }
 
-        this.active = true;
+        this.mode = 'record';
         this.paused = false;
         this.trackedTokenId = token.id;
         this.lastGridKey = null;
@@ -499,7 +544,7 @@ class MappingManager {
                 console.error(`${MODULE.NAME}: Failed while finishing the recorded map path`, error);
             });
         }
-        this.active = false;
+        this.mode = 'view';
         this.paused = false;
         this.lastGridKey = null;
         this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
@@ -635,17 +680,6 @@ class MappingManager {
         return this.following ? this._gridPosition(token.document) : null;
     }
 
-    async toggleFollow() {
-        // Recording already follows, so the toggle is meaningless during it.
-        if (this.active) return this.following;
-        this.following = !this.following;
-        this._unexploredPromptSuppressed = false;
-        if (this.following) {
-            this.trackedTokenId = this._getSingleControlledToken()?.id ?? this.trackedTokenId;
-        }
-        await this.renderWindow({ centerOnParty: this.following });
-        return this.following;
-    }
 
     /**
      * Offer to start mapping when a followed token walks off the edge of what
@@ -725,6 +759,8 @@ class MappingManager {
                 type,
                 column,
                 row,
+                // Additive: symbols written before notes existed simply have none.
+                text: String(symbol.text ?? '').trim().slice(0, MAPPING_SYMBOL_TEXT_LIMIT),
                 createdAt: Number(symbol.createdAt) || 0,
                 createdBy: typeof symbol.createdBy === 'string' ? symbol.createdBy : null
             });
@@ -1041,6 +1077,16 @@ class MappingManager {
         // old map without requiring a reset.
         features = mergeSourceFeatures(features, incomingFeatures);
         features = mergeFeatures(features, flattenFeatureSources(featureSources));
+        // Squares that have just joined an area adopt the surface already
+        // chosen for it, so revealing the rest of a room does not leave it
+        // half-surfaced. New areas stay default until they are named.
+        const previouslyExplored = new Set(latest.explored ?? []);
+        const floors = propagateFloors(
+            combinedExplored,
+            features,
+            latest.floors,
+            [...combinedExplored].filter(key => !previouslyExplored.has(key))
+        );
         const dimensions = this._sceneGridDimensions(canvas.scene);
         const next = {
             ...latest,
@@ -1049,6 +1095,7 @@ class MappingManager {
             explored: [...combinedExplored],
             features,
             featureSources,
+            floors,
             lastPosition: position,
             createdAt: latest.createdAt || Date.now(),
             updatedAt: Date.now(),
@@ -1171,10 +1218,27 @@ class MappingManager {
         const record = this.records.get(this.currentMapId);
         const cellKey = `${Number(column)},${Number(row)}`;
         if (!record || !record.explored.includes(cellKey) || !this.canManageRecord(record)) return false;
+
+        let text = '';
+        if (MAPPING_ANNOTATED_SYMBOLS.has(type)) {
+            const existing = this.state.symbols
+                ?.find(symbol => symbol.column === Number(column) && symbol.row === Number(row));
+            const result = await foundry.applications.api.DialogV2.input({
+                window: { title: game.i18n.localize(`${MODULE.ID}.mapping.noteTitle`) },
+                content: `<div class="form-group"><label>${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.noteText`))}</label><div class="form-fields"><input type="text" name="text" maxlength="${MAPPING_SYMBOL_TEXT_LIMIT}" value="${foundry.utils.escapeHTML(existing?.text ?? '')}"></div></div>`,
+                ok: { label: game.i18n.localize(`${MODULE.ID}.mapping.noteSave`) },
+                rejectClose: false,
+                modal: true
+            });
+            if (result === null || result === undefined) return false;
+            text = String(result.text ?? '').trim().slice(0, MAPPING_SYMBOL_TEXT_LIMIT);
+        }
+
         await this._requestMutation({
             action: 'place-symbol',
             mapId: record.id,
             type,
+            text,
             column: Number(column),
             row: Number(row)
         });
@@ -1297,6 +1361,7 @@ class MappingManager {
                 type,
                 column,
                 row,
+                text: String(data.text ?? '').trim().slice(0, MAPPING_SYMBOL_TEXT_LIMIT),
                 createdAt: Date.now(),
                 createdBy: user.id
             });

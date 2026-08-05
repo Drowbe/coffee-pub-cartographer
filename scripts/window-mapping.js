@@ -46,6 +46,13 @@ const THUMBNAIL_INK = {
 /** Rings of hatching drawn outward from the explored edge. Must fit the margin. */
 const HATCH_RINGS = MAP_MARGIN_CELLS;
 /** Neighbour offsets used to grow the hatch band outward. */
+/** The three mutually exclusive modes, in the order they are offered. */
+const MAPPING_MODE_BUTTONS = [
+    { id: 'view', key: 'View', icon: 'fa-solid fa-eye' },
+    { id: 'follow', key: 'Follow', icon: 'fa-solid fa-location-arrow' },
+    { id: 'record', key: 'Record', icon: 'fa-solid fa-circle' }
+];
+/** Neighbour offsets used to grow the hatch band outward. */
 const HATCH_NEIGHBOURS = [
     [-1, -1], [0, -1], [1, -1],
     [-1, 0], [1, 0],
@@ -72,7 +79,7 @@ export class MappingWindow extends ToolWindowBase {
     );
 
     static ACTION_HANDLERS = {
-        'toggle-recording': (_event, _target, app) => void app.manager.toggleRecording(),
+        'set-mode': (_event, target, app) => void app.manager.setMode(target.dataset.mode),
         'toggle-list': (_event, _target, app) => void app.toggleList(),
         'add-map': (_event, _target, app) => void app.manager.createMapForSelection(),
         'select-map': (_event, target, app) => void app.selectMap(target.dataset.mapId),
@@ -87,7 +94,7 @@ export class MappingWindow extends ToolWindowBase {
         'zoom-in': (_event, _target, app) => app.setZoom((app._targetZoom ?? app.zoom) + 0.15),
         'zoom-out': (_event, _target, app) => app.setZoom((app._targetZoom ?? app.zoom) - 0.15),
         'center-view': (_event, _target, app) => app.centerView(),
-        'toggle-follow': (_event, _target, app) => void app.manager.toggleFollow()
+        'fit-map': (_event, _target, app) => app.fitMap()
     };
 
     constructor(manager, options = {}) {
@@ -141,12 +148,12 @@ export class MappingWindow extends ToolWindowBase {
         const statusClass = this.manager.paused
             ? ' is-paused'
             : (this.manager.active ? ' is-recording' : (this.manager.following ? ' is-following' : ''));
-        const status = `<span class="cartographer-mapping-status${statusClass}"><i class="fa-solid fa-circle"></i> ${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.${statusKey}`))}</span>`;
+        this._statusMarkup = `<span class="cartographer-mapping-status${statusClass}"><i class="fa-solid fa-circle"></i> ${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.${statusKey}`))}</span>`;
         return {
             appId: this.id,
             bodyContent,
             showToolBar: true,
-            toolBarLeft: `${status}${this._buildTopActions(model)}`,
+            toolBarLeft: this._buildTopActions(model),
             toolBarRight: this._buildViewControls(model),
             showToolFooter: true,
             toolFooterLeft: this._buildStatusIdentity(model),
@@ -166,7 +173,9 @@ export class MappingWindow extends ToolWindowBase {
         const image = portrait
             ? `<img class="cartographer-mapping-portrait" src="${foundry.utils.escapeHTML(portrait)}" alt="">`
             : '<i class="fa-solid fa-street-view cartographer-mapping-portrait is-placeholder"></i>';
-        return `<span class="cartographer-mapping-token">${image}<span>${name}</span></span>`;
+        // The mode reads as a property of who is being mapped, so it sits with
+        // them in the status bar rather than among the actions up top.
+        return `<span class="cartographer-mapping-token">${image}<span>${name}</span></span>${this._statusMarkup ?? ''}`;
     }
 
     /** How much has been mapped, at the right of the status bar. */
@@ -179,13 +188,12 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     _buildTopActions(model) {
-        const buttons = [];
         if (this.viewMode === 'list') {
-            buttons.push(this._chromeButton({
+            const buttons = [this._chromeButton({
                 action: 'toggle-list',
                 icon: 'fa-solid fa-map',
                 label: model.viewMapLabel
-            }));
+            })];
             if (model.canAdd) {
                 buttons.push(this._chromeButton({
                     action: 'add-map',
@@ -193,29 +201,27 @@ export class MappingWindow extends ToolWindowBase {
                     label: model.addMapLabel
                 }));
             }
-        } else {
-            buttons.push(this._chromeButton({
-                action: 'toggle-list',
-                icon: 'fa-solid fa-list',
-                label: model.listLabel
-            }));
-            buttons.push(this._chromeButton({
-                action: 'toggle-follow',
-                icon: 'fa-solid fa-location-arrow',
-                label: model.followLabel,
-                className: `cartographer-mapping-follow${this.manager.following ? ' is-active' : ''}`,
-                disabled: this.manager.active
-            }));
-            buttons.push(this._chromeButton({
-                action: 'toggle-recording',
-                icon: this.manager.active ? 'fa-solid fa-stop' : 'fa-solid fa-circle',
-                label: model.recordLabel,
-                text: model.recordLabel,
-                className: `cartographer-mapping-record${this.manager.paused ? ' is-paused' : (this.manager.active ? ' is-recording' : '')}`,
-                disabled: !model.canRecord && !this.manager.active
-            }));
+            return `<span class="cartographer-mapping-chrome-actions is-primary">${buttons.join('')}</span>`;
         }
-        return `<span class="cartographer-mapping-chrome-actions is-primary">${buttons.join('')}</span>`;
+
+        const list = this._chromeButton({
+            action: 'toggle-list',
+            icon: 'fa-solid fa-list',
+            label: model.listLabel
+        });
+        // One mode is in effect at a time, so these read as a segmented choice
+        // rather than as three independent toggles.
+        const modes = model.modes.map(mode => this._chromeButton({
+            action: 'set-mode',
+            icon: mode.icon,
+            label: mode.label,
+            text: mode.text,
+            dataset: { mode: mode.id },
+            className: `cartographer-mapping-mode${mode.isCurrent ? ' is-current' : ''}`,
+            disabled: mode.disabled
+        }));
+        return `<span class="cartographer-mapping-chrome-actions">${list}</span>`
+            + `<span class="cartographer-mapping-chrome-actions is-modes">${modes.join('')}</span>`;
     }
 
     /** Zoom and centring, right-aligned in the top bar. */
@@ -223,20 +229,33 @@ export class MappingWindow extends ToolWindowBase {
         if (this.viewMode !== 'map') return '';
         const buttons = [
             this._chromeButton({ action: 'zoom-out', icon: 'fa-solid fa-minus', label: model.zoomOutLabel }),
-            this._chromeButton({ action: 'center-view', icon: 'fa-solid fa-crosshairs', label: model.centerPartyLabel }),
+            this.manager.mode === 'view'
+                ? this._chromeButton({
+                    action: 'fit-map',
+                    icon: 'fa-solid fa-maximize',
+                    label: game.i18n.localize(`${MODULE.ID}.mapping.fitMap`)
+                })
+                : this._chromeButton({
+                    action: 'center-view',
+                    icon: 'fa-solid fa-crosshairs',
+                    label: model.centerPartyLabel
+                }),
             this._chromeButton({ action: 'zoom-in', icon: 'fa-solid fa-plus', label: model.zoomInLabel })
         ];
         return `<span class="cartographer-mapping-zoom-readout">${Math.round(this.zoom * 100)}%</span>`
             + `<span class="cartographer-mapping-chrome-actions is-navigation">${buttons.join('')}</span>`;
     }
 
-    _chromeButton({ action, icon, label, text = '', className = '', disabled = false }) {
+    _chromeButton({ action, icon, label, text = '', className = '', disabled = false, dataset = {} }) {
         const safeAction = foundry.utils.escapeHTML(action);
         const safeLabel = foundry.utils.escapeHTML(label ?? '');
         const allClasses = [className, text ? 'is-labelled' : ''].filter(Boolean).join(' ');
         const classes = allClasses ? ` class="${foundry.utils.escapeHTML(allClasses)}"` : '';
         const caption = text ? `<span>${foundry.utils.escapeHTML(text)}</span>` : '';
-        return `<button type="button"${classes} data-action="${safeAction}" data-tooltip="${safeLabel}" aria-label="${safeLabel}"${disabled ? ' disabled' : ''}><i class="${icon}"></i>${caption}</button>`;
+        const data = Object.entries(dataset)
+            .map(([name, value]) => ` data-${name}="${foundry.utils.escapeHTML(String(value))}"`)
+            .join('');
+        return `<button type="button"${classes} data-action="${safeAction}" data-tooltip="${safeLabel}" aria-label="${safeLabel}"${data}${disabled ? ' disabled' : ''}><i class="${icon}"></i>${caption}</button>`;
     }
 
     /**
@@ -358,11 +377,17 @@ export class MappingWindow extends ToolWindowBase {
             isRecording: this.manager.active,
             isPaused: this.manager.paused,
             zoom: this.zoom,
-            recordLabel: game.i18n.localize(`${MODULE.ID}.mapping.${this.manager.active ? 'stopRecording' : 'startRecording'}`),
+            modes: MAPPING_MODE_BUTTONS.map(mode => ({
+                id: mode.id,
+                icon: mode.icon,
+                label: game.i18n.localize(`${MODULE.ID}.mapping.mode${mode.key}Hint`),
+                text: game.i18n.localize(`${MODULE.ID}.mapping.mode${mode.key}`),
+                isCurrent: this.manager.mode === mode.id,
+                // Recording is the only mode with entry requirements, so it is
+                // the only one that can be unavailable.
+                disabled: mode.id === 'record' && !canRecord && this.manager.mode !== 'record'
+            })),
             listLabel: game.i18n.localize(`${MODULE.ID}.mapping.showMaps`),
-            followLabel: game.i18n.localize(
-                `${MODULE.ID}.mapping.${this.manager.following ? 'followStop' : 'followStart'}`
-            ),
             zoomInLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomIn`),
             zoomOutLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomOut`),
             centerPartyLabel: game.i18n.localize(
@@ -424,7 +449,8 @@ export class MappingWindow extends ToolWindowBase {
                 symbol: symbolDefinition ? {
                     className: `is-${symbol.type}`,
                     markup: symbolDefinition.markup,
-                    label: game.i18n.localize(`${MODULE.ID}.${symbolDefinition.labelKey}`)
+                    // A note's own text is more use than its type name.
+                    label: symbol.text || game.i18n.localize(`${MODULE.ID}.${symbolDefinition.labelKey}`)
                 } : null,
                 isParty
             };
@@ -495,6 +521,17 @@ export class MappingWindow extends ToolWindowBase {
      * neither has been explored, which is what keeps a stored edge from
      * showing up beyond the mapped area.
      */
+    /** Human-readable name for a mapped opening, used for its tooltip. */
+    _featureLabel(feature) {
+        const key = {
+            door: 'featureDoor',
+            'locked-door': 'featureLockedDoor',
+            window: 'featureWindow',
+            'secret-door': 'featureSecretDoor'
+        }[feature];
+        return key ? game.i18n.localize(`${MODULE.ID}.mapping.${key}`) : '';
+    }
+
     _drawableSide(edgeKey, explored) {
         const [orientation, first, second] = edgeKey.split(':');
         const a = Number(first);
@@ -564,6 +601,7 @@ export class MappingWindow extends ToolWindowBase {
             const symbol = DOOR_GLYPH_FEATURES.includes(run.feature)
                 ? this._doorSymbol(run.direction, run.feature, run.span)
                 : this._windowSymbol(run.direction, run.span);
+            symbol.label = this._featureLabel(run.feature);
             target.set(run.key, [...(target.get(run.key) ?? []), symbol]);
         }
 
@@ -572,7 +610,7 @@ export class MappingWindow extends ToolWindowBase {
             if (edge.feature === 'secret-door') {
                 secretDoorSymbolsByCell.set(edge.key, [
                     ...(secretDoorSymbolsByCell.get(edge.key) ?? []),
-                    this._secretDoorSymbol(edge.direction)
+                    { ...this._secretDoorSymbol(edge.direction), label: this._featureLabel('secret-door') }
                 ]);
                 continue;
             }
@@ -787,6 +825,17 @@ export class MappingWindow extends ToolWindowBase {
         viewport.addEventListener('pointercancel', this._handlePanEnd);
         viewport.addEventListener('contextmenu', this._handleMapContextMenu);
 
+        // The camera offset is measured from the viewport's own size, so a
+        // resize has to re-apply it or the map drifts off centre. While
+        // following or recording this also re-centres on the party, so the
+        // token stays put under the resized window.
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = new ResizeObserver(() => {
+            if (this._followArmed && this.manager.getTrackedPositionForCurrentMap()) this.centerOnParty();
+            else this._applyCamera();
+        });
+        this._resizeObserver.observe(viewport);
+
         // The grid element is brand new on every render. Re-establish the view
         // before the browser paints, otherwise the map flashes at the origin.
         const grid = viewport.querySelector('.cartographer-mapping-grid');
@@ -867,19 +916,36 @@ export class MappingWindow extends ToolWindowBase {
         if (typeof contextMenu?.show !== 'function') return;
         const localize = key => game.i18n.localize(`${MODULE.ID}.${key}`);
         const place = type => () => this.manager.placeMapSymbol(type, column, row);
-        const items = MAPPING_SYMBOL_CATEGORIES.map(category => ({
+        // Sorted on the localized name rather than the catalogue order, so the
+        // menu stays alphabetical in whatever language it is read in.
+        const byName = (left, right) => left.name.localeCompare(right.name);
+        const categories = MAPPING_SYMBOL_CATEGORIES.map(category => ({
             name: localize(category.labelKey),
             icon: category.icon,
-            submenu: category.types.map(type => {
-                const definition = getMappingSymbol(type);
-                return {
-                    name: localize(definition.labelKey),
-                    callback: place(type)
-                };
-            })
-        }));
-        // Floor surfaces apply to the whole room, so they sit apart from the
-        // per-square symbols above.
+            submenu: category.types
+                .map(type => ({ name: localize(getMappingSymbol(type).labelKey), callback: place(type) }))
+                .sort(byName)
+        })).sort(byName);
+
+        const items = [];
+        // Delete leads, so the action that undoes a mistake is always in the
+        // same place rather than moving with the rest of the menu.
+        if (this.manager.hasMapSymbol(column, row)) {
+            items.push({
+                name: localize('mapping.removeSymbol'),
+                icon: 'fa-solid fa-trash-can',
+                callback: () => this.manager.removeMapSymbol(column, row)
+            });
+            items.push({ separator: true });
+        }
+        items.push({
+            name: localize('mapping.placeables'),
+            icon: 'fa-solid fa-shapes',
+            submenu: categories
+        });
+
+        // Floor surfaces apply to a whole area rather than one square, so they
+        // sit last, apart from the per-square actions above.
         const currentFloor = this.manager.getFloorType(column, row);
         items.push({ separator: true });
         items.push({
@@ -891,14 +957,6 @@ export class MappingWindow extends ToolWindowBase {
                 callback: () => this.manager.setFloorType(floor.type, column, row)
             }))
         });
-        if (this.manager.hasMapSymbol(column, row)) {
-            items.push({ separator: true });
-            items.push({
-                name: localize('mapping.removeSymbol'),
-                icon: 'fa-solid fa-trash-can',
-                callback: () => this.manager.removeMapSymbol(column, row)
-            });
-        }
         const root = this.element?.ownerDocument?.body ?? document.body;
         contextMenu.show({
             id: `${MODULE.ID}-mapping-cell-context`,
@@ -1021,6 +1079,41 @@ export class MappingWindow extends ToolWindowBase {
         return true;
     }
 
+    /**
+     * Frame the whole map in the window. This is what the view-mode button
+     * does, since with no tracked token there is nothing to centre on.
+     */
+    fitMap() {
+        const explored = this.manager.state.explored ?? [];
+        if (!explored.length) return false;
+        const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
+        if (!viewport?.clientWidth) return false;
+        let minColumn = Infinity;
+        let minRow = Infinity;
+        let maxColumn = -Infinity;
+        let maxRow = -Infinity;
+        for (const key of explored) {
+            const [column, row] = key.split(',').map(Number);
+            if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
+            minColumn = Math.min(minColumn, column);
+            minRow = Math.min(minRow, row);
+            maxColumn = Math.max(maxColumn, column);
+            maxRow = Math.max(maxRow, row);
+        }
+        if (!Number.isFinite(minColumn)) return false;
+        const width = (maxColumn - minColumn + 1) * this._cellSize;
+        const height = (maxRow - minRow + 1) * this._cellSize;
+        const margin = MAP_MARGIN_CELLS * this._cellSize;
+        this.zoom = Math.max(0.4, Math.min(2.5, Math.min(
+            viewport.clientWidth / (width + margin),
+            viewport.clientHeight / (height + margin)
+        )));
+        this._targetZoom = this.zoom;
+        this.centerOnMap();
+        void this.manager.renderWindow();
+        return true;
+    }
+
     centerView() {
         if (!this.centerOnParty()) this.centerOnMap();
     }
@@ -1056,6 +1149,8 @@ export class MappingWindow extends ToolWindowBase {
     _onClose(options) {
         this._pan = null;
         this._targetZoom = null;
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
         this._stopCameraAnimation();
         void this.manager?.onWindowClosed(this);
         return super._onClose?.(options);

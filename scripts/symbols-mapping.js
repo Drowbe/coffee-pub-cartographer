@@ -42,6 +42,13 @@ function ladder(direction = 'up') {
     return boxed(`${line(38, 24, 38, 77)}${line(62, 24, 62, 77)}${rungs}${arrow}${text(direction === 'up' ? 'U' : 'D', 25, 54, 'symbol-small')}`);
 }
 
+/**
+ * A lettered marker. These annotate rather than describe architecture, so they
+ * are drawn as a bare disc instead of the boxed card the built features use.
+ */
+const disc = (value, className = 'symbol-medium') =>
+    `${circle(50, 50, 30)}${text(value, 50, 54, className)}`;
+
 const symbol = (labelKey, markup) => Object.freeze({ labelKey, markup });
 
 export const MAPPING_SYMBOLS = Object.freeze({
@@ -106,6 +113,36 @@ export const MAPPING_SYMBOLS = Object.freeze({
     stove: symbol('mapping.symbolStove', boxed(`${rect(25, 28, 50, 47)}${circle(42, 47, 9, 'symbol-fill-soft')}${circle(60, 47, 7, 'symbol-fill-soft')}${line(33, 65, 67, 65, 'symbol-thin')}`)),
     cage: symbol('mapping.symbolCage', boxed(`${rect(23, 24, 54, 52)}${[32, 41, 50, 59, 68].map(x => line(x, 24, x, 76, 'symbol-thin')).join('')}${line(23, 50, 77, 50, 'symbol-thin')}`)),
 
+    'point-of-interest': symbol('mapping.symbolPointOfInterest', disc('!')),
+    mystery: symbol('mapping.symbolMystery', disc('?')),
+    quest: symbol('mapping.symbolQuest', disc('Q')),
+    codex: symbol('mapping.symbolCodex', disc('C')),
+    note: symbol('mapping.symbolNote', boxed(
+        '<path d="M30 24 L62 24 L70 34 L70 76 L30 76 Z"></path>'
+        + '<path class="symbol-thin" d="M62 24 L62 34 L70 34"></path>'
+        + [46, 55, 64].map(y => line(37, y, 63, y, 'symbol-thin')).join('')
+    )),
+
+    'magic-circle': symbol('mapping.symbolMagicCircle', boxed(
+        `${circle(50, 50, 30)}${circle(50, 50, 22, 'symbol-thin')}`
+        + '<polyline class="symbol-thin" points="50,30 61.8,66.2 31,43.8 69,43.8 38.2,66.2 50,30"></polyline>'
+    )),
+    teleport: symbol('mapping.symbolTeleport', boxed(
+        // An inward spiral reads as a vortex, and stays distinct from the
+        // concentric rings already used for wells and pits.
+        '<path d="M50 21 A29 29 0 1 1 21 50 A22 22 0 1 0 50 28 A15 15 0 1 1 65 43 A8 8 0 1 0 50 43"></path>'
+        + circle(50, 50, 4, 'symbol-fill')
+    )),
+    contraption: symbol('mapping.symbolContraption', boxed(
+        `${circle(50, 50, 21)}${circle(50, 50, 7, 'symbol-fill')}`
+        + [0, 45, 90, 135, 180, 225, 270, 315].map(degrees => {
+            const radians = (degrees * Math.PI) / 180;
+            const inner = { x: 50 + (21 * Math.cos(radians)), y: 50 + (21 * Math.sin(radians)) };
+            const outer = { x: 50 + (30 * Math.cos(radians)), y: 50 + (30 * Math.sin(radians)) };
+            return line(inner.x.toFixed(1), inner.y.toFixed(1), outer.x.toFixed(1), outer.y.toFixed(1));
+        }).join('')
+    )),
+
     // Kept for maps created by early mapper builds.
     stairs: symbol('mapping.symbolStairsUp', stairs('up')),
     treasure: symbol('mapping.symbolTreasure', boxed(`${rect(22, 40, 56, 31)}<path d="M22 43 Q50 22 78 43"></path>${line(22, 49, 78, 49, 'symbol-thin')}${rect(45, 45, 10, 12, 'symbol-fill')}`))
@@ -114,18 +151,13 @@ export const MAPPING_SYMBOLS = Object.freeze({
 export const MAPPING_SYMBOL_TYPES = new Set(Object.keys(MAPPING_SYMBOLS));
 
 export const MAPPING_SYMBOL_CATEGORIES = Object.freeze([
-    { labelKey: 'mapping.categoryStairsLadders', icon: 'fa-solid fa-stairs', types: ['stairs-up', 'stairs-down', 'spiral-stairs-up', 'spiral-stairs-down', 'ladder-up', 'ladder-down', 'slide'] },
-    { labelKey: 'mapping.categoryTrapsMechanisms', icon: 'fa-solid fa-gears', types: ['trap-door-floor', 'trap-door-ceiling', 'secret-trap-door', 'trap', 'trigger', 'lever', 'stairs-slide-trap'] },
-    { labelKey: 'mapping.categoryPitsShafts', icon: 'fa-regular fa-square', types: ['open-pit-square', 'covered-pit-square', 'open-pit-round', 'covered-pit-round', 'hole-ceiling', 'hole-floor'] },
-    { labelKey: 'mapping.categoryWaterFeatures', icon: 'fa-solid fa-water', types: ['pool', 'fountain', 'well-square', 'well-round'] },
-    { labelKey: 'mapping.categoryFireFeatures', icon: 'fa-solid fa-fire-flame-curved', types: ['fire-pit', 'fireplace'] },
-    { labelKey: 'mapping.categoryStructuralFeatures', icon: 'fa-solid fa-landmark', types: ['dais', 'altar', 'pillar-square', 'pillar-round', 'tunnel-subterranean'] },
-    { labelKey: 'mapping.categorySeating', icon: 'fa-solid fa-chair', types: ['chair', 'padded-chair', 'throne', 'stool', 'bench', 'hammock'] },
-    { labelKey: 'mapping.categoryTablesWorkspaces', icon: 'fa-solid fa-table', types: ['desk', 'table'] },
-    { labelKey: 'mapping.categoryStorage', icon: 'fa-solid fa-box-archive', types: ['bookcase-cupboard', 'chest', 'cask', 'sack'] },
-    { labelKey: 'mapping.categorySleeping', icon: 'fa-solid fa-bed', types: ['bed'] },
-    { labelKey: 'mapping.categoryDecor', icon: 'fa-solid fa-monument', types: ['statue-small-medium', 'statue-large', 'curtain'] },
-    { labelKey: 'mapping.categoryUtility', icon: 'fa-solid fa-toolbox', types: ['stove', 'cage'] }
+    { labelKey: 'mapping.categoryAccess', icon: 'fa-solid fa-stairs', types: ['stairs-up', 'stairs-down', 'spiral-stairs-up', 'spiral-stairs-down', 'ladder-up', 'ladder-down', 'slide', 'tunnel-subterranean'] },
+    { labelKey: 'mapping.categoryArcane', icon: 'fa-solid fa-wand-sparkles', types: ['magic-circle', 'teleport'] },
+    { labelKey: 'mapping.categoryHazards', icon: 'fa-solid fa-triangle-exclamation', types: ['trap', 'trap-door-floor', 'trap-door-ceiling', 'secret-trap-door', 'stairs-slide-trap', 'trigger', 'lever', 'contraption', 'open-pit-square', 'covered-pit-square', 'open-pit-round', 'covered-pit-round', 'hole-ceiling', 'hole-floor'] },
+    { labelKey: 'mapping.categoryMarkers', icon: 'fa-solid fa-bookmark', types: ['point-of-interest', 'mystery', 'quest', 'codex', 'note'] },
+    { labelKey: 'mapping.categoryStructures', icon: 'fa-solid fa-landmark', types: ['dais', 'altar', 'pillar-square', 'pillar-round', 'statue-small-medium', 'statue-large'] },
+    { labelKey: 'mapping.categoryWaterFire', icon: 'fa-solid fa-fire-flame-curved', types: ['pool', 'fountain', 'well-square', 'well-round', 'fire-pit', 'fireplace'] },
+    { labelKey: 'mapping.categoryFurnishings', icon: 'fa-solid fa-couch', types: ['chair', 'padded-chair', 'throne', 'stool', 'bench', 'hammock', 'desk', 'table', 'bookcase-cupboard', 'chest', 'cask', 'sack', 'bed', 'curtain', 'stove', 'cage', 'treasure'] }
 ]);
 
 export function getMappingSymbol(type) {
@@ -133,15 +165,27 @@ export function getMappingSymbol(type) {
 }
 
 /**
+ * Symbols that carry a line of the player's own text, shown as their tooltip.
+ * A later phase can hand these off to the notes system; the stored text is the
+ * part worth capturing now.
+ */
+export const MAPPING_ANNOTATED_SYMBOLS = new Set(['note']);
+/** Longest note text kept on a symbol. */
+export const MAPPING_SYMBOL_TEXT_LIMIT = 240;
+
+/**
  * Floor surfaces, applied to a whole contiguous area rather than one square.
  * "default" carries no pattern and is how a floor is cleared again.
  */
 export const MAPPING_FLOOR_TYPES = Object.freeze([
     { type: 'default', labelKey: 'mapping.floorDefault', icon: 'fa-regular fa-square' },
+    { type: 'brick', labelKey: 'mapping.floorBrick', icon: 'fa-solid fa-table-cells-large' },
+    { type: 'cobblestone', labelKey: 'mapping.floorCobblestone', icon: 'fa-solid fa-circle-nodes' },
     { type: 'dirt', labelKey: 'mapping.floorDirt', icon: 'fa-solid fa-mound' },
-    { type: 'rock', labelKey: 'mapping.floorRock', icon: 'fa-solid fa-gem' },
-    { type: 'wood', labelKey: 'mapping.floorWood', icon: 'fa-solid fa-grip-lines' },
-    { type: 'tile', labelKey: 'mapping.floorTile', icon: 'fa-solid fa-table-cells' }
+    { type: 'grass', labelKey: 'mapping.floorGrass', icon: 'fa-solid fa-seedling' },
+    { type: 'rock', labelKey: 'mapping.floorRock', icon: 'fa-solid fa-circle' },
+    { type: 'tile', labelKey: 'mapping.floorTile', icon: 'fa-solid fa-table-cells' },
+    { type: 'wood', labelKey: 'mapping.floorWood', icon: 'fa-solid fa-grip-lines' }
 ]);
 
 export const MAPPING_FLOOR_TYPE_IDS = new Set(MAPPING_FLOOR_TYPES.map(floor => floor.type));

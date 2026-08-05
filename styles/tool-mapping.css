@@ -205,60 +205,85 @@
     box-shadow: inset -1px -1px 0 var(--cartographer-map-floor-grid);
 }
 
-/* Floor surfaces. Each square phases its pattern by its own grid position, the
+/* Floor surfaces are painted by a masked overlay rather than a background, so
+   the square keeps its paper underneath and the pattern still takes its colour
+   from the theme. Each square phases the mask by its own grid position, the
    same trick the hatching uses, so a surface reads as one continuous material
    across a room instead of restarting at every square. */
-.cartographer-mapping-cell.is-explored[class*="is-floor-"] {
-    background-repeat: repeat;
-    background-position:
+.cartographer-mapping-cell.is-explored[class*="is-floor-"]::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-color: var(--cartographer-map-floor-fill);
+    -webkit-mask-repeat: repeat;
+    mask-repeat: repeat;
+    -webkit-mask-position:
         calc(var(--cartographer-floor-x, 0) * var(--cartographer-map-cell-size) * -1)
         calc(var(--cartographer-floor-y, 0) * var(--cartographer-map-cell-size) * -1);
+    mask-position:
+        calc(var(--cartographer-floor-x, 0) * var(--cartographer-map-cell-size) * -1)
+        calc(var(--cartographer-floor-y, 0) * var(--cartographer-map-cell-size) * -1);
+    pointer-events: none;
 }
 
-.cartographer-mapping-cell.is-floor-dirt {
-    background-image:
-        radial-gradient(circle at 25% 35%, var(--cartographer-map-floor-fill) 0.6px, transparent 0.7px),
-        radial-gradient(circle at 70% 80%, var(--cartographer-map-floor-fill) 0.5px, transparent 0.6px);
-    background-size: 7px 7px, 11px 11px;
+/* Grit gathered into clusters rather than spread evenly, so it reads as
+   scuffed ground the way the grass tufts read as growth. */
+.cartographer-mapping-cell.is-floor-dirt::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cg fill='%23000'%3E%3Ccircle cx='6' cy='6' r='1.4'/%3E%3Ccircle cx='9.4' cy='7.6' r='0.85'/%3E%3Ccircle cx='6.8' cy='9.3' r='0.6'/%3E%3Ccircle cx='4.2' cy='8.2' r='0.5'/%3E%3Ccircle cx='18' cy='17' r='1.5'/%3E%3Ccircle cx='21' cy='18.6' r='0.9'/%3E%3Ccircle cx='18.7' cy='20.4' r='0.6'/%3E%3Ccircle cx='15.6' cy='18.9' r='0.55'/%3E%3Ccircle cx='20' cy='5' r='1.1'/%3E%3Ccircle cx='22.4' cy='6.6' r='0.6'/%3E%3Ccircle cx='6' cy='20' r='1'/%3E%3Ccircle cx='3.6' cy='21.4' r='0.55'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cg fill='%23000'%3E%3Ccircle cx='6' cy='6' r='1.4'/%3E%3Ccircle cx='9.4' cy='7.6' r='0.85'/%3E%3Ccircle cx='6.8' cy='9.3' r='0.6'/%3E%3Ccircle cx='4.2' cy='8.2' r='0.5'/%3E%3Ccircle cx='18' cy='17' r='1.5'/%3E%3Ccircle cx='21' cy='18.6' r='0.9'/%3E%3Ccircle cx='18.7' cy='20.4' r='0.6'/%3E%3Ccircle cx='15.6' cy='18.9' r='0.55'/%3E%3Ccircle cx='20' cy='5' r='1.1'/%3E%3Ccircle cx='22.4' cy='6.6' r='0.6'/%3E%3Ccircle cx='6' cy='20' r='1'/%3E%3Ccircle cx='3.6' cy='21.4' r='0.55'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 26px 26px;
+    mask-size: 26px 26px;
 }
 
-.cartographer-mapping-cell.is-floor-rock {
-    background-image:
-        repeating-linear-gradient(
-            45deg,
-            var(--cartographer-map-floor-fill) 0, var(--cartographer-map-floor-fill) 0.8px,
-            transparent 0.8px, transparent 9px
-        ),
-        repeating-linear-gradient(
-            -45deg,
-            var(--cartographer-map-floor-fill) 0, var(--cartographer-map-floor-fill) 0.8px,
-            transparent 0.8px, transparent 13px
-        );
-    background-size: 12.7279px 12.7279px, 18.3848px 18.3848px;
+/* Tufts, a few to a square. */
+.cartographer-mapping-cell.is-floor-grass::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M6 19 L5 13 M6 19 L7 13 M6 19 L9 15'/%3E%3Cpath d='M18 24 L17 18 M18 24 L19 18 M18 24 L21 20'/%3E%3Cpath d='M13 10 L12 5 M13 10 L14 5 M13 10 L16 7'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M6 19 L5 13 M6 19 L7 13 M6 19 L9 15'/%3E%3Cpath d='M18 24 L17 18 M18 24 L19 18 M18 24 L21 20'/%3E%3Cpath d='M13 10 L12 5 M13 10 L14 5 M13 10 L16 7'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 26px 26px;
+    mask-size: 26px 26px;
 }
 
-.cartographer-mapping-cell.is-floor-wood {
-    background-image: repeating-linear-gradient(
-        90deg,
-        var(--cartographer-map-floor-fill) 0, var(--cartographer-map-floor-fill) 0.9px,
-        transparent 0.9px, transparent 6px
-    );
-    background-size: 6px 6px;
+/* Clustered boulders in assorted sizes. */
+.cartographer-mapping-cell.is-floor-rock::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Ccircle cx='7' cy='8' r='3.4'/%3E%3Ccircle cx='13' cy='12' r='1.9'/%3E%3Ccircle cx='4' cy='14' r='1.4'/%3E%3Ccircle cx='21' cy='21' r='3.8'/%3E%3Ccircle cx='26' cy='16' r='1.7'/%3E%3Ccircle cx='18' cy='26' r='2.3'/%3E%3Ccircle cx='25' cy='5' r='2.1'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Ccircle cx='7' cy='8' r='3.4'/%3E%3Ccircle cx='13' cy='12' r='1.9'/%3E%3Ccircle cx='4' cy='14' r='1.4'/%3E%3Ccircle cx='21' cy='21' r='3.8'/%3E%3Ccircle cx='26' cy='16' r='1.7'/%3E%3Ccircle cx='18' cy='26' r='2.3'/%3E%3Ccircle cx='25' cy='5' r='2.1'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 30px 30px;
+    mask-size: 30px 30px;
 }
 
-.cartographer-mapping-cell.is-floor-tile {
-    background-image:
-        repeating-linear-gradient(
-            0deg,
-            var(--cartographer-map-floor-fill) 0, var(--cartographer-map-floor-fill) 0.9px,
-            transparent 0.9px, transparent 9px
-        ),
-        repeating-linear-gradient(
-            90deg,
-            var(--cartographer-map-floor-fill) 0, var(--cartographer-map-floor-fill) 0.9px,
-            transparent 0.9px, transparent 9px
-        );
-    background-size: 9px 9px, 9px 9px;
+/* Packed cobbles, offset row to row. */
+.cartographer-mapping-cell.is-floor-cobblestone::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='16' viewBox='0 0 24 16'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cellipse cx='6' cy='4' rx='5' ry='3'/%3E%3Cellipse cx='18' cy='4' rx='5' ry='3'/%3E%3Cellipse cx='0' cy='12' rx='5' ry='3'/%3E%3Cellipse cx='12' cy='12' rx='5' ry='3'/%3E%3Cellipse cx='24' cy='12' rx='5' ry='3'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='16' viewBox='0 0 24 16'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cellipse cx='6' cy='4' rx='5' ry='3'/%3E%3Cellipse cx='18' cy='4' rx='5' ry='3'/%3E%3Cellipse cx='0' cy='12' rx='5' ry='3'/%3E%3Cellipse cx='12' cy='12' rx='5' ry='3'/%3E%3Cellipse cx='24' cy='12' rx='5' ry='3'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 24px 16px;
+    mask-size: 24px 16px;
+}
+
+/* Running bond, the courses staggered by half a brick. */
+.cartographer-mapping-cell.is-floor-brick::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='12' viewBox='0 0 24 12'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H24 M0 6.5 H24'/%3E%3Cpath d='M0.5 0.5 V6.5 M12.5 0.5 V6.5'/%3E%3Cpath d='M6.5 6.5 V12 M18.5 6.5 V12'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='12' viewBox='0 0 24 12'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H24 M0 6.5 H24'/%3E%3Cpath d='M0.5 0.5 V6.5 M12.5 0.5 V6.5'/%3E%3Cpath d='M6.5 6.5 V12 M18.5 6.5 V12'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 24px 12px;
+    mask-size: 24px 12px;
+}
+
+/* Long boards with occasional butt joints. */
+.cartographer-mapping-cell.is-floor-wood::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='12' viewBox='0 0 36 12'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H36 M0 6.5 H36'/%3E%3Cpath d='M9.5 0.5 V6.5 M25.5 6.5 V12'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='12' viewBox='0 0 36 12'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H36 M0 6.5 H36'/%3E%3Cpath d='M9.5 0.5 V6.5 M25.5 6.5 V12'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 36px 12px;
+    mask-size: 36px 12px;
+}
+
+.cartographer-mapping-cell.is-floor-tile::before {
+    -webkit-mask-image:
+        repeating-linear-gradient(0deg, #000 0, #000 0.9px, transparent 0.9px, transparent 9px),
+        repeating-linear-gradient(90deg, #000 0, #000 0.9px, transparent 0.9px, transparent 9px);
+    mask-image:
+        repeating-linear-gradient(0deg, #000 0, #000 0.9px, transparent 0.9px, transparent 9px),
+        repeating-linear-gradient(90deg, #000 0, #000 0.9px, transparent 0.9px, transparent 9px);
+    -webkit-mask-size: 9px 9px;
+    mask-size: 9px 9px;
 }
 
 .cartographer-mapping-cell.is-explored.is-new {
@@ -397,6 +422,10 @@
     width: 80%;
     height: 80%;
     overflow: visible;
+    /* Solid paper behind the glyph, so a floor surface underneath cannot show
+       through its open areas and muddle the linework. */
+    border-radius: 3px;
+    background: var(--cartographer-map-paper);
     /* Hit-testable so the symbol can carry a tooltip naming it. Pan and the
        cell context menu both still work: they listen on the viewport and
        resolve the cell with closest(), so events bubbling from here land the
@@ -604,14 +633,43 @@
     background: color-mix(in srgb, var(--blacksmith-status-danger) 18%, var(--blacksmith-tool-field-background));
 }
 
-.cartographer-mapping-chrome-actions button.cartographer-mapping-follow.is-active {
+/* The three modes read as one segmented choice, so they sit flush together and
+   only the current one is filled in. */
+.cartographer-mapping-chrome-actions.is-modes {
+    margin-left: 4px;
+    padding-left: 8px;
+    gap: 2px;
+    border-left: 1px solid var(--blacksmith-tool-divider);
+}
+
+.cartographer-mapping-chrome-actions button.cartographer-mapping-mode {
+    color: var(--blacksmith-tool-text-muted);
+}
+
+.cartographer-mapping-chrome-actions button.cartographer-mapping-mode.is-current {
     border-color: var(--blacksmith-tool-accent);
     background: var(--blacksmith-tool-surface-selected);
     color: var(--blacksmith-tool-accent);
 }
 
+/* Recording is the one mode that announces itself in colour. */
+.cartographer-mapping-chrome-actions button.cartographer-mapping-mode[data-mode="record"].is-current {
+    border-color: var(--blacksmith-status-danger);
+    background: color-mix(in srgb, var(--blacksmith-status-danger) 18%, var(--blacksmith-tool-field-background));
+    color: var(--blacksmith-status-danger);
+}
+
 .cartographer-mapping-status.is-following i {
     color: var(--blacksmith-tool-accent);
+}
+
+/* Openings carry a tooltip, so they need to be hit-testable. Pan and the cell
+   context menu are unaffected: both listen on the viewport and resolve the
+   square with closest(), so events bubbling from here land the same way. */
+.cartographer-mapping-door-symbol,
+.cartographer-mapping-window-symbol,
+.cartographer-mapping-secret-door-symbol {
+    pointer-events: auto;
 }
 
 /* The create card leads the list, so it reads as an action rather than a map. */
