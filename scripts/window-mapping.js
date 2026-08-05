@@ -277,7 +277,8 @@ export class MappingWindow extends ToolWindowBase {
                     || mappedGeometry.secretDoorSymbolsByCell.has(key),
                 symbol: symbolDefinition ? {
                     className: `is-${symbol.type}`,
-                    markup: symbolDefinition.markup
+                    markup: symbolDefinition.markup,
+                    label: game.i18n.localize(`${MODULE.ID}.${symbolDefinition.labelKey}`)
                 } : null,
                 isParty
             };
@@ -329,7 +330,12 @@ export class MappingWindow extends ToolWindowBase {
                 cells.push({
                     ring,
                     gridColumn: column - originColumn + 1,
-                    gridRow: row - originRow + 1
+                    gridRow: row - originRow + 1,
+                    // Absolute cell coordinates. CSS shifts each tile's pattern
+                    // by its own position so the hatching is phased to one
+                    // continuous lattice instead of restarting per square.
+                    patternX: column,
+                    patternY: row
                 });
             }
             frontier = next;
@@ -402,9 +408,13 @@ export class MappingWindow extends ToolWindowBase {
         };
         return {
             transform: transforms[direction] ?? transforms.north,
+            // The wall stays unbroken. A secret door reads as solid wall on an
+            // old-school map -- it is annotated, not opened -- and the previous
+            // glyph left a gap in the stroke, which drew it as an ordinary
+            // doorway. The S sits just inside the room instead, which lands
+            // correctly for all four edges under these transforms.
             lines: [
-                { points: '0,0 38,0', echoPoints: '0,-1.2 38,0.8' },
-                { points: '62,0 100,0', echoPoints: '62,-0.9 100,1' }
+                { points: '0,0 100,0', echoPoints: '0,-1.1 100,0.9' }
             ]
         };
     }
