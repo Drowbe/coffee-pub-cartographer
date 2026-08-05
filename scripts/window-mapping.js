@@ -3,7 +3,7 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
-import { getMappingSymbol, MAPPING_SYMBOL_CATEGORIES } from './symbols-mapping.js';
+import { getMappingSymbol, MAPPING_FLOOR_TYPES, MAPPING_SYMBOL_CATEGORIES } from './symbols-mapping.js';
 
 const ToolWindowBase = game.modules.get('coffee-pub-blacksmith')?.api?.BlacksmithToolWindowBaseV2 ?? class {
     static DEFAULT_OPTIONS = {};
@@ -261,6 +261,7 @@ export class MappingWindow extends ToolWindowBase {
         const cells = coordinates.map(([column, row]) => {
             const key = `${column},${row}`;
             const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
+            const floor = this.manager.state.floors?.[key];
             const isNew = newTiles.has(key);
             const symbol = placedSymbols.get(key);
             const symbolDefinition = symbol ? getMappingSymbol(symbol.type) : null;
@@ -268,7 +269,11 @@ export class MappingWindow extends ToolWindowBase {
                 key,
                 gridColumn: column - originColumn + 1,
                 gridRow: row - originRow + 1,
-                className: `is-explored${isNew ? ' is-new' : ''}${isParty ? ' is-party' : ''}`,
+                // Absolute coordinates, so a floor surface can phase its
+                // pattern to a single lattice across the whole room.
+                patternX: column,
+                patternY: row,
+                className: `is-explored${isNew ? ' is-new' : ''}${isParty ? ' is-party' : ''}${floor ? ` is-floor-${floor}` : ''}`,
                 segments: mappedGeometry.segmentsByCell.get(key) ?? [],
                 doorSymbols: mappedGeometry.doorSymbolsByCell.get(key) ?? [],
                 secretDoorSymbols: mappedGeometry.secretDoorSymbolsByCell.get(key) ?? [],
@@ -641,6 +646,19 @@ export class MappingWindow extends ToolWindowBase {
                 };
             })
         }));
+        // Floor surfaces apply to the whole room, so they sit apart from the
+        // per-square symbols above.
+        const currentFloor = this.manager.getFloorType(column, row);
+        items.push({ separator: true });
+        items.push({
+            name: localize('mapping.floorType'),
+            icon: 'fa-solid fa-fill-drip',
+            submenu: MAPPING_FLOOR_TYPES.map(floor => ({
+                name: `${localize(floor.labelKey)}${floor.type === currentFloor ? ' ✓' : ''}`,
+                icon: floor.icon,
+                callback: () => this.manager.setFloorType(floor.type, column, row)
+            }))
+        });
         if (this.manager.hasMapSymbol(column, row)) {
             items.push({ separator: true });
             items.push({

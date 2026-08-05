@@ -131,3 +131,17 @@ export const MAPPING_SYMBOL_CATEGORIES = Object.freeze([
 export function getMappingSymbol(type) {
     return MAPPING_SYMBOLS[type] ?? null;
 }
+
+/**
+ * Floor surfaces, applied to a whole contiguous area rather than one square.
+ * "default" carries no pattern and is how a floor is cleared again.
+ */
+export const MAPPING_FLOOR_TYPES = Object.freeze([
+    { type: 'default', labelKey: 'mapping.floorDefault', icon: 'fa-regular fa-square' },
+    { type: 'dirt', labelKey: 'mapping.floorDirt', icon: 'fa-solid fa-mound' },
+    { type: 'rock', labelKey: 'mapping.floorRock', icon: 'fa-solid fa-gem' },
+    { type: 'wood', labelKey: 'mapping.floorWood', icon: 'fa-solid fa-grip-lines' },
+    { type: 'tile', labelKey: 'mapping.floorTile', icon: 'fa-solid fa-table-cells' }
+]);
+
+export const MAPPING_FLOOR_TYPE_IDS = new Set(MAPPING_FLOOR_TYPES.map(floor => floor.type));

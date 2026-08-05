@@ -20,6 +20,7 @@
     --cartographer-map-void: rgba(112, 85, 49, 0.08);
     --cartographer-map-void-grid: rgba(112, 85, 49, 0.16);
     --cartographer-map-hatch: rgba(23, 19, 16, 0.92);
+    --cartographer-map-floor-fill: rgba(23, 19, 16, 0.34);
 
     --cartographer-map-party: #c15701;
 }
@@ -34,6 +35,7 @@
     --cartographer-map-void: rgba(0, 0, 0, 0.25);
     --cartographer-map-void-grid: rgba(236, 227, 208, 0.08);
     --cartographer-map-hatch: rgba(236, 227, 208, 0.72);
+    --cartographer-map-floor-fill: rgba(236, 227, 208, 0.26);
     --cartographer-map-party: #e8a34a;
 }
 
@@ -49,6 +51,7 @@
     --cartographer-map-void: transparent;
     --cartographer-map-void-grid: rgba(255, 255, 255, 0.07);
     --cartographer-map-hatch: rgba(242, 234, 217, 0.62);
+    --cartographer-map-floor-fill: rgba(242, 234, 217, 0.24);
     --cartographer-map-party: rgba(240, 214, 160, 0.95);
 }
 
@@ -140,15 +143,14 @@
     background-size: var(--cartographer-map-cell-size) var(--cartographer-map-cell-size);
 }
 
-/* Solid rock around the mapped area, in the pen-and-ink convention: dense
-   hatching packed against the walls, breaking up into stipple as it moves out
-   so the band ends in scattered rock rather than a hard edge.
+/* Solid rock around the mapped area, in the pen-and-ink convention: strokes
+   packed hard against the walls, thinning as they move out so the band trails
+   off rather than stopping at an edge.
 
-   Every tile shifts its pattern by its own grid position, so the strokes are
-   phased to one continuous lattice across the whole map. Without that each
-   square restarts its own gradient and the hatching visibly fails to meet at
-   the seams. The tile sizes are deliberately coprime-ish with the 36px cell so
-   the repeat does not land on the grid and read as mechanical. */
+   Every tile shifts its pattern by its own grid position, which phases all of
+   them to one lattice spanning the whole map. Without that each square starts
+   its own gradient at its own corner and the strokes visibly fail to meet at
+   the seams. */
 .cartographer-mapping-hatch {
     pointer-events: none;
     background-repeat: repeat;
@@ -157,31 +159,42 @@
         calc(var(--cartographer-hatch-y) * var(--cartographer-map-cell-size) * -1);
 }
 
+/* Each ring is the same 45-degree pen stroke, thinning outward.
+   background-size must be the stripe period times sqrt(2): that is the distance
+   over which a 45-degree pattern repeats along an axis, so the tile meets
+   itself seamlessly. Any other size and the strokes break at every tile edge. */
+
 /* Hard against the wall: close-packed strokes, near-full ink. */
 .cartographer-mapping-hatch.is-ring-1 {
-    background-image:
-        linear-gradient(45deg, var(--cartographer-map-hatch) 12%, transparent 12%),
-        linear-gradient(45deg, var(--cartographer-map-hatch) 12%, transparent 12%);
-    background-size: 5px 5px, 7px 7px;
-    opacity: 0.92;
+    background-image: repeating-linear-gradient(
+        45deg,
+        var(--cartographer-map-hatch) 0, var(--cartographer-map-hatch) 1.2px,
+        transparent 1.2px, transparent 5px
+    );
+    background-size: 7.0711px 7.0711px;
+    opacity: 0.95;
 }
 
-/* Breaking up: the strokes thin out and the first rock specks appear. */
+/* Thinning out as it leaves the wall. */
 .cartographer-mapping-hatch.is-ring-2 {
-    background-image:
-        linear-gradient(45deg, var(--cartographer-map-hatch) 9%, transparent 9%),
-        radial-gradient(circle at 30% 70%, var(--cartographer-map-hatch) 0.7px, transparent 0.8px);
-    background-size: 8px 8px, 9px 9px;
-    opacity: 0.62;
+    background-image: repeating-linear-gradient(
+        45deg,
+        var(--cartographer-map-hatch) 0, var(--cartographer-map-hatch) 1px,
+        transparent 1px, transparent 7px
+    );
+    background-size: 9.8995px 9.8995px;
+    opacity: 0.7;
 }
 
-/* Scattered rock only, so the band dissolves instead of stopping. */
+/* Sparse strokes so the band trails off rather than stopping at an edge. */
 .cartographer-mapping-hatch.is-ring-3 {
-    background-image:
-        radial-gradient(circle at 35% 65%, var(--cartographer-map-hatch) 0.7px, transparent 0.8px),
-        radial-gradient(circle at 75% 25%, var(--cartographer-map-hatch) 0.5px, transparent 0.6px);
-    background-size: 11px 11px, 13px 13px;
-    opacity: 0.4;
+    background-image: repeating-linear-gradient(
+        45deg,
+        var(--cartographer-map-hatch) 0, var(--cartographer-map-hatch) 1px,
+        transparent 1px, transparent 9px
+    );
+    background-size: 12.7279px 12.7279px;
+    opacity: 0.42;
 }
 
 .cartographer-mapping-cell {
@@ -193,6 +206,62 @@
 .cartographer-mapping-cell.is-explored {
     background: var(--cartographer-map-paper);
     box-shadow: inset -1px -1px 0 var(--cartographer-map-floor-grid);
+}
+
+/* Floor surfaces. Each square phases its pattern by its own grid position, the
+   same trick the hatching uses, so a surface reads as one continuous material
+   across a room instead of restarting at every square. */
+.cartographer-mapping-cell.is-explored[class*="is-floor-"] {
+    background-repeat: repeat;
+    background-position:
+        calc(var(--cartographer-floor-x, 0) * var(--cartographer-map-cell-size) * -1)
+        calc(var(--cartographer-floor-y, 0) * var(--cartographer-map-cell-size) * -1);
+}
+
+.cartographer-mapping-cell.is-floor-dirt {
+    background-image:
+        radial-gradient(circle at 25% 35%, var(--cartographer-map-floor-fill) 0.6px, transparent 0.7px),
+        radial-gradient(circle at 70% 80%, var(--cartographer-map-floor-fill) 0.5px, transparent 0.6px);
+    background-size: 7px 7px, 11px 11px;
+}
+
+.cartographer-mapping-cell.is-floor-rock {
+    background-image:
+        repeating-linear-gradient(
+            45deg,
+            var(--cartographer-map-floor-fill) 0, var(--cartographer-map-floor-fill) 0.8px,
+            transparent 0.8px, transparent 9px
+        ),
+        repeating-linear-gradient(
+            -45deg,
+            var(--cartographer-map-floor-fill) 0, var(--cartographer-map-floor-fill) 0.8px,
+            transparent 0.8px, transparent 13px
+        );
+    background-size: 12.7279px 12.7279px, 18.3848px 18.3848px;
+}
+
+.cartographer-mapping-cell.is-floor-wood {
+    background-image: repeating-linear-gradient(
+        90deg,
+        var(--cartographer-map-floor-fill) 0, var(--cartographer-map-floor-fill) 0.9px,
+        transparent 0.9px, transparent 6px
+    );
+    background-size: 6px 6px;
+}
+
+.cartographer-mapping-cell.is-floor-tile {
+    background-image:
+        repeating-linear-gradient(
+            0deg,
+            var(--cartographer-map-floor-fill) 0, var(--cartographer-map-floor-fill) 0.9px,
+            transparent 0.9px, transparent 9px
+        ),
+        repeating-linear-gradient(
+            90deg,
+            var(--cartographer-map-floor-fill) 0, var(--cartographer-map-floor-fill) 0.9px,
+            transparent 0.9px, transparent 9px
+        );
+    background-size: 9px 9px, 9px 9px;
 }
 
 .cartographer-mapping-cell.is-explored.is-new {

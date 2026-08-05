@@ -774,6 +774,50 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
     return { features: observed, sources };
 }
 
+/**
+ * The explored squares reachable from a starting square without crossing a
+ * recorded boundary — one room, in other words.
+ *
+ * Every recorded feature blocks, doorways included: a doorway is where one
+ * floor surface stops and the next begins, so a room's flooring should not run
+ * out into the corridor it opens onto. This reads only the party's own record,
+ * never live scene geometry, so it cannot spread through a wall they have not
+ * discovered yet.
+ */
+function contiguousFloorRegion(exploredKeys, features, start, limit = 4000) {
+    const explored = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
+    const startKey = `${start.column},${start.row}`;
+    if (!explored.has(startKey)) return [];
+
+    const blocked = (fromKey, from, to) => {
+        const direction = directionBetween(from, to);
+        if (!direction) return true;
+        const opposite = oppositeDirection(direction);
+        const here = features?.[fromKey] ?? [];
+        const there = features?.[`${to.column},${to.row}`] ?? [];
+        return here.some(code => code.endsWith(`:${direction}`))
+            || there.some(code => code.endsWith(`:${opposite}`));
+    };
+
+    const region = [startKey];
+    const seen = new Set([startKey]);
+    const queue = [start];
+    while (queue.length && region.length < limit) {
+        const current = queue.shift();
+        const currentKey = `${current.column},${current.row}`;
+        for (const [columnOffset, rowOffset] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+            const next = { column: current.column + columnOffset, row: current.row + rowOffset };
+            const nextKey = `${next.column},${next.row}`;
+            if (seen.has(nextKey) || !explored.has(nextKey)) continue;
+            if (blocked(currentKey, current, next)) continue;
+            seen.add(nextKey);
+            region.push(nextKey);
+            queue.push(next);
+        }
+    }
+    return region;
+}
+
 function normalizeFeatures(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
     const normalized = {};
@@ -982,6 +1026,7 @@ export {
     classifyWall,
     directionBetween,
     flattenFeatureSources,
+    contiguousFloorRegion,
     gridTravelPath,
     mergeFeatureSources,
     mergeFeatures,

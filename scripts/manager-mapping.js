@@ -13,13 +13,14 @@ import {
     mergeSourceFeatures,
     normalizeFeatureSources,
     normalizeFeatures,
+    contiguousFloorRegion,
     observeCrossedSecretDoors,
     observeVisibleFeatures,
     subtractFeatureSources,
     visibleRevealKeys
 } from './utils-mapping.js';
 import { notify } from './utils-toast.js';
-import { MAPPING_SYMBOL_TYPES } from './symbols-mapping.js';
+import { MAPPING_FLOOR_TYPE_IDS, MAPPING_SYMBOL_TYPES } from './symbols-mapping.js';
 
 const FLAG_KEY = 'mapping';
 const TOOL_ID = `${MODULE.ID}-mapping`;
@@ -82,6 +83,7 @@ class MappingManager {
             features: {},
             featureSources: {},
             symbols: [],
+            floors: {},
             lastPosition: null,
             createdAt: 0,
             updatedAt: 0,
@@ -340,6 +342,7 @@ class MappingManager {
             features: normalizeFeatures(raw.features),
             featureSources: normalizeFeatureSources(raw.featureSources),
             symbols: this._normalizeSymbols(raw.symbols),
+            floors: this._normalizeFloors(raw.floors),
             lastPosition: this._normalizePosition(raw.lastPosition),
             createdAt: Number(raw.createdAt) || Number(raw.updatedAt) || 0,
             updatedAt: Number(raw.updatedAt) || 0,
@@ -650,6 +653,24 @@ class MappingManager {
                 createdAt: Number(symbol.createdAt) || 0,
                 createdBy: typeof symbol.createdBy === 'string' ? symbol.createdBy : null
             });
+        }
+        return normalized;
+    }
+
+    /**
+     * Floors are additive to the record rather than a new schema version: an
+     * older client simply ignores the key, and a record written before floors
+     * existed normalizes to none.
+     */
+    _normalizeFloors(floors) {
+        if (!floors || typeof floors !== 'object') return {};
+        const normalized = {};
+        for (const [key, type] of Object.entries(floors)) {
+            if (!/^-?\d+,-?\d+$/.test(key)) continue;
+            const value = String(type ?? '');
+            // "default" is the absence of a floor, so it is never stored.
+            if (value === 'default' || !MAPPING_FLOOR_TYPE_IDS.has(value)) continue;
+            normalized[key] = value;
         }
         return normalized;
     }
@@ -1087,6 +1108,25 @@ class MappingManager {
         return true;
     }
 
+    async setFloorType(type, column, row) {
+        if (!MAPPING_FLOOR_TYPE_IDS.has(type)) return false;
+        const record = this.records.get(this.currentMapId);
+        const cellKey = `${Number(column)},${Number(row)}`;
+        if (!record || !record.explored.includes(cellKey) || !this.canManageRecord(record)) return false;
+        await this._requestMutation({
+            action: 'set-floor',
+            mapId: record.id,
+            type,
+            column: Number(column),
+            row: Number(row)
+        });
+        return true;
+    }
+
+    getFloorType(column, row) {
+        return this.state.floors?.[`${Number(column)},${Number(row)}`] ?? 'default';
+    }
+
     hasMapSymbol(column, row) {
         return this.state.symbols.some(symbol => symbol.column === Number(column) && symbol.row === Number(row));
     }
@@ -1185,6 +1225,30 @@ class MappingManager {
                 .filter(symbol => symbol.column !== column || symbol.row !== row);
             record = { ...record, symbols, updatedAt: Date.now(), updatedBy: user.id };
             this.records.set(record.id, record);
+        } else if (data.action === 'set-floor') {
+            const type = String(data.type ?? '');
+            const column = Number(data.column);
+            const row = Number(data.row);
+            const cellKey = `${column},${row}`;
+            if (!MAPPING_FLOOR_TYPE_IDS.has(type)
+                || !Number.isInteger(column)
+                || !Number.isInteger(row)
+                || !record.explored.includes(cellKey)) return;
+            // One click surfaces the whole room. The region comes from the
+            // party's own record, so it can never spread past a boundary they
+            // have not discovered.
+            const region = contiguousFloorRegion(
+                new Set(record.explored),
+                record.features,
+                { column, row }
+            );
+            const floors = { ...this._normalizeFloors(record.floors) };
+            for (const key of region) {
+                if (type === 'default') delete floors[key];
+                else floors[key] = type;
+            }
+            record = { ...record, floors, updatedAt: Date.now(), updatedBy: user.id };
+            this.records.set(record.id, record);
         } else if (data.action === 'reset') {
             record = {
                 ...record,
@@ -1192,6 +1256,7 @@ class MappingManager {
                 features: {},
                 featureSources: {},
                 symbols: [],
+                floors: {},
                 lastPosition: null,
                 updatedAt: Date.now(),
                 updatedBy: user.id
