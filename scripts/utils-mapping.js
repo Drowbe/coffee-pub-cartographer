@@ -126,6 +126,84 @@ function gridCellAt(point) {
     return Number.isInteger(column) && Number.isInteger(row) ? { column, row } : null;
 }
 
+function wallSegment(document) {
+    const coordinates = document?.c ?? document?._source?.c;
+    if (!Array.isArray(coordinates) || coordinates.length < 4) return null;
+    const [x1, y1, x2, y2] = coordinates.map(Number);
+    if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+    const length = Math.hypot(x2 - x1, y2 - y1);
+    if (!length) return null;
+    return {
+        document,
+        start: { x: x1, y: y1 },
+        end: { x: x2, y: y2 },
+        length,
+        unit: { x: (x2 - x1) / length, y: (y2 - y1) / length }
+    };
+}
+
+function pointDistance(first, second) {
+    return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function farthestEndpointPair(segments) {
+    const points = segments.flatMap(segment => [segment.start, segment.end]);
+    let pair = [points[0], points[1] ?? points[0]];
+    let distance = -1;
+    for (let first = 0; first < points.length; first++) {
+        for (let second = first + 1; second < points.length; second++) {
+            const candidate = pointDistance(points[first], points[second]);
+            if (candidate <= distance) continue;
+            pair = [points[first], points[second]];
+            distance = candidate;
+        }
+    }
+    return { pair, distance: Math.max(0, distance) };
+}
+
+/**
+ * Scene authors frequently build one curved or decorative doorway from two
+ * short, connected Wall documents. Collapse those fragments to the chain's
+ * first/last extent before grid snapping so one doorway yields one glyph.
+ */
+function normalizedDoorSpans(documents) {
+    const segments = documents.map(wallSegment).filter(Boolean);
+    const gridSize = Math.min(
+        canvas.grid.sizeX ?? canvas.grid.size,
+        canvas.grid.sizeY ?? canvas.grid.size
+    );
+    const joinDistance = gridSize * 0.25;
+    const maxSpan = gridSize * 1.6;
+    const clusters = [];
+
+    for (const segment of segments) {
+        const cluster = clusters.find(candidate => {
+            const aligned = candidate.some(existing => (
+                Math.abs((existing.unit.x * segment.unit.x) + (existing.unit.y * segment.unit.y)) >= 0.7
+            ));
+            if (!aligned) return false;
+            const connected = candidate.some(existing => Math.min(
+                pointDistance(existing.start, segment.start),
+                pointDistance(existing.start, segment.end),
+                pointDistance(existing.end, segment.start),
+                pointDistance(existing.end, segment.end)
+            ) <= joinDistance);
+            if (!connected) return false;
+            return farthestEndpointPair([...candidate, segment]).distance <= maxSpan;
+        });
+        if (cluster) cluster.push(segment);
+        else clusters.push([segment]);
+    }
+
+    return clusters.map(cluster => {
+        const { pair } = farthestEndpointPair(cluster);
+        return {
+            document: { c: [pair[0].x, pair[0].y, pair[1].x, pair[1].y] },
+            members: cluster
+        };
+    });
+}
+
 /**
  * Return the two cells which share the nearest grid boundary for a sampled
  * wall point. The boundary is derived from scene geometry, not the observer's
@@ -260,21 +338,20 @@ function observeCrossedSecretDoors(tokenDocument, fromCoordinates, toCoordinates
 
     const allowed = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
     const observed = {};
-    for (const wall of canvas.walls.placeables ?? []) {
-        if (!isSecretDoor(wall.document)) continue;
-        const coordinates = wall.document?.c ?? wall.document?._source?.c;
-        if (!Array.isArray(coordinates) || coordinates.length < 4) continue;
-        const [x1, y1, x2, y2] = coordinates.map(Number);
-        if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
-        if (!segmentsIntersect(
+    const secretDocuments = (canvas.walls.placeables ?? [])
+        .map(wall => wall.document)
+        .filter(isSecretDoor);
+    for (const span of normalizedDoorSpans(secretDocuments)) {
+        const crossed = span.members.some(member => segmentsIntersect(
             movementStart,
             movementEnd,
-            { x: x1, y: y1 },
-            { x: x2, y: y2 }
-        )) continue;
+            member.start,
+            member.end
+        ));
+        if (!crossed) continue;
 
         for (const observation of wallBoundaryObservations(
-            wall.document,
+            span.document,
             toToken,
             allowed,
             { featureOverride: 'secret-door', requireVisibility: false }
@@ -385,8 +462,26 @@ function visibleRevealKeys(tokenDocument, revealKeys) {
 function observeVisibleFeatures(tokenDocument, revealKeys) {
     const allowed = revealKeys instanceof Set ? revealKeys : new Set(revealKeys ?? []);
     const observed = {};
+    const doorDocuments = [];
     for (const wall of canvas.walls?.placeables ?? []) {
+        if (classifyWall(wall.document) === 'door') {
+            doorDocuments.push(wall.document);
+            continue;
+        }
         for (const observation of wallBoundaryObservations(wall.document, tokenDocument, allowed)) {
+            observed[observation.key] ??= [];
+            if (!observed[observation.key].includes(observation.code)) {
+                observed[observation.key].push(observation.code);
+            }
+        }
+    }
+    for (const span of normalizedDoorSpans(doorDocuments)) {
+        for (const observation of wallBoundaryObservations(
+            span.document,
+            tokenDocument,
+            allowed,
+            { featureOverride: 'door' }
+        )) {
             observed[observation.key] ??= [];
             if (!observed[observation.key].includes(observation.code)) {
                 observed[observation.key].push(observation.code);
