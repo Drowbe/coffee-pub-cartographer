@@ -19,6 +19,7 @@
     /* Undiscovered ground behind the drawing. */
     --cartographer-map-void: rgba(112, 85, 49, 0.08);
     --cartographer-map-void-grid: rgba(112, 85, 49, 0.16);
+    --cartographer-map-hatch: rgba(23, 19, 16, 0.55);
 
     --cartographer-map-party: #c15701;
 }
@@ -32,6 +33,7 @@
        canvas does not show a tonal seam where the grid box ends. */
     --cartographer-map-void: rgba(0, 0, 0, 0.25);
     --cartographer-map-void-grid: rgba(236, 227, 208, 0.08);
+    --cartographer-map-hatch: rgba(236, 227, 208, 0.4);
     --cartographer-map-party: #e8a34a;
 }
 
@@ -46,6 +48,7 @@
     --cartographer-map-floor-grid: rgba(242, 234, 217, 0.18);
     --cartographer-map-void: transparent;
     --cartographer-map-void-grid: rgba(255, 255, 255, 0.07);
+    --cartographer-map-hatch: rgba(242, 234, 217, 0.34);
     --cartographer-map-party: rgba(240, 214, 160, 0.95);
 }
 
@@ -135,6 +138,30 @@
         linear-gradient(var(--cartographer-map-void-grid) 1px, transparent 1px),
         linear-gradient(90deg, var(--cartographer-map-void-grid) 1px, transparent 1px);
     background-size: var(--cartographer-map-cell-size) var(--cartographer-map-cell-size);
+}
+
+/* Solid rock around the mapped area, drawn as the diagonal hatching the
+   old-school style uses for "not a room". It fades outward over the endless
+   canvas margin so the band reads as hand-drawn shading rather than a border. */
+.cartographer-mapping-hatch {
+    pointer-events: none;
+    background-image: repeating-linear-gradient(
+        45deg,
+        var(--cartographer-map-hatch) 0 1px,
+        transparent 1px 5px
+    );
+}
+
+.cartographer-mapping-hatch.is-ring-1 {
+    opacity: 0.85;
+}
+
+.cartographer-mapping-hatch.is-ring-2 {
+    opacity: 0.45;
+}
+
+.cartographer-mapping-hatch.is-ring-3 {
+    opacity: 0.18;
 }
 
 .cartographer-mapping-cell {
@@ -228,6 +255,17 @@
     fill: none;
     opacity: 0.25;
     stroke-width: 5;
+}
+
+/* The variant marking inside a doorway (the locked door's bolt). Thinner than
+   the wall stubs it sits between, so it reads as a marking on the door rather
+   than another piece of wall. */
+.cartographer-mapping-door-mark .cartographer-mapping-door-line {
+    stroke-width: 7;
+}
+
+.cartographer-mapping-door-mark .cartographer-mapping-door-line.is-sketch-echo {
+    stroke-width: 3;
 }
 
 .cartographer-mapping-secret-door-line {

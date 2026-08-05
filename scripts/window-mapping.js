@@ -16,6 +16,16 @@ const MAP_CELL_SIZE = 36;
 const CAMERA_EASING = 0.28;
 /** Blank cells drawn beyond the explored bounds on the endless canvas. */
 const MAP_MARGIN_CELLS = 3;
+/** Features drawn with the doorway glyph rather than as a boundary stroke. */
+const DOOR_GLYPH_FEATURES = ['door', 'locked-door'];
+/** Rings of hatching drawn outward from the explored edge. Must fit the margin. */
+const HATCH_RINGS = MAP_MARGIN_CELLS;
+/** Neighbour offsets used to grow the hatch band outward. */
+const HATCH_NEIGHBOURS = [
+    [-1, -1], [0, -1], [1, -1],
+    [-1, 0], [1, 0],
+    [-1, 1], [0, 1], [1, 1]
+];
 
 export class MappingWindow extends ToolWindowBase {
     static DEFAULT_OPTIONS = foundry.utils.mergeObject(
@@ -282,16 +292,64 @@ export class MappingWindow extends ToolWindowBase {
             rowCount,
             originColumn,
             originRow,
+            hatchCells: this._buildHatchCells(explored, originColumn, originRow),
             showParty: Boolean(trackedPosition),
             feetMapped: explored.size * (this.manager.state.gridDistance || 5)
         };
+    }
+
+    /**
+     * The band of solid rock drawn around the mapped area, in the old-school
+     * style where the space outside the rooms is hatched rather than left
+     * blank. Grown outward from the explored edge one ring at a time, so the
+     * work tracks the perimeter rather than the whole map.
+     *
+     * This is purely presentational: it is derived from the explored set at
+     * render time and never persisted, and it says nothing about what is
+     * actually out there. Hatching a genuinely sealed vault would mean reading
+     * undiscovered geometry, which the party could not know either.
+     */
+    _buildHatchCells(explored, originColumn, originRow) {
+        const cells = [];
+        const seen = new Set(explored);
+        let frontier = explored;
+        for (let ring = 1; ring <= HATCH_RINGS; ring++) {
+            const next = new Set();
+            for (const key of frontier) {
+                const [column, row] = key.split(',').map(Number);
+                for (const [columnOffset, rowOffset] of HATCH_NEIGHBOURS) {
+                    const neighbour = `${column + columnOffset},${row + rowOffset}`;
+                    if (seen.has(neighbour)) continue;
+                    seen.add(neighbour);
+                    next.add(neighbour);
+                }
+            }
+            for (const key of next) {
+                const [column, row] = key.split(',').map(Number);
+                cells.push({
+                    ring,
+                    gridColumn: column - originColumn + 1,
+                    gridRow: row - originRow + 1
+                });
+            }
+            frontier = next;
+        }
+        return cells;
     }
 
     _getMappedTileGeometry(explored, features) {
         const segmentsByCell = new Map();
         const doorSymbolsByCell = new Map();
         const secretDoorSymbolsByCell = new Map();
-        const priorities = { wall: 1, window: 2, door: 3, 'secret-door': 4 };
+        // A doorway outranks the wall it sits in, and a discovered secret
+        // outranks every ordinary opening on the same edge.
+        const priorities = {
+            wall: 1,
+            window: 2,
+            door: 3,
+            'locked-door': 4,
+            'secret-door': 5
+        };
         const edges = new Map();
         for (const [key, codes] of Object.entries(features ?? {})) {
             if (!explored.has(key)) continue;
@@ -313,10 +371,10 @@ export class MappingWindow extends ToolWindowBase {
         }
 
         for (const edge of edges.values()) {
-            if (edge.feature === 'door') {
+            if (DOOR_GLYPH_FEATURES.includes(edge.feature)) {
                 doorSymbolsByCell.set(edge.key, [
                     ...(doorSymbolsByCell.get(edge.key) ?? []),
-                    this._doorSymbol(edge.direction)
+                    this._doorSymbol(edge.direction, edge.feature)
                 ]);
                 continue;
             }
@@ -351,7 +409,26 @@ export class MappingWindow extends ToolWindowBase {
         };
     }
 
-    _doorSymbol(direction) {
+    /**
+     * The extra marking that distinguishes a door variant, authored facing
+     * north and rotated into place like the secret-door glyph.
+     */
+    _doorMark(direction, feature) {
+        if (feature !== 'locked-door') return null;
+        const transforms = {
+            north: 'translate(0 0)',
+            south: 'translate(100 100) rotate(180)',
+            west: 'translate(0 100) rotate(-90)',
+            east: 'translate(100 0) rotate(90)'
+        };
+        return {
+            transform: transforms[direction] ?? transforms.north,
+            // A bar across the doorway, per the official locked-door glyph.
+            lines: [{ points: '50,-9 50,11', echoPoints: '49.2,-9 50.8,11' }]
+        };
+    }
+
+    _doorSymbol(direction, feature = 'door') {
         const symbols = {
             north: {
                 lines: [
@@ -386,7 +463,8 @@ export class MappingWindow extends ToolWindowBase {
                 echoBoxPoints: '89,39 88.5,61 113,62 114,38 89,39'
             }
         };
-        return symbols[direction];
+        const symbol = symbols[direction];
+        return symbol ? { ...symbol, mark: this._doorMark(direction, feature) } : symbol;
     }
 
     _tileSegment(feature, direction, priority) {

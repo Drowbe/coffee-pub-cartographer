@@ -42,6 +42,11 @@
         </div>
         {{else}}
         <div class="cartographer-mapping-grid" data-origin-column="{{originColumn}}" data-origin-row="{{originRow}}" style="--cartographer-map-columns: {{columnCount}}; --cartographer-map-rows: {{rowCount}};">
+            {{! Solid rock around the mapped area. Drawn before the floor cells
+                so nothing can sit on top of a room. }}
+            {{#each hatchCells}}
+            <div class="cartographer-mapping-hatch is-ring-{{ring}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}};" aria-hidden="true"></div>
+            {{/each}}
             {{#each cells}}
             <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}};">
                 {{#if hasLinework}}
@@ -58,6 +63,14 @@
                         {{/each}}
                         <polygon class="cartographer-mapping-door-box is-sketch-echo" points="{{echoBoxPoints}}"></polygon>
                         <polygon class="cartographer-mapping-door-box" points="{{boxPoints}}"></polygon>
+                        {{#if mark}}
+                        <g class="cartographer-mapping-door-mark" transform="{{mark.transform}}">
+                            {{#each mark.lines}}
+                            <polyline class="cartographer-mapping-door-line is-sketch-echo" points="{{echoPoints}}"></polyline>
+                            <polyline class="cartographer-mapping-door-line" points="{{points}}"></polyline>
+                            {{/each}}
+                        </g>
+                        {{/if}}
                     </g>
                     {{/each}}
                     {{#each secretDoorSymbols}}

@@ -6,6 +6,10 @@ const DIRECTIONS = ['north', 'east', 'south', 'west'];
 
 /** Slope ratio at which a wall is treated as diagonal rather than straight. */
 const DIAGONAL_WALL_RATIO = 0.4;
+/** Features drawn with the doorway glyph rather than as a boundary stroke. */
+const DOOR_FEATURES = ['door', 'locked-door'];
+/** Every feature that may be persisted against a cell edge. */
+const EDGE_FEATURES = ['wall', 'window', 'secret-door', ...DOOR_FEATURES];
 
 function isSecretDoor(document) {
     const source = document?._source ?? document;
@@ -25,7 +29,20 @@ function classifyWall(document) {
     const sight = Number(source.sight);
     const light = Number(source.light);
 
-    if (door === doorTypes.DOOR) return 'door';
+    if (door === doorTypes.DOOR) {
+        // Foundry records the lock on the wall itself, so the map can show the
+        // official locked glyph without any authoring.
+        //
+        // One-way doors are deliberately not distinguished yet. Detecting them
+        // is trivial (source.dir), but the official glyph is a directional
+        // arrow, and Foundry's dir is LEFT/RIGHT relative to the wall's own
+        // vector rather than a compass bearing. Until that is mapped through
+        // edge snapping, an arrow would point the wrong way half the time,
+        // which is worse than drawing an ordinary door.
+        const doorStates = CONST.WALL_DOOR_STATES ?? {};
+        if (Number(source.ds) === Number(doorStates.LOCKED)) return 'locked-door';
+        return 'door';
+    }
     if (door === doorTypes.SECRET) return 'wall';
 
     const isTerrain = sight === senseTypes.LIMITED && light === senseTypes.LIMITED;
@@ -665,7 +682,9 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
     const allowed = revealKeys instanceof Set ? revealKeys : new Set(revealKeys ?? []);
     const observed = {};
     const sources = {};
-    const doorDocuments = [];
+    // Door variants cluster only with their own kind, so a locked door beside a
+    // plain one cannot be collapsed into a single mislabelled glyph.
+    const doorGroups = new Map();
     const secretDocuments = [];
     const structuralDocuments = [];
     for (const wall of canvas.walls?.placeables ?? []) {
@@ -673,8 +692,10 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             secretDocuments.push(wall.document);
             continue;
         }
-        if (classifyWall(wall.document) === 'door') {
-            doorDocuments.push(wall.document);
+        const feature = classifyWall(wall.document);
+        if (DOOR_FEATURES.includes(feature)) {
+            if (!doorGroups.has(feature)) doorGroups.set(feature, []);
+            doorGroups.get(feature).push(wall.document);
             continue;
         }
         structuralDocuments.push(wall.document);
@@ -704,22 +725,26 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             }
         }
     }
-    for (const span of normalizedDoorSpans(doorDocuments)) {
-        const sourceId = `door:${span.members.map(member => member.document.id).sort().join('|')}`;
-        for (const observation of wallBoundaryObservations(
-            span.document,
-            tokenDocument,
-            allowed,
-            { featureOverride: 'door' }
-        )) {
-            observed[observation.key] ??= [];
-            if (!observed[observation.key].includes(observation.code)) {
-                observed[observation.key].push(observation.code);
-            }
-            sources[sourceId] ??= {};
-            sources[sourceId][observation.key] ??= [];
-            if (!sources[sourceId][observation.key].includes(observation.code)) {
-                sources[sourceId][observation.key].push(observation.code);
+    for (const [feature, documents] of doorGroups) {
+        for (const span of normalizedDoorSpans(documents)) {
+            // The source prefix stays "door:" for every variant so attribution
+            // on records written before variants existed still lines up.
+            const sourceId = `door:${span.members.map(member => member.document.id).sort().join('|')}`;
+            for (const observation of wallBoundaryObservations(
+                span.document,
+                tokenDocument,
+                allowed,
+                { featureOverride: feature }
+            )) {
+                observed[observation.key] ??= [];
+                if (!observed[observation.key].includes(observation.code)) {
+                    observed[observation.key].push(observation.code);
+                }
+                sources[sourceId] ??= {};
+                sources[sourceId][observation.key] ??= [];
+                if (!sources[sourceId][observation.key].includes(observation.code)) {
+                    sources[sourceId][observation.key].push(observation.code);
+                }
             }
         }
     }
@@ -757,7 +782,7 @@ function normalizeFeatures(raw) {
         const valid = [...new Set(codes.filter(code => {
             if (typeof code !== 'string') return false;
             const [feature, direction] = code.split(':');
-            return ['wall', 'window', 'door', 'secret-door'].includes(feature) && DIRECTIONS.includes(direction);
+            return EDGE_FEATURES.includes(feature) && DIRECTIONS.includes(direction);
         }))];
         if (valid.length) normalized[key] = valid;
     }
