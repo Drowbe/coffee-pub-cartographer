@@ -3,6 +3,7 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
+import { getMappingSymbol, MAPPING_SYMBOL_CATEGORIES } from './symbols-mapping.js';
 
 const ToolWindowBase = game.modules.get('coffee-pub-blacksmith')?.api?.BlacksmithToolWindowBaseV2 ?? class {
     static DEFAULT_OPTIONS = {};
@@ -42,8 +43,8 @@ export class MappingWindow extends ToolWindowBase {
             event.stopPropagation();
             void app.manager.deleteMap(target.dataset.mapId);
         },
-        'zoom-in': (_event, _target, app) => app.setZoom(app.zoom + 0.15),
-        'zoom-out': (_event, _target, app) => app.setZoom(app.zoom - 0.15),
+        'zoom-in': (_event, _target, app) => app.setZoom((app._targetZoom ?? app.zoom) + 0.15),
+        'zoom-out': (_event, _target, app) => app.setZoom((app._targetZoom ?? app.zoom) - 0.15),
         'center-view': (_event, _target, app) => app.centerView()
     };
 
@@ -60,7 +61,6 @@ export class MappingWindow extends ToolWindowBase {
         this._handlePanStart = this._handlePanStart.bind(this);
         this._handlePanMove = this._handlePanMove.bind(this);
         this._handlePanEnd = this._handlePanEnd.bind(this);
-        this._handleWheelZoom = this._handleWheelZoom.bind(this);
         this._handleMapContextMenu = this._handleMapContextMenu.bind(this);
     }
 
@@ -229,6 +229,7 @@ export class MappingWindow extends ToolWindowBase {
             const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
             const isNew = newTiles.has(key);
             const symbol = placedSymbols.get(key);
+            const symbolDefinition = symbol ? getMappingSymbol(symbol.type) : null;
             return {
                 key,
                 gridColumn: column + 1,
@@ -240,10 +241,9 @@ export class MappingWindow extends ToolWindowBase {
                 hasLinework: mappedGeometry.segmentsByCell.has(key)
                     || mappedGeometry.doorSymbolsByCell.has(key)
                     || mappedGeometry.secretDoorSymbolsByCell.has(key),
-                symbol: symbol ? {
-                    isStairs: symbol.type === 'stairs',
-                    isTrap: symbol.type === 'trap',
-                    isTreasure: symbol.type === 'treasure'
+                symbol: symbolDefinition ? {
+                    className: `is-${symbol.type}`,
+                    markup: symbolDefinition.markup
                 } : null,
                 isParty
             };
@@ -406,24 +406,20 @@ export class MappingWindow extends ToolWindowBase {
         this._hasBuiltMap = false;
         this._renderedExplored = new Set();
         this._mapScroll = { left: 0, top: 0, gridMargin: '' };
-        const hasParty = Boolean(this.manager.getTrackedPositionForCurrentMap());
-        await this.manager.renderWindow({ centerOnParty: hasParty });
-        if (!hasParty) {
-            await new Promise(resolve => requestAnimationFrame(resolve));
-            this.centerOnMap();
-        }
+        await this.manager.renderWindow();
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        this.centerOnMap();
     }
 
-    setZoom(value, { anchor = null } = {}) {
+    setZoom(value) {
         const zoom = Math.max(0.4, Math.min(2.5, Number(value) || 1));
+        const anchor = this._captureViewportAnchor();
         this._targetZoom = zoom;
         this._zoomQueue = (this._zoomQueue ?? Promise.resolve())
             .catch(error => console.error(`${MODULE.NAME}: Failed to zoom mapping window`, error))
             .then(async () => {
                 this.zoom = zoom;
-                await this.manager.renderWindow({
-                    centerOnParty: !anchor && Boolean(this.manager.getTrackedPositionForCurrentMap())
-                });
+                await this.manager.renderWindow();
                 if (!anchor) return;
                 this._ensureScrollMargin();
                 await new Promise(resolve => requestAnimationFrame(resolve));
@@ -440,7 +436,6 @@ export class MappingWindow extends ToolWindowBase {
         viewport.addEventListener('pointermove', this._handlePanMove);
         viewport.addEventListener('pointerup', this._handlePanEnd);
         viewport.addEventListener('pointercancel', this._handlePanEnd);
-        viewport.addEventListener('wheel', this._handleWheelZoom, { passive: false });
         viewport.addEventListener('contextmenu', this._handleMapContextMenu);
     }
 
@@ -495,15 +490,17 @@ export class MappingWindow extends ToolWindowBase {
         if (typeof contextMenu?.show !== 'function') return;
         const localize = key => game.i18n.localize(`${MODULE.ID}.${key}`);
         const place = type => () => this.manager.placeMapSymbol(type, column, row);
-        const items = [{
-            name: localize('mapping.placeSymbol'),
-            icon: 'fa-solid fa-location-dot',
-            submenu: [
-                { name: localize('mapping.symbolStairs'), icon: 'fa-solid fa-stairs', callback: place('stairs') },
-                { name: localize('mapping.symbolTrap'), icon: 'fa-solid fa-triangle-exclamation', callback: place('trap') },
-                { name: localize('mapping.symbolTreasure'), icon: 'fa-solid fa-gem', callback: place('treasure') }
-            ]
-        }];
+        const items = MAPPING_SYMBOL_CATEGORIES.map(category => ({
+            name: localize(category.labelKey),
+            icon: category.icon,
+            submenu: category.types.map(type => {
+                const definition = getMappingSymbol(type);
+                return {
+                    name: localize(definition.labelKey),
+                    callback: place(type)
+                };
+            })
+        }));
         if (this.manager.hasMapSymbol(column, row)) {
             items.push({ separator: true });
             items.push({
@@ -523,34 +520,20 @@ export class MappingWindow extends ToolWindowBase {
         });
     }
 
-    _handleWheelZoom(event) {
-        event.preventDefault();
-        const direction = event.deltaY < 0 ? 1 : -1;
-        this._pendingWheelZoom = Math.max(0.4, Math.min(2.5,
-            (this._pendingWheelZoom ?? this._targetZoom ?? this.zoom) + (direction * 0.1)
-        ));
-        this._pendingWheelAnchor = this._captureZoomAnchor(event);
-        if (this._wheelZoomTimer) clearTimeout(this._wheelZoomTimer);
-        this._wheelZoomTimer = setTimeout(() => {
-            const zoom = this._pendingWheelZoom;
-            const anchor = this._pendingWheelAnchor;
-            this._pendingWheelZoom = null;
-            this._pendingWheelAnchor = null;
-            this._wheelZoomTimer = null;
-            void this.setZoom(zoom, { anchor });
-        }, 45);
-    }
-
-    _captureZoomAnchor(event) {
+    _captureViewportAnchor() {
+        const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
         const grid = this.element?.querySelector('.cartographer-mapping-grid');
-        if (!grid) return null;
+        if (!viewport || !grid) return null;
+        const viewportRect = viewport.getBoundingClientRect();
         const gridRect = grid.getBoundingClientRect();
         const renderedZoom = Number.parseFloat(grid.style.getPropertyValue('--cartographer-map-zoom')) || this.zoom;
+        const clientX = viewportRect.left + (viewport.clientWidth / 2);
+        const clientY = viewportRect.top + (viewport.clientHeight / 2);
         return {
-            clientX: event.clientX,
-            clientY: event.clientY,
-            mapX: (event.clientX - gridRect.left) / renderedZoom,
-            mapY: (event.clientY - gridRect.top) / renderedZoom
+            clientX,
+            clientY,
+            mapX: (clientX - gridRect.left) / renderedZoom,
+            mapY: (clientY - gridRect.top) / renderedZoom
         };
     }
 
@@ -574,7 +557,7 @@ export class MappingWindow extends ToolWindowBase {
     centerOnParty({ behavior = 'auto' } = {}) {
         const elements = this._ensureScrollMargin();
         const partyCell = this.element?.querySelector('.cartographer-mapping-cell.is-party');
-        if (!elements || !partyCell) return;
+        if (!elements || !partyCell) return false;
         const { viewport } = elements;
         const viewportRect = viewport.getBoundingClientRect();
         const partyRect = partyCell.getBoundingClientRect();
@@ -585,6 +568,7 @@ export class MappingWindow extends ToolWindowBase {
                 + (partyRect.height / 2) - (viewport.clientHeight / 2),
             behavior
         });
+        return true;
     }
 
     centerView() {
@@ -616,11 +600,11 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     followParty(position) {
-        if (!this.rendered || !position || this.viewMode !== 'map') return;
+        if (!this.rendered || !position || this.viewMode !== 'map') return false;
         const key = `${position.column},${position.row}`;
         const selector = `.cartographer-mapping-cell[data-cell="${CSS.escape(key)}"]`;
         const partyCell = this.element?.querySelector(selector);
-        if (!partyCell) return;
+        if (!partyCell) return false;
         const previousCell = this.element?.querySelector('.cartographer-mapping-cell.is-party');
         if (previousCell !== partyCell) {
             previousCell?.classList.remove('is-party');
@@ -636,6 +620,7 @@ export class MappingWindow extends ToolWindowBase {
             this._followFrame = null;
             this.centerOnParty({ behavior: 'smooth' });
         });
+        return true;
     }
 
     _saveScrollPositions() {
@@ -671,10 +656,6 @@ export class MappingWindow extends ToolWindowBase {
 
     _onClose(options) {
         this._pan = null;
-        if (this._wheelZoomTimer) clearTimeout(this._wheelZoomTimer);
-        this._wheelZoomTimer = null;
-        this._pendingWheelZoom = null;
-        this._pendingWheelAnchor = null;
         this._targetZoom = null;
         if (this._followFrame) cancelAnimationFrame(this._followFrame);
         this._followFrame = null;

@@ -72,26 +72,8 @@
                 </svg>
                 {{/if}}
                 {{#if symbol}}
-                <svg class="cartographer-mapping-placeable" viewBox="0 0 100 100" aria-hidden="true">
-                    {{#if symbol.isStairs}}
-                    <g class="is-stairs">
-                        <rect x="17" y="18" width="66" height="64"></rect>
-                        <line x1="30" y1="18" x2="30" y2="82"></line>
-                        <line x1="43" y1="18" x2="43" y2="82"></line>
-                        <line x1="56" y1="18" x2="56" y2="82"></line>
-                        <line x1="69" y1="18" x2="69" y2="82"></line>
-                        <polyline points="23,71 76,29 65,29 76,29 76,40"></polyline>
-                    </g>
-                    {{/if}}
-                    {{#if symbol.isTrap}}<text class="is-trap" x="50" y="53">T</text>{{/if}}
-                    {{#if symbol.isTreasure}}
-                    <g class="is-treasure">
-                        <rect x="20" y="29" width="60" height="48"></rect>
-                        <path d="M20 45 Q50 22 80 45"></path>
-                        <line x1="20" y1="50" x2="80" y2="50"></line>
-                        <rect x="45" y="45" width="10" height="13"></rect>
-                    </g>
-                    {{/if}}
+                <svg class="cartographer-mapping-placeable {{symbol.className}}" viewBox="0 0 100 100" aria-hidden="true">
+                    {{{symbol.markup}}}
                 </svg>
                 {{/if}}
                 {{#if isParty}}<i class="fa-solid fa-street-view cartographer-mapping-party" aria-hidden="true"></i>{{/if}}

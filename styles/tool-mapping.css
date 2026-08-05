@@ -65,7 +65,7 @@
     width: 100%;
     height: 100%;
     min-height: 240px;
-    overflow: auto;
+    overflow: hidden;
     scrollbar-width: none;
     -ms-overflow-style: none;
     padding: 0;
@@ -222,27 +222,59 @@
     pointer-events: none;
     fill: none;
     stroke: var(--cartographer-map-wall);
-    stroke-width: 7;
+    stroke-width: 4.5;
     stroke-linecap: round;
     stroke-linejoin: round;
 }
 
-.cartographer-mapping-placeable .is-stairs polyline {
+.cartographer-mapping-placeable .symbol-frame {
+    stroke-width: 3.5;
+}
+
+.cartographer-mapping-placeable .symbol-thin {
+    stroke-width: 2.5;
+}
+
+.cartographer-mapping-placeable .symbol-heavy {
     stroke-width: 6;
 }
 
-.cartographer-mapping-placeable text.is-trap {
+.cartographer-mapping-placeable .symbol-dash {
+    stroke-dasharray: 7 5;
+}
+
+.cartographer-mapping-placeable .symbol-fill {
+    fill: var(--cartographer-map-wall);
+}
+
+.cartographer-mapping-placeable .symbol-fill-soft {
+    fill: var(--blacksmith-tool-scrim);
+}
+
+.cartographer-mapping-placeable .symbol-cutout {
+    stroke: var(--blacksmith-tool-scrim);
+}
+
+.cartographer-mapping-placeable .symbol-text {
     fill: var(--cartographer-map-wall);
     stroke: none;
     font-family: Georgia, 'Times New Roman', serif;
-    font-size: 72px;
+    font-size: 34px;
     font-weight: 700;
     text-anchor: middle;
     dominant-baseline: middle;
 }
 
-.cartographer-mapping-placeable .is-treasure rect {
-    fill: var(--blacksmith-tool-scrim);
+.cartographer-mapping-placeable .symbol-text.symbol-small {
+    font-size: 18px;
+}
+
+.cartographer-mapping-placeable .symbol-text.symbol-medium {
+    font-size: 29px;
+}
+
+.cartographer-mapping-placeable .symbol-text.symbol-large {
+    font-size: 55px;
 }
 
 .cartographer-mapping-party {

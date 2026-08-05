@@ -19,12 +19,12 @@ import {
     visibleRevealKeys
 } from './utils-mapping.js';
 import { notify } from './utils-toast.js';
+import { MAPPING_SYMBOL_TYPES } from './symbols-mapping.js';
 
 const FLAG_KEY = 'mapping';
 const TOOL_ID = `${MODULE.ID}-mapping`;
 const WINDOW_ID = `${MODULE.ID}-mapper`;
 const STATE_VERSION = 2;
-const MAP_SYMBOL_TYPES = new Set(['stairs', 'trap', 'treasure']);
 
 class MappingManager {
     constructor() {
@@ -49,6 +49,7 @@ class MappingManager {
         this._selectionFrame = null;
         this._closingWindow = false;
         this._catchUpTimer = null;
+        this._followRecordedPosition = null;
     }
 
     _recordId(actorId, sceneId) {
@@ -107,6 +108,7 @@ class MappingManager {
         this._selectionFrame = null;
         if (this._catchUpTimer) clearTimeout(this._catchUpTimer);
         this._catchUpTimer = null;
+        this._followRecordedPosition = null;
         this.window = null;
     }
 
@@ -159,22 +161,41 @@ class MappingManager {
             }
             if (tokenDocument.id !== this.trackedTokenId) return;
             const visionChanged = ('rotation' in changes) || ('sight' in changes);
-            if (!moved && !visionChanged) return;
+            if (moved || !visionChanged) return;
             if (!this.active || this.paused) return;
-            void this._requestReveal(movementDocument, position, { force: visionChanged }).catch(error => {
-                console.error(`${MODULE.NAME}: Failed to map token movement`, error);
+            void this._requestReveal(movementDocument, position, { force: true }).catch(error => {
+                console.error(`${MODULE.NAME}: Failed to update the map for changed token vision`, error);
             });
-            if (moved) this._scheduleCatchUp(tokenDocument.id);
         });
         this._hooks.push({ name: 'updateToken', id: updateToken });
+
+        const moveToken = Hooks.on('moveToken', (tokenDocument, movement) => {
+            if (tokenDocument.id !== this.trackedTokenId) return;
+            if (!this.active || this.paused) return;
+
+            const teleported = this._isTeleportMovement(movement);
+            if (teleported && this._catchUpTimer) {
+                clearTimeout(this._catchUpTimer);
+                this._catchUpTimer = null;
+            }
+
+            const position = this._gridPosition(tokenDocument);
+            this._followRecordedPosition = position;
+            if (this.window?.followParty(position)) this._followRecordedPosition = null;
+            void this._requestReveal(tokenDocument, position, {
+                force: teleported,
+                resetPath: teleported
+            }).catch(error => {
+                console.error(`${MODULE.NAME}: Failed to map token movement`, error);
+            });
+            if (!teleported) this._scheduleCatchUp(tokenDocument.id);
+        });
+        this._hooks.push({ name: 'moveToken', id: moveToken });
 
         const updateScene = Hooks.on('updateScene', (scene, changes) => {
             if (!changes?.flags?.[MODULE.ID]?.[FLAG_KEY]) return;
             this._replaceSceneRecords(scene, scene.getFlag(MODULE.ID, FLAG_KEY));
-            void this.renderWindow({
-                centerOnParty: this.active,
-                centerBehavior: this.active ? 'smooth' : 'auto'
-            });
+            void this.renderWindow();
         });
         this._hooks.push({ name: 'updateScene', id: updateScene });
 
@@ -437,6 +458,7 @@ class MappingManager {
         }
         this.active = false;
         this.paused = false;
+        this._followRecordedPosition = null;
         this.lastGridKey = null;
         this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
         if (closeWindow && this.window?.rendered) {
@@ -463,14 +485,13 @@ class MappingManager {
         }
         if (this.window?.rendered) {
             this.window.bringToFront?.();
-            await this.renderWindow({ centerOnParty: Boolean(this.getTrackedPositionForCurrentMap()) });
+            await this.renderWindow();
             return this.window;
         }
         const { MappingWindow } = await import('./window-mapping.js');
         this.window = await MappingWindow.open(this);
         await new Promise(resolve => requestAnimationFrame(resolve));
-        if (this.getTrackedPositionForCurrentMap()) this.window?.centerOnParty();
-        else this.window?.centerOnMap?.();
+        this.window?.centerOnMap?.();
         return this.window;
     }
 
@@ -499,6 +520,7 @@ class MappingManager {
     async pauseMapping() {
         if (!this.active || this.paused) return false;
         this.paused = true;
+        this._followRecordedPosition = null;
         this.lastGridKey = null;
         if (this._catchUpTimer) {
             clearTimeout(this._catchUpTimer);
@@ -521,7 +543,7 @@ class MappingManager {
             force: true,
             resetPath: true
         });
-        await this.renderWindow({ centerOnParty: true, centerBehavior: 'smooth' });
+        await this.renderWindow();
         return true;
     }
 
@@ -532,9 +554,17 @@ class MappingManager {
                 const window = this.window;
                 if (!window?.rendered) return;
                 await window.render(false);
-                if (centerOnParty && this.window === window && window.rendered) {
+                const followPosition = this.active ? this._followRecordedPosition : null;
+                if ((centerOnParty || followPosition) && this.window === window && window.rendered) {
                     await new Promise(resolve => requestAnimationFrame(resolve));
-                    if (this.window === window && window.rendered) window.centerOnParty({ behavior: centerBehavior });
+                    if (this.window !== window || !window.rendered) return;
+                    if (centerOnParty) window.centerOnParty({ behavior: centerBehavior });
+                    if (followPosition && window.followParty(followPosition)) {
+                        const pending = this._followRecordedPosition;
+                        if (pending?.column === followPosition.column && pending?.row === followPosition.row) {
+                            this._followRecordedPosition = null;
+                        }
+                    }
                 }
             });
         return this._renderQueue;
@@ -599,7 +629,7 @@ class MappingManager {
             const type = String(symbol?.type ?? '');
             const column = Number(symbol?.column);
             const row = Number(symbol?.row);
-            if (!MAP_SYMBOL_TYPES.has(type) || !Number.isInteger(column) || !Number.isInteger(row)) continue;
+            if (!MAPPING_SYMBOL_TYPES.has(type) || !Number.isInteger(column) || !Number.isInteger(row)) continue;
             const key = `${column},${row}`;
             if (occupied.has(key)) continue;
             occupied.add(key);
@@ -691,6 +721,13 @@ class MappingManager {
             x: start.x + ((end.x - start.x) * amount),
             y: start.y + ((end.y - start.y) * amount)
         };
+    }
+
+    _isTeleportMovement(movement) {
+        const waypoints = movement?.passed?.waypoints;
+        if (!Array.isArray(waypoints) || waypoints.length === 0) return false;
+        const action = waypoints.at(-1)?.action;
+        return CONFIG.Token.movement.actions[action]?.teleport === true;
     }
 
     _scheduleCatchUp(tokenId) {
@@ -883,7 +920,7 @@ class MappingManager {
         this.records.set(id, next);
         this.currentMapId = id;
         this.state = next;
-        void this.renderWindow({ centerOnParty: this.active, centerBehavior: 'smooth' });
+        void this.renderWindow();
         await this._persistSceneRecords(canvas.scene.id);
     }
 
@@ -974,7 +1011,7 @@ class MappingManager {
     }
 
     async placeMapSymbol(type, column, row) {
-        if (!MAP_SYMBOL_TYPES.has(type)) return false;
+        if (!MAPPING_SYMBOL_TYPES.has(type)) return false;
         const record = this.records.get(this.currentMapId);
         const cellKey = `${Number(column)},${Number(row)}`;
         if (!record || !record.explored.includes(cellKey) || !this.canManageRecord(record)) return false;
@@ -1051,7 +1088,7 @@ class MappingManager {
             const column = Number(data.column);
             const row = Number(data.row);
             const cellKey = `${column},${row}`;
-            if (!MAP_SYMBOL_TYPES.has(type)
+            if (!MAPPING_SYMBOL_TYPES.has(type)
                 || !Number.isInteger(column)
                 || !Number.isInteger(row)
                 || !record.explored.includes(cellKey)) return;
@@ -1135,10 +1172,7 @@ class MappingManager {
             const latest = this.getMapList()[0];
             if (latest) this.selectMap(latest.id, { render: false });
         }
-        void this.renderWindow({
-            centerOnParty: this.active,
-            centerBehavior: this.active ? 'smooth' : 'auto'
-        });
+        void this.renderWindow();
     }
 }
 
