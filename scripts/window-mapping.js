@@ -33,6 +33,16 @@ const GLYPH_TRANSFORMS = {
     west: 'translate(0 100) rotate(-90)',
     east: 'translate(100 0) rotate(90)'
 };
+/** Edge of the square map silhouette drawn for the list view, in pixels. */
+const THUMBNAIL_SIZE = 96;
+/** How many generated thumbnails to retain before evicting the oldest. */
+const THUMBNAIL_CACHE_LIMIT = 40;
+/** Silhouette ink per theme, so a thumbnail reads on light and dark alike. */
+const THUMBNAIL_INK = {
+    light: 'rgba(23, 19, 16, 0.72)',
+    dark: 'rgba(236, 227, 208, 0.78)',
+    glass: 'rgba(242, 234, 217, 0.72)'
+};
 /** Rings of hatching drawn outward from the explored edge. Must fit the margin. */
 const HATCH_RINGS = MAP_MARGIN_CELLS;
 /** Neighbour offsets used to grow the hatch band outward. */
@@ -95,6 +105,7 @@ export class MappingWindow extends ToolWindowBase {
         this._followArmed = true;
         this._hasPaintedMap = false;
         this._cellSize = MAP_CELL_SIZE;
+        this._thumbnailCache = new Map();
         this._handlePanStart = this._handlePanStart.bind(this);
         this._handlePanMove = this._handlePanMove.bind(this);
         this._handlePanEnd = this._handlePanEnd.bind(this);
@@ -123,9 +134,6 @@ export class MappingWindow extends ToolWindowBase {
             : (this.manager.paused
                 ? 'mapping.statusPaused'
                 : (this.manager.active ? 'mapping.statusActive' : 'mapping.statusViewing'));
-        const footerLeft = this.viewMode === 'list'
-            ? game.i18n.format(`${MODULE.ID}.mapping.mapCount`, { count: model.maps.length })
-            : `${model.feetMapped} ${game.i18n.localize(`${MODULE.ID}.mapping.feetMapped`)}`;
         const statusClass = this.manager.paused
             ? ' is-paused'
             : (this.manager.active ? ' is-recording' : '');
@@ -135,11 +143,35 @@ export class MappingWindow extends ToolWindowBase {
             bodyContent,
             showToolBar: true,
             toolBarLeft: `${status}${this._buildTopActions(model)}`,
-            toolBarRight: `<span class="cartographer-mapping-token">${foundry.utils.escapeHTML(this.manager.getTrackedTokenName())}</span>`,
+            toolBarRight: this._buildViewControls(model),
             showToolFooter: true,
-            toolFooterLeft: `<span>${foundry.utils.escapeHTML(footerLeft)}</span>`,
-            toolFooterRight: this._buildFooterActions(model)
+            toolFooterLeft: this._buildStatusIdentity(model),
+            toolFooterRight: this._buildStatusMeasure(model)
         };
+    }
+
+    /** Who is being mapped, at the left of the status bar. */
+    _buildStatusIdentity() {
+        if (this.viewMode === 'list') {
+            return `<span class="cartographer-mapping-status-text">${foundry.utils.escapeHTML(
+                game.i18n.localize(`${MODULE.ID}.mapping.recordedMaps`)
+            )}</span>`;
+        }
+        const name = foundry.utils.escapeHTML(this.manager.getTrackedTokenName());
+        const portrait = this.manager.getTrackedTokenPortrait();
+        const image = portrait
+            ? `<img class="cartographer-mapping-portrait" src="${foundry.utils.escapeHTML(portrait)}" alt="">`
+            : '<i class="fa-solid fa-street-view cartographer-mapping-portrait is-placeholder"></i>';
+        return `<span class="cartographer-mapping-token">${image}<span>${name}</span></span>`;
+    }
+
+    /** How much has been mapped, at the right of the status bar. */
+    _buildStatusMeasure(model) {
+        const text = this.viewMode === 'list'
+            ? game.i18n.format(`${MODULE.ID}.mapping.mapCount`, { count: model.maps.length })
+            : `${model.feetMapped} ${game.i18n.localize(`${MODULE.ID}.mapping.feetMapped`)}`;
+        const icon = this.viewMode === 'list' ? 'fa-solid fa-layer-group' : 'fa-solid fa-ruler';
+        return `<span class="cartographer-mapping-measure"><i class="${icon}"></i><span>${foundry.utils.escapeHTML(text)}</span></span>`;
     }
 
     _buildTopActions(model) {
@@ -167,6 +199,7 @@ export class MappingWindow extends ToolWindowBase {
                 action: 'toggle-recording',
                 icon: this.manager.active ? 'fa-solid fa-stop' : 'fa-solid fa-circle',
                 label: model.recordLabel,
+                text: model.recordLabel,
                 className: `cartographer-mapping-record${this.manager.paused ? ' is-paused' : (this.manager.active ? ' is-recording' : '')}`,
                 disabled: !model.canRecord && !this.manager.active
             }));
@@ -174,24 +207,92 @@ export class MappingWindow extends ToolWindowBase {
         return `<span class="cartographer-mapping-chrome-actions is-primary">${buttons.join('')}</span>`;
     }
 
-    _buildFooterActions(model) {
+    /** Zoom and centring, right-aligned in the top bar. */
+    _buildViewControls(model) {
         if (this.viewMode !== 'map') return '';
         const buttons = [
             this._chromeButton({ action: 'zoom-out', icon: 'fa-solid fa-minus', label: model.zoomOutLabel }),
             this._chromeButton({ action: 'center-view', icon: 'fa-solid fa-crosshairs', label: model.centerPartyLabel }),
             this._chromeButton({ action: 'zoom-in', icon: 'fa-solid fa-plus', label: model.zoomInLabel })
         ];
-        return `<span class="cartographer-mapping-chrome-actions is-navigation">${buttons.join('')}</span><span class="cartographer-mapping-zoom-readout">${Math.round(this.zoom * 100)}%</span>`;
+        return `<span class="cartographer-mapping-zoom-readout">${Math.round(this.zoom * 100)}%</span>`
+            + `<span class="cartographer-mapping-chrome-actions is-navigation">${buttons.join('')}</span>`;
     }
 
-    _chromeButton({ action, icon, label, className = '', disabled = false }) {
+    _chromeButton({ action, icon, label, text = '', className = '', disabled = false }) {
         const safeAction = foundry.utils.escapeHTML(action);
         const safeLabel = foundry.utils.escapeHTML(label ?? '');
-        const classes = className ? ` class="${foundry.utils.escapeHTML(className)}"` : '';
-        return `<button type="button"${classes} data-action="${safeAction}" data-tooltip="${safeLabel}" aria-label="${safeLabel}"${disabled ? ' disabled' : ''}><i class="${icon}"></i></button>`;
+        const allClasses = [className, text ? 'is-labelled' : ''].filter(Boolean).join(' ');
+        const classes = allClasses ? ` class="${foundry.utils.escapeHTML(allClasses)}"` : '';
+        const caption = text ? `<span>${foundry.utils.escapeHTML(text)}</span>` : '';
+        return `<button type="button"${classes} data-action="${safeAction}" data-tooltip="${safeLabel}" aria-label="${safeLabel}"${disabled ? ' disabled' : ''}><i class="${icon}"></i>${caption}</button>`;
+    }
+
+    /**
+     * A silhouette of a map's explored squares, for the list view.
+     *
+     * Drawn to a small canvas rather than as DOM: a few thousand fillRect calls
+     * cost far less than a few thousand elements, and the result is cached
+     * against the record's updatedAt so it is redrawn only when the map itself
+     * changes. Nothing is generated unless the list is actually on screen.
+     */
+    _mapThumbnail(record) {
+        const explored = record.explored ?? [];
+        if (!explored.length) return null;
+        const cacheKey = `${record.id}:${record.updatedAt}:${this.toolTheme}`;
+        const cached = this._thumbnailCache.get(cacheKey);
+        if (cached) return cached;
+
+        let minColumn = Infinity;
+        let minRow = Infinity;
+        let maxColumn = -Infinity;
+        let maxRow = -Infinity;
+        const cells = [];
+        for (const key of explored) {
+            const [column, row] = key.split(',').map(Number);
+            if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
+            minColumn = Math.min(minColumn, column);
+            minRow = Math.min(minRow, row);
+            maxColumn = Math.max(maxColumn, column);
+            maxRow = Math.max(maxRow, row);
+            cells.push([column, row]);
+        }
+        if (!cells.length) return null;
+
+        const canvasElement = document.createElement('canvas');
+        canvasElement.width = THUMBNAIL_SIZE;
+        canvasElement.height = THUMBNAIL_SIZE;
+        const context = canvasElement.getContext('2d');
+        if (!context) return null;
+        const columns = maxColumn - minColumn + 1;
+        const rows = maxRow - minRow + 1;
+        const scale = Math.min(THUMBNAIL_SIZE / columns, THUMBNAIL_SIZE / rows);
+        const offsetX = (THUMBNAIL_SIZE - (columns * scale)) / 2;
+        const offsetY = (THUMBNAIL_SIZE - (rows * scale)) / 2;
+        // Themed here rather than read from CSS, so a thumbnail generated
+        // before the window has been laid out is still the right colour.
+        context.fillStyle = THUMBNAIL_INK[this.toolTheme] ?? THUMBNAIL_INK.light;
+        const side = Math.max(1, scale);
+        for (const [column, row] of cells) {
+            context.fillRect(
+                offsetX + ((column - minColumn) * scale),
+                offsetY + ((row - minRow) * scale),
+                side,
+                side
+            );
+        }
+
+        const url = canvasElement.toDataURL('image/png');
+        this._thumbnailCache.set(cacheKey, url);
+        // Bounded so a long session of edits cannot grow this without limit.
+        if (this._thumbnailCache.size > THUMBNAIL_CACHE_LIMIT) {
+            this._thumbnailCache.delete(this._thumbnailCache.keys().next().value);
+        }
+        return url;
     }
 
     _buildModel() {
+        const isList = this.viewMode === 'list';
         const maps = this.manager.getMapList().map(record => ({
             id: record.id,
             name: record.name,
@@ -201,7 +302,8 @@ export class MappingWindow extends ToolWindowBase {
             feetMapped: record.explored.length * (record.gridDistance || 5),
             isCurrent: record.id === this.manager.currentMapId,
             canManage: this.manager.canManageRecord(record),
-            canRecord: record.sceneId === canvas?.scene?.id && this.manager.canManageRecord(record)
+            canRecord: record.sceneId === canvas?.scene?.id && this.manager.canManageRecord(record),
+            thumbnail: isList ? this._mapThumbnail(record) : null
         }));
         if (this.viewMode === 'list') {
             return {
@@ -236,6 +338,7 @@ export class MappingWindow extends ToolWindowBase {
         const common = {
             canRecord,
             isRecording: this.manager.active,
+            isPaused: this.manager.paused,
             zoom: this.zoom,
             recordLabel: game.i18n.localize(`${MODULE.ID}.mapping.${this.manager.active ? 'stopRecording' : 'startRecording'}`),
             listLabel: game.i18n.localize(`${MODULE.ID}.mapping.showMaps`),
@@ -524,13 +627,15 @@ export class MappingWindow extends ToolWindowBase {
     _doorMark(feature, width) {
         if (feature !== 'locked-door') return null;
         const centre = width / 2;
-        // A bar across the doorway, per the official locked-door glyph. It
-        // rides inside the door's own group, so it needs no transform of its
-        // own and stays centred however wide the opening is.
+        // A short bolt across the doorway, per the official locked-door glyph.
+        // Deliberately well clear of the box edges: a bar that reaches them
+        // reads as a wall dividing the opening, which makes one wide locked
+        // door look like two ordinary ones. Round caps add half the stroke
+        // width at each end, so the drawn length is shorter than it looks.
         return {
             lines: [{
-                points: `${centre},-9 ${centre},11`,
-                echoPoints: `${centre - 0.8},-9 ${centre + 0.8},11`
+                points: `${centre},-4 ${centre},6`,
+                echoPoints: `${centre - 0.6},-4 ${centre + 0.6},6`
             }]
         };
     }

@@ -607,6 +607,13 @@ class MappingManager {
         return mappedPosition ?? this._gridPosition(token.document);
     }
 
+    /** Portrait for the status bar. Falls back to the token art, then nothing. */
+    getTrackedTokenPortrait() {
+        const token = this._getTrackedToken();
+        const actor = token?.actor ?? (this.state.actorId ? game.actors?.get(this.state.actorId) : null);
+        return actor?.img || token?.document?.texture?.src || null;
+    }
+
     getTrackedTokenName() {
         return this.state.actorName || this._getTrackedToken()?.name || game.i18n.localize(`${MODULE.ID}.mapping.noToken`);
     }

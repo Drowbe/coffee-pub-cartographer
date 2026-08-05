@@ -357,15 +357,15 @@
     stroke-width: 5;
 }
 
-/* The variant marking inside a doorway (the locked door's bolt). Thinner than
-   the wall stubs it sits between, so it reads as a marking on the door rather
-   than another piece of wall. */
+/* The variant marking inside a doorway (the locked door's bolt). Much thinner
+   than the wall stubs and the box it sits in, so it reads as pen marking on the
+   door rather than as structure splitting the opening in two. */
 .cartographer-mapping-door-mark .cartographer-mapping-door-line {
-    stroke-width: 7;
+    stroke-width: 4;
 }
 
 .cartographer-mapping-door-mark .cartographer-mapping-door-line.is-sketch-echo {
-    stroke-width: 3;
+    stroke-width: 2;
 }
 
 .cartographer-mapping-secret-door-line {
@@ -522,8 +522,37 @@
     color: var(--blacksmith-status-warning);
 }
 
-.cartographer-mapping-token {
+/* Status bar: who is being mapped on the left, how much on the right. */
+.cartographer-mapping-token,
+.cartographer-mapping-measure,
+.cartographer-mapping-status-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     color: var(--blacksmith-tool-text-muted);
+}
+
+.cartographer-mapping-portrait {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    border: 1px solid var(--blacksmith-tool-divider);
+    border-radius: 50%;
+    object-fit: cover;
+    background: var(--blacksmith-tool-surface-sunken);
+}
+
+.cartographer-mapping-portrait.is-placeholder {
+    display: grid;
+    border: 0;
+    background: none;
+    font-size: 14px;
+    place-items: center;
+}
+
+.cartographer-mapping-measure i {
+    font-size: 11px;
+    opacity: 0.8;
 }
 
 .cartographer-mapping-window .blacksmith-window-tool-bar-left {
@@ -580,9 +609,59 @@
     background: color-mix(in srgb, var(--blacksmith-status-warning) 18%, var(--blacksmith-tool-field-background));
 }
 
+/* A button that carries its caption, such as Record / Stop Recording. */
+.cartographer-mapping-chrome-actions button.is-labelled {
+    width: auto;
+    gap: 6px;
+    padding: 0 9px;
+    grid-auto-flow: column;
+}
+
+.cartographer-mapping-chrome-actions button.is-labelled span {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+}
+
 .cartographer-mapping-zoom-readout {
     min-width: 38px;
+    margin-right: 6px;
+    color: var(--blacksmith-tool-text-muted);
     text-align: right;
+}
+
+/* Recording tell that survives the bars auto-hiding. Pinned to the viewport,
+   not the map, so it stays put while the camera moves underneath. */
+.cartographer-mapping-rec {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 6;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--blacksmith-status-danger);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--blacksmith-status-danger) 28%, transparent);
+    pointer-events: none;
+    animation: cartographer-map-rec-pulse 1.4s ease-in-out infinite;
+}
+
+.cartographer-mapping-rec.is-paused {
+    background: var(--blacksmith-status-warning);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--blacksmith-status-warning) 28%, transparent);
+    animation: none;
+}
+
+@keyframes cartographer-map-rec-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cartographer-mapping-rec {
+        animation: none;
+    }
 }
 
 .cartographer-mapping-root.is-list-view {
@@ -662,9 +741,25 @@
 
 .cartographer-mapping-list-icon {
     display: grid;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
     place-items: center;
+    border-radius: 4px;
+    background: var(--cartographer-map-paper);
     color: var(--blacksmith-tool-accent);
     font-size: 1.2rem;
+}
+
+/* The map silhouette. Rendered small and cached, so it costs nothing to show
+   and nothing to skip when the list is not open. */
+.cartographer-mapping-list-icon img {
+    width: 100%;
+    height: 100%;
+    padding: 3px;
+    box-sizing: border-box;
+    object-fit: contain;
+    image-rendering: pixelated;
 }
 
 .cartographer-mapping-list-copy {

@@ -23,6 +23,16 @@ const GLYPH_FEATURES = [...DOOR_FEATURES, 'secret-door', 'window'];
 const SPANNING_GLYPH_FEATURES = [...DOOR_FEATURES, 'window'];
 /** Every feature that may be persisted against a cell edge. */
 const EDGE_FEATURES = ['wall', ...GLYPH_FEATURES];
+/**
+ * Prefixes a persisted feature source may use. A source id is "<kind>:<wall
+ * ids>", and normalizeFeatureSources drops anything that does not match, so a
+ * new kind must be added here or its observations vanish silently on the way
+ * into the record.
+ */
+const FEATURE_SOURCE_KINDS = ['wall', 'door', 'window'];
+const FEATURE_SOURCE_PATTERN = new RegExp(
+    `^(?:${FEATURE_SOURCE_KINDS.join('|')}):[A-Za-z0-9_|.-]+$`
+);
 
 function isSecretDoor(document) {
     const source = document?._source ?? document;
@@ -858,7 +868,7 @@ function normalizeFeatureSources(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
     const normalized = {};
     for (const [sourceId, features] of Object.entries(raw)) {
-        if (typeof sourceId !== 'string' || !/^(?:wall|door):[A-Za-z0-9_|.-]+$/.test(sourceId)) continue;
+        if (typeof sourceId !== 'string' || !FEATURE_SOURCE_PATTERN.test(sourceId)) continue;
         const sourceFeatures = normalizeFeatures(features);
         if (Object.keys(sourceFeatures).length) normalized[sourceId] = sourceFeatures;
     }
