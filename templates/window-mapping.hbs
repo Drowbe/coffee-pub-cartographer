@@ -56,7 +56,7 @@
                     <polyline class="cartographer-mapping-segment {{className}}" points="{{points}}"></polyline>
                     {{/each}}
                     {{#each doorSymbols}}
-                    <g class="cartographer-mapping-door-symbol">
+                    <g class="cartographer-mapping-door-symbol" transform="{{transform}}">
                         {{#each lines}}
                         <polyline class="cartographer-mapping-door-line is-sketch-echo" points="{{echoPoints}}"></polyline>
                         <polyline class="cartographer-mapping-door-line" points="{{points}}"></polyline>
@@ -64,7 +64,7 @@
                         <polygon class="cartographer-mapping-door-box is-sketch-echo" points="{{echoBoxPoints}}"></polygon>
                         <polygon class="cartographer-mapping-door-box" points="{{boxPoints}}"></polygon>
                         {{#if mark}}
-                        <g class="cartographer-mapping-door-mark" transform="{{mark.transform}}">
+                        <g class="cartographer-mapping-door-mark">
                             {{#each mark.lines}}
                             <polyline class="cartographer-mapping-door-line is-sketch-echo" points="{{echoPoints}}"></polyline>
                             <polyline class="cartographer-mapping-door-line" points="{{points}}"></polyline>

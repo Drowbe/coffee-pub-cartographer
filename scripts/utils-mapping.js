@@ -9,11 +9,18 @@ const DIAGONAL_WALL_RATIO = 0.4;
 /** Features drawn with the doorway glyph rather than as a boundary stroke. */
 const DOOR_FEATURES = ['door', 'locked-door'];
 /**
- * Features drawn as a single glyph on the wall. These are clustered from their
- * fragments and marked once at the midpoint, because the symbol represents the
- * opening itself rather than every quarter-grid sample of the wall document.
+ * Features drawn as a symbol on the wall rather than as a boundary stroke.
+ * Their fragments are clustered into one opening before snapping.
  */
 const GLYPH_FEATURES = [...DOOR_FEATURES, 'secret-door', 'window'];
+/**
+ * Openings whose symbol should be as wide as the opening itself. These mark
+ * every square they cross rather than only their midpoint, so a warehouse door
+ * spanning several squares is recorded at its true width -- and so a long
+ * opening is still recorded when its midpoint happens to be out of sight. The
+ * renderer joins the marks back into one symbol.
+ */
+const SPANNING_GLYPH_FEATURES = [...DOOR_FEATURES, 'window'];
 /** Every feature that may be persisted against a cell edge. */
 const EDGE_FEATURES = ['wall', ...GLYPH_FEATURES];
 
@@ -54,9 +61,14 @@ function classifyWall(document) {
     const isTerrain = sight === senseTypes.LIMITED && light === senseTypes.LIMITED;
     if (isTerrain) return null;
 
+    // A window blocks movement while sight passes through it under a distance
+    // threshold. PROXIMITY and DISTANCE are both threshold modes, and light is
+    // configured independently of sight -- a window that lets light through
+    // normally is ordinary. Requiring sight AND light to both be PROXIMITY
+    // missed most real windows and drew them as plain wall.
+    const thresholdSenses = [senseTypes.PROXIMITY, senseTypes.DISTANCE];
     const isWindow = move === movementTypes.NORMAL
-        && sight === senseTypes.PROXIMITY
-        && light === senseTypes.PROXIMITY;
+        && (thresholdSenses.includes(sight) || thresholdSenses.includes(light));
     if (isWindow) return 'window';
 
     const isPhysicalWall = move === movementTypes.NORMAL
@@ -451,7 +463,8 @@ function wallBoundaryObservations(
         canvas.grid.sizeX ?? canvas.grid.size,
         canvas.grid.sizeY ?? canvas.grid.size
     );
-    const sampleCount = midpointOnly || GLYPH_FEATURES.includes(feature)
+    const sampleCount = midpointOnly
+        || (GLYPH_FEATURES.includes(feature) && !SPANNING_GLYPH_FEATURES.includes(feature))
         ? 1
         : Math.max(1, Math.ceil(length / (gridSize * 0.25)));
     const observations = [];

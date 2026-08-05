@@ -18,6 +18,21 @@ const CAMERA_EASING = 0.28;
 const MAP_MARGIN_CELLS = 3;
 /** Features drawn with the doorway glyph rather than as a boundary stroke. */
 const DOOR_GLYPH_FEATURES = ['door', 'locked-door'];
+/** Openings drawn as wide as the run of squares they occupy. */
+const SPANNING_GLYPH_FEATURES = [...DOOR_GLYPH_FEATURES, 'window'];
+/** Wall stub left at each end of an opening, in local glyph units. */
+const GLYPH_STUB = 38;
+/**
+ * Each glyph is authored facing north and rotated into place. Note where local
+ * +x ends up: north and east run with increasing column/row, south and west
+ * run against them. That is why a run anchors at its far end for those two.
+ */
+const GLYPH_TRANSFORMS = {
+    north: 'translate(0 0)',
+    south: 'translate(100 100) rotate(180)',
+    west: 'translate(0 100) rotate(-90)',
+    east: 'translate(100 0) rotate(90)'
+};
 /** Rings of hatching drawn outward from the explored edge. Must fit the margin. */
 const HATCH_RINGS = MAP_MARGIN_CELLS;
 /** Neighbour offsets used to grow the hatch band outward. */
@@ -384,25 +399,24 @@ export class MappingWindow extends ToolWindowBase {
             }
         }
 
+        // Wide openings mark every square they cross, so join those marks back
+        // into one run and draw a single symbol across it.
+        for (const run of this._coalesceGlyphRuns(edges)) {
+            const target = DOOR_GLYPH_FEATURES.includes(run.feature)
+                ? doorSymbolsByCell
+                : windowSymbolsByCell;
+            const symbol = DOOR_GLYPH_FEATURES.includes(run.feature)
+                ? this._doorSymbol(run.direction, run.feature, run.span)
+                : this._windowSymbol(run.direction, run.span);
+            target.set(run.key, [...(target.get(run.key) ?? []), symbol]);
+        }
+
         for (const edge of edges.values()) {
-            if (DOOR_GLYPH_FEATURES.includes(edge.feature)) {
-                doorSymbolsByCell.set(edge.key, [
-                    ...(doorSymbolsByCell.get(edge.key) ?? []),
-                    this._doorSymbol(edge.direction, edge.feature)
-                ]);
-                continue;
-            }
+            if (SPANNING_GLYPH_FEATURES.includes(edge.feature)) continue;
             if (edge.feature === 'secret-door') {
                 secretDoorSymbolsByCell.set(edge.key, [
                     ...(secretDoorSymbolsByCell.get(edge.key) ?? []),
                     this._secretDoorSymbol(edge.direction)
-                ]);
-                continue;
-            }
-            if (edge.feature === 'window') {
-                windowSymbolsByCell.set(edge.key, [
-                    ...(windowSymbolsByCell.get(edge.key) ?? []),
-                    this._windowSymbol(edge.direction)
                 ]);
                 continue;
             }
@@ -415,26 +429,71 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     /**
+     * Join adjacent, collinear marks of the same opening into runs, so a wide
+     * door recorded across several squares becomes one wide symbol instead of
+     * a row of identical small ones.
+     */
+    _coalesceGlyphRuns(edges) {
+        const groups = new Map();
+        for (const edge of edges.values()) {
+            if (!SPANNING_GLYPH_FEATURES.includes(edge.feature)) continue;
+            const [column, row] = edge.key.split(',').map(Number);
+            const horizontal = edge.direction === 'north' || edge.direction === 'south';
+            const groupKey = `${edge.feature}:${edge.direction}:${horizontal ? row : column}`;
+            if (!groups.has(groupKey)) groups.set(groupKey, { edge, horizontal, column, row, values: [] });
+            groups.get(groupKey).values.push(horizontal ? column : row);
+        }
+
+        const runs = [];
+        for (const group of groups.values()) {
+            const { edge, horizontal, column, row } = group;
+            const values = [...new Set(group.values)].sort((left, right) => left - right);
+            // Anchor where the glyph's local +x runs along the run: forward for
+            // north and east, back from the far end for south and west.
+            const forward = edge.direction === 'north' || edge.direction === 'east';
+            const flush = (start, end) => {
+                const anchor = forward ? start : end;
+                runs.push({
+                    key: horizontal ? `${anchor},${row}` : `${column},${anchor}`,
+                    feature: edge.feature,
+                    direction: edge.direction,
+                    span: end - start + 1
+                });
+            };
+            let start = values[0];
+            let previous = values[0];
+            for (let index = 1; index < values.length; index++) {
+                if (values[index] === previous + 1) {
+                    previous = values[index];
+                    continue;
+                }
+                flush(start, previous);
+                start = values[index];
+                previous = values[index];
+            }
+            flush(start, previous);
+        }
+        return runs;
+    }
+
+    /**
      * A window: the wall opens and the gap is bridged by a shallow slot. Kept
      * deliberately thinner than the doorway box so the two read apart at a
      * glance, and drawn in ink like everything else -- the map is pen and ink,
      * so a colour was the one thing on it that could not have been drawn.
      */
-    _windowSymbol(direction) {
-        const transforms = {
-            north: 'translate(0 0)',
-            south: 'translate(100 100) rotate(180)',
-            west: 'translate(0 100) rotate(-90)',
-            east: 'translate(100 0) rotate(90)'
-        };
+    _windowSymbol(direction, span = 1) {
+        const width = 100 * span;
+        const stub = 30;
+        const inner = width - stub;
         return {
-            transform: transforms[direction] ?? transforms.north,
+            transform: GLYPH_TRANSFORMS[direction] ?? GLYPH_TRANSFORMS.north,
             lines: [
-                { points: '0,0 30,0', echoPoints: '0,-1.1 30,0.8' },
-                { points: '70,0 100,0', echoPoints: '70,-0.9 100,1' }
+                { points: `0,0 ${stub},0`, echoPoints: `0,-1.1 ${stub},0.8` },
+                { points: `${inner},0 ${width},0`, echoPoints: `${inner},-0.9 ${width},1` }
             ],
-            slotPoints: '30,-5 70,-4 70,5 30,4 30,-5',
-            echoSlotPoints: '31,-4 69,-5.5 70.5,4 30,5 31,-4'
+            slotPoints: `${stub},-5 ${inner},-4 ${inner},5 ${stub},4 ${stub},-5`,
+            echoSlotPoints: `${stub + 1},-4 ${inner - 1},-5.5 ${inner},4 ${stub},5 ${stub + 1},-4`
         };
     }
 
@@ -462,58 +521,39 @@ export class MappingWindow extends ToolWindowBase {
      * The extra marking that distinguishes a door variant, authored facing
      * north and rotated into place like the secret-door glyph.
      */
-    _doorMark(direction, feature) {
+    _doorMark(feature, width) {
         if (feature !== 'locked-door') return null;
-        const transforms = {
-            north: 'translate(0 0)',
-            south: 'translate(100 100) rotate(180)',
-            west: 'translate(0 100) rotate(-90)',
-            east: 'translate(100 0) rotate(90)'
-        };
+        const centre = width / 2;
+        // A bar across the doorway, per the official locked-door glyph. It
+        // rides inside the door's own group, so it needs no transform of its
+        // own and stays centred however wide the opening is.
         return {
-            transform: transforms[direction] ?? transforms.north,
-            // A bar across the doorway, per the official locked-door glyph.
-            lines: [{ points: '50,-9 50,11', echoPoints: '49.2,-9 50.8,11' }]
+            lines: [{
+                points: `${centre},-9 ${centre},11`,
+                echoPoints: `${centre - 0.8},-9 ${centre + 0.8},11`
+            }]
         };
     }
 
-    _doorSymbol(direction, feature = 'door') {
-        const symbols = {
-            north: {
-                lines: [
-                    { points: '0,0 38,0', echoPoints: '0,-1.2 38,0.8' },
-                    { points: '62,0 100,0', echoPoints: '62,-0.9 100,1' }
-                ],
-                boxPoints: '38,-12 62,-10.5 61,14 39,13 38,-12',
-                echoBoxPoints: '39,-11 61,-11.5 62,13 38,14 39,-11'
-            },
-            south: {
-                lines: [
-                    { points: '0,100 38,100', echoPoints: '0,98.8 38,100.8' },
-                    { points: '62,100 100,100', echoPoints: '62,99.1 100,101' }
-                ],
-                boxPoints: '38,88 62,89.5 61,114 39,113 38,88',
-                echoBoxPoints: '39,89 61,88.5 62,113 38,114 39,89'
-            },
-            west: {
-                lines: [
-                    { points: '0,0 0,38', echoPoints: '-1.2,0 0.8,38' },
-                    { points: '0,62 0,100', echoPoints: '-0.9,62 1,100' }
-                ],
-                boxPoints: '-12,38 -10.5,62 14,61 13,39 -12,38',
-                echoBoxPoints: '-11,39 -11.5,61 13,62 14,38 -11,39'
-            },
-            east: {
-                lines: [
-                    { points: '100,0 100,38', echoPoints: '98.8,0 100.8,38' },
-                    { points: '100,62 100,100', echoPoints: '99.1,62 101,100' }
-                ],
-                boxPoints: '88,38 89.5,62 114,61 113,39 88,38',
-                echoBoxPoints: '89,39 88.5,61 113,62 114,38 89,39'
-            }
+    /**
+     * A doorway, as wide as the opening it represents. Authored facing north
+     * and rotated into place, which is what lets one set of coordinates serve
+     * all four edges at any width; the four hardcoded direction variants this
+     * replaced could only ever be one square wide.
+     */
+    _doorSymbol(direction, feature = 'door', span = 1) {
+        const width = 100 * span;
+        const inner = width - GLYPH_STUB;
+        return {
+            transform: GLYPH_TRANSFORMS[direction] ?? GLYPH_TRANSFORMS.north,
+            lines: [
+                { points: `0,0 ${GLYPH_STUB},0`, echoPoints: `0,-1.2 ${GLYPH_STUB},0.8` },
+                { points: `${inner},0 ${width},0`, echoPoints: `${inner},-0.9 ${width},1` }
+            ],
+            boxPoints: `${GLYPH_STUB},-12 ${inner},-10.5 ${inner - 1},14 ${GLYPH_STUB + 1},13 ${GLYPH_STUB},-12`,
+            echoBoxPoints: `${GLYPH_STUB + 1},-11 ${inner - 1},-11.5 ${inner},13 ${GLYPH_STUB},14 ${GLYPH_STUB + 1},-11`,
+            mark: this._doorMark(feature, width)
         };
-        const symbol = symbols[direction];
-        return symbol ? { ...symbol, mark: this._doorMark(direction, feature) } : symbol;
     }
 
     _tileSegment(feature, direction, priority) {
