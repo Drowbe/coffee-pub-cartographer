@@ -277,9 +277,11 @@ export class MappingWindow extends ToolWindowBase {
                 segments: mappedGeometry.segmentsByCell.get(key) ?? [],
                 doorSymbols: mappedGeometry.doorSymbolsByCell.get(key) ?? [],
                 secretDoorSymbols: mappedGeometry.secretDoorSymbolsByCell.get(key) ?? [],
+                windowSymbols: mappedGeometry.windowSymbolsByCell.get(key) ?? [],
                 hasLinework: mappedGeometry.segmentsByCell.has(key)
                     || mappedGeometry.doorSymbolsByCell.has(key)
-                    || mappedGeometry.secretDoorSymbolsByCell.has(key),
+                    || mappedGeometry.secretDoorSymbolsByCell.has(key)
+                    || mappedGeometry.windowSymbolsByCell.has(key),
                 symbol: symbolDefinition ? {
                     className: `is-${symbol.type}`,
                     markup: symbolDefinition.markup,
@@ -352,6 +354,7 @@ export class MappingWindow extends ToolWindowBase {
         const segmentsByCell = new Map();
         const doorSymbolsByCell = new Map();
         const secretDoorSymbolsByCell = new Map();
+        const windowSymbolsByCell = new Map();
         // A doorway outranks the wall it sits in, and a discovered secret
         // outranks every ordinary opening on the same edge.
         const priorities = {
@@ -396,12 +399,43 @@ export class MappingWindow extends ToolWindowBase {
                 ]);
                 continue;
             }
+            if (edge.feature === 'window') {
+                windowSymbolsByCell.set(edge.key, [
+                    ...(windowSymbolsByCell.get(edge.key) ?? []),
+                    this._windowSymbol(edge.direction)
+                ]);
+                continue;
+            }
             const segment = this._tileSegment(edge.feature, edge.direction, priorities[edge.feature]);
             if (segment) {
                 segmentsByCell.set(edge.key, [...(segmentsByCell.get(edge.key) ?? []), segment]);
             }
         }
-        return { segmentsByCell, doorSymbolsByCell, secretDoorSymbolsByCell };
+        return { segmentsByCell, doorSymbolsByCell, secretDoorSymbolsByCell, windowSymbolsByCell };
+    }
+
+    /**
+     * A window: the wall opens and the gap is bridged by a shallow slot. Kept
+     * deliberately thinner than the doorway box so the two read apart at a
+     * glance, and drawn in ink like everything else -- the map is pen and ink,
+     * so a colour was the one thing on it that could not have been drawn.
+     */
+    _windowSymbol(direction) {
+        const transforms = {
+            north: 'translate(0 0)',
+            south: 'translate(100 100) rotate(180)',
+            west: 'translate(0 100) rotate(-90)',
+            east: 'translate(100 0) rotate(90)'
+        };
+        return {
+            transform: transforms[direction] ?? transforms.north,
+            lines: [
+                { points: '0,0 30,0', echoPoints: '0,-1.1 30,0.8' },
+                { points: '70,0 100,0', echoPoints: '70,-0.9 100,1' }
+            ],
+            slotPoints: '30,-5 70,-4 70,5 30,4 30,-5',
+            echoSlotPoints: '31,-4 69,-5.5 70.5,4 30,5 31,-4'
+        };
     }
 
     _secretDoorSymbol(direction) {

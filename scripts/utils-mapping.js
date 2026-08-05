@@ -8,8 +8,14 @@ const DIRECTIONS = ['north', 'east', 'south', 'west'];
 const DIAGONAL_WALL_RATIO = 0.4;
 /** Features drawn with the doorway glyph rather than as a boundary stroke. */
 const DOOR_FEATURES = ['door', 'locked-door'];
+/**
+ * Features drawn as a single glyph on the wall. These are clustered from their
+ * fragments and marked once at the midpoint, because the symbol represents the
+ * opening itself rather than every quarter-grid sample of the wall document.
+ */
+const GLYPH_FEATURES = [...DOOR_FEATURES, 'secret-door', 'window'];
 /** Every feature that may be persisted against a cell edge. */
-const EDGE_FEATURES = ['wall', 'window', 'secret-door', ...DOOR_FEATURES];
+const EDGE_FEATURES = ['wall', ...GLYPH_FEATURES];
 
 function isSecretDoor(document) {
     const source = document?._source ?? document;
@@ -445,7 +451,7 @@ function wallBoundaryObservations(
         canvas.grid.sizeX ?? canvas.grid.size,
         canvas.grid.sizeY ?? canvas.grid.size
     );
-    const sampleCount = midpointOnly || ['door', 'secret-door'].includes(feature)
+    const sampleCount = midpointOnly || GLYPH_FEATURES.includes(feature)
         ? 1
         : Math.max(1, Math.ceil(length / (gridSize * 0.25)));
     const observations = [];
@@ -682,9 +688,10 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
     const allowed = revealKeys instanceof Set ? revealKeys : new Set(revealKeys ?? []);
     const observed = {};
     const sources = {};
-    // Door variants cluster only with their own kind, so a locked door beside a
-    // plain one cannot be collapsed into a single mislabelled glyph.
-    const doorGroups = new Map();
+    // Glyph features cluster only with their own kind, so a locked door beside
+    // a plain one -- or a window beside a door -- cannot be collapsed into a
+    // single mislabelled symbol.
+    const glyphGroups = new Map();
     const secretDocuments = [];
     const structuralDocuments = [];
     for (const wall of canvas.walls?.placeables ?? []) {
@@ -693,9 +700,9 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             continue;
         }
         const feature = classifyWall(wall.document);
-        if (DOOR_FEATURES.includes(feature)) {
-            if (!doorGroups.has(feature)) doorGroups.set(feature, []);
-            doorGroups.get(feature).push(wall.document);
+        if (GLYPH_FEATURES.includes(feature)) {
+            if (!glyphGroups.has(feature)) glyphGroups.set(feature, []);
+            glyphGroups.get(feature).push(wall.document);
             continue;
         }
         structuralDocuments.push(wall.document);
@@ -725,11 +732,12 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             }
         }
     }
-    for (const [feature, documents] of doorGroups) {
+    for (const [feature, documents] of glyphGroups) {
         for (const span of normalizedDoorSpans(documents)) {
-            // The source prefix stays "door:" for every variant so attribution
-            // on records written before variants existed still lines up.
-            const sourceId = `door:${span.members.map(member => member.document.id).sort().join('|')}`;
+            // Door variants keep the "door:" prefix so attribution on records
+            // written before variants existed still lines up.
+            const prefix = DOOR_FEATURES.includes(feature) ? 'door' : feature;
+            const sourceId = `${prefix}:${span.members.map(member => member.document.id).sort().join('|')}`;
             for (const observation of wallBoundaryObservations(
                 span.document,
                 tokenDocument,

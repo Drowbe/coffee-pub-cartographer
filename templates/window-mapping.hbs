@@ -73,6 +73,16 @@
                         {{/if}}
                     </g>
                     {{/each}}
+                    {{#each windowSymbols}}
+                    <g class="cartographer-mapping-window-symbol" transform="{{transform}}">
+                        {{#each lines}}
+                        <polyline class="cartographer-mapping-window-line is-sketch-echo" points="{{echoPoints}}"></polyline>
+                        <polyline class="cartographer-mapping-window-line" points="{{points}}"></polyline>
+                        {{/each}}
+                        <polygon class="cartographer-mapping-window-slot is-sketch-echo" points="{{echoSlotPoints}}"></polygon>
+                        <polygon class="cartographer-mapping-window-slot" points="{{slotPoints}}"></polygon>
+                    </g>
+                    {{/each}}
                     {{#each secretDoorSymbols}}
                     <g class="cartographer-mapping-secret-door-symbol" transform="{{transform}}">
                         {{#each lines}}

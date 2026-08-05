@@ -13,7 +13,6 @@
     /* Explored floor, and anything that must read as drawn on top of it. */
     --cartographer-map-paper: #f7ecd8;
     --cartographer-map-ink: #171310;
-    --cartographer-map-window-ink: #2f6f9f;
     --cartographer-map-floor-grid: rgba(112, 85, 49, 0.22);
 
     /* Undiscovered ground behind the drawing. */
@@ -28,7 +27,6 @@
 .application.blacksmith-window-tool.cartographer-mapping-window.blacksmith-window-tool-theme-dark {
     --cartographer-map-paper: #23211d;
     --cartographer-map-ink: #ece3d0;
-    --cartographer-map-window-ink: #6fb3e0;
     --cartographer-map-floor-grid: rgba(236, 227, 208, 0.16);
     /* Matches --blacksmith-tool-surface-sunken for this theme so the endless
        canvas does not show a tonal seam where the grid box ends. */
@@ -46,7 +44,6 @@
 .application.blacksmith-window-tool.cartographer-mapping-window.blacksmith-window-tool-theme-glass {
     --cartographer-map-paper: rgba(26, 23, 19, 0.9);
     --cartographer-map-ink: #f2ead9;
-    --cartographer-map-window-ink: #86c2ea;
     --cartographer-map-floor-grid: rgba(242, 234, 217, 0.18);
     --cartographer-map-void: transparent;
     --cartographer-map-void-grid: rgba(255, 255, 255, 0.07);
@@ -307,18 +304,32 @@
     stroke-linejoin: round;
 }
 
-.cartographer-mapping-segment.is-window {
-    stroke: var(--cartographer-map-window-ink);
-    stroke-width: 13;
+.cartographer-mapping-window-line {
+    fill: none;
+    stroke: var(--cartographer-map-ink);
+    stroke-width: 12;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* Shallower than the doorway box, so a window and a door stay distinct. */
+.cartographer-mapping-window-slot {
+    fill: var(--cartographer-map-paper);
+    stroke: var(--cartographer-map-ink);
+    stroke-width: 7;
+    stroke-linejoin: round;
+}
+
+.cartographer-mapping-window-line.is-sketch-echo,
+.cartographer-mapping-window-slot.is-sketch-echo {
+    fill: none;
+    opacity: 0.25;
+    stroke-width: 4;
 }
 
 .cartographer-mapping-segment.is-sketch-echo {
     opacity: 0.28;
     stroke-width: 7;
-}
-
-.cartographer-mapping-segment.is-window.is-sketch-echo {
-    stroke-width: 8;
 }
 
 
