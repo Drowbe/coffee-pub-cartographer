@@ -2,11 +2,51 @@
 /* --- MAPPING TOOL ------------------- */
 /* ------------------------------------ */
 
+/* The map is a drawing surface, not window chrome, so it carries its own
+   palette instead of borrowing the shell's. Reusing --blacksmith-tool-scrim as
+   paper is what broke Dark and Glass: scrim turns near-black in those themes,
+   which left black ink on black paper. Paper and ink are declared as a pair per
+   theme so the contrast is stated in one place and cannot drift apart. */
 .application.blacksmith-window-tool.cartographer-mapping-window {
     --cartographer-map-cell-size: 36px;
-    --cartographer-map-wall: #000;
-    --cartographer-map-window: #4c93cc;
-    --cartographer-map-floor-grid: color-mix(in srgb, var(--blacksmith-tool-divider) 28%, transparent);
+
+    /* Explored floor, and anything that must read as drawn on top of it. */
+    --cartographer-map-paper: #f7ecd8;
+    --cartographer-map-ink: #171310;
+    --cartographer-map-window-ink: #2f6f9f;
+    --cartographer-map-floor-grid: rgba(112, 85, 49, 0.22);
+
+    /* Undiscovered ground behind the drawing. */
+    --cartographer-map-void: rgba(112, 85, 49, 0.08);
+    --cartographer-map-void-grid: rgba(112, 85, 49, 0.16);
+
+    --cartographer-map-party: #c15701;
+}
+
+.application.blacksmith-window-tool.cartographer-mapping-window.blacksmith-window-tool-theme-dark {
+    --cartographer-map-paper: #23211d;
+    --cartographer-map-ink: #ece3d0;
+    --cartographer-map-window-ink: #6fb3e0;
+    --cartographer-map-floor-grid: rgba(236, 227, 208, 0.16);
+    /* Matches --blacksmith-tool-surface-sunken for this theme so the endless
+       canvas does not show a tonal seam where the grid box ends. */
+    --cartographer-map-void: rgba(0, 0, 0, 0.25);
+    --cartographer-map-void-grid: rgba(236, 227, 208, 0.08);
+    --cartographer-map-party: #e8a34a;
+}
+
+/* Glass puts the translucency in the shell and the undiscovered area only. The
+   drawn map stays opaque, per the Tool window contract that consumer content
+   may remain opaque for readability, so explored rooms read as solid paper
+   floating over the canvas rather than dissolving into the frost. */
+.application.blacksmith-window-tool.cartographer-mapping-window.blacksmith-window-tool-theme-glass {
+    --cartographer-map-paper: rgba(26, 23, 19, 0.9);
+    --cartographer-map-ink: #f2ead9;
+    --cartographer-map-window-ink: #86c2ea;
+    --cartographer-map-floor-grid: rgba(242, 234, 217, 0.18);
+    --cartographer-map-void: transparent;
+    --cartographer-map-void-grid: rgba(255, 255, 255, 0.07);
+    --cartographer-map-party: rgba(240, 214, 160, 0.95);
 }
 
 .cartographer-mapping-window .blacksmith-window-tool-body {
@@ -71,7 +111,7 @@
     min-height: 240px;
     overflow: hidden;
     padding: 0;
-    background-color: var(--blacksmith-tool-surface-sunken);
+    background-color: var(--cartographer-map-void);
     user-select: none;
     touch-action: none;
 }
@@ -90,10 +130,10 @@
     width: max-content;
     transform-origin: 0 0;
     will-change: transform;
-    background-color: var(--blacksmith-tool-surface-sunken);
+    background-color: var(--cartographer-map-void);
     background-image:
-        linear-gradient(var(--blacksmith-tool-divider) 1px, transparent 1px),
-        linear-gradient(90deg, var(--blacksmith-tool-divider) 1px, transparent 1px);
+        linear-gradient(var(--cartographer-map-void-grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--cartographer-map-void-grid) 1px, transparent 1px);
     background-size: var(--cartographer-map-cell-size) var(--cartographer-map-cell-size);
 }
 
@@ -104,7 +144,7 @@
 }
 
 .cartographer-mapping-cell.is-explored {
-    background: var(--blacksmith-tool-scrim);
+    background: var(--cartographer-map-paper);
     box-shadow: inset -1px -1px 0 var(--cartographer-map-floor-grid);
 }
 
@@ -145,14 +185,14 @@
 
 .cartographer-mapping-segment {
     fill: none;
-    stroke: var(--cartographer-map-wall);
+    stroke: var(--cartographer-map-ink);
     stroke-width: 12;
     stroke-linecap: round;
     stroke-linejoin: round;
 }
 
 .cartographer-mapping-segment.is-window {
-    stroke: var(--cartographer-map-window);
+    stroke: var(--cartographer-map-window-ink);
     stroke-width: 13;
 }
 
@@ -168,7 +208,7 @@
 
 .cartographer-mapping-door-line,
 .cartographer-mapping-door-box {
-    stroke: var(--cartographer-map-wall);
+    stroke: var(--cartographer-map-ink);
     stroke-linecap: round;
     stroke-linejoin: round;
 }
@@ -179,7 +219,7 @@
 }
 
 .cartographer-mapping-door-box {
-    fill: var(--blacksmith-tool-scrim);
+    fill: var(--cartographer-map-paper);
     stroke-width: 9;
 }
 
@@ -192,7 +232,7 @@
 
 .cartographer-mapping-secret-door-line {
     fill: none;
-    stroke: var(--cartographer-map-wall);
+    stroke: var(--cartographer-map-ink);
     stroke-width: 12;
     stroke-linecap: round;
     stroke-linejoin: round;
@@ -204,7 +244,7 @@
 }
 
 .cartographer-mapping-secret-door-letter {
-    fill: var(--cartographer-map-wall);
+    fill: var(--cartographer-map-ink);
     font-family: Georgia, 'Times New Roman', serif;
     font-size: 48px;
     font-weight: 700;
@@ -221,7 +261,7 @@
     overflow: visible;
     pointer-events: none;
     fill: none;
-    stroke: var(--cartographer-map-wall);
+    stroke: var(--cartographer-map-ink);
     stroke-width: 4.5;
     stroke-linecap: round;
     stroke-linejoin: round;
@@ -244,19 +284,19 @@
 }
 
 .cartographer-mapping-placeable .symbol-fill {
-    fill: var(--cartographer-map-wall);
+    fill: var(--cartographer-map-ink);
 }
 
 .cartographer-mapping-placeable .symbol-fill-soft {
-    fill: var(--blacksmith-tool-scrim);
+    fill: var(--cartographer-map-paper);
 }
 
 .cartographer-mapping-placeable .symbol-cutout {
-    stroke: var(--blacksmith-tool-scrim);
+    stroke: var(--cartographer-map-paper);
 }
 
 .cartographer-mapping-placeable .symbol-text {
-    fill: var(--cartographer-map-wall);
+    fill: var(--cartographer-map-ink);
     stroke: none;
     font-family: Georgia, 'Times New Roman', serif;
     font-size: 34px;
@@ -280,7 +320,7 @@
 .cartographer-mapping-party {
     z-index: 4;
     pointer-events: none;
-    color: var(--blacksmith-tool-accent);
+    color: var(--cartographer-map-party);
     font-size: 18px;
     filter: drop-shadow(0 1px 1px rgb(0 0 0 / 55%));
 }

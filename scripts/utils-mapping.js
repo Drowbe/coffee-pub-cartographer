@@ -4,6 +4,9 @@
 
 const DIRECTIONS = ['north', 'east', 'south', 'west'];
 
+/** Slope ratio at which a wall is treated as diagonal rather than straight. */
+const DIAGONAL_WALL_RATIO = 0.4;
+
 function isSecretDoor(document) {
     const source = document?._source ?? document;
     const doorTypes = CONST.WALL_DOOR_TYPES ?? {};
@@ -163,6 +166,100 @@ function farthestEndpointPair(segments) {
 }
 
 /**
+ * Order wall documents into connected runs, each entry flagged with whether it
+ * is walked backwards so a run reads as one continuous path.
+ *
+ * A Foundry curve is authored as a fan of short straight segments that share
+ * endpoints. Snapping each document independently is what leaves a curve full
+ * of holes: the stair-step connector can only join boundaries it sees in
+ * sequence, and a curve's gaps fall on the joins *between* documents. Walking a
+ * run as one path puts those joins in sequence.
+ *
+ * Only documents that actually share an endpoint are joined, so two wall runs
+ * with an open archway between them are never chained across the opening.
+ */
+function connectedWallRuns(documents) {
+    const gridSize = Math.min(
+        canvas.grid.sizeX ?? canvas.grid.size,
+        canvas.grid.sizeY ?? canvas.grid.size
+    );
+    const tolerance = Math.max(1, gridSize * 0.08);
+    const segments = documents.map(wallSegment).filter(Boolean);
+
+    // Bucket endpoints on a tolerance-sized lattice. This runs for every
+    // sampled step of a move, so searching for joins by scanning every wall
+    // would be quadratic per step on a wall-heavy scene.
+    const buckets = new Map();
+    const cellOf = point => [Math.round(point.x / tolerance), Math.round(point.y / tolerance)];
+    for (const segment of segments) {
+        for (const point of [segment.start, segment.end]) {
+            const [x, y] = cellOf(point);
+            const key = `${x},${y}`;
+            if (!buckets.has(key)) buckets.set(key, []);
+            buckets.get(key).push(segment);
+        }
+    }
+    // Two points within tolerance can still quantize into neighbouring
+    // buckets, so probe the surrounding lattice cells as well.
+    const neighbours = point => {
+        const [x, y] = cellOf(point);
+        const found = [];
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                const list = buckets.get(`${x + dx},${y + dy}`);
+                if (list) found.push(...list);
+            }
+        }
+        return found;
+    };
+
+    const near = (first, second) => pointDistance(first, second) <= tolerance;
+    const used = new Set();
+    const runs = [];
+
+    for (const seed of segments) {
+        if (used.has(seed)) continue;
+        used.add(seed);
+        const run = [{ document: seed.document, reversed: false }];
+        let head = seed.start;
+        let tail = seed.end;
+
+        for (let extended = true; extended;) {
+            extended = false;
+            for (const candidate of neighbours(tail)) {
+                if (used.has(candidate)) continue;
+                if (near(tail, candidate.start)) {
+                    run.push({ document: candidate.document, reversed: false });
+                    tail = candidate.end;
+                } else if (near(tail, candidate.end)) {
+                    run.push({ document: candidate.document, reversed: true });
+                    tail = candidate.start;
+                } else continue;
+                used.add(candidate);
+                extended = true;
+                break;
+            }
+            if (extended) continue;
+            for (const candidate of neighbours(head)) {
+                if (used.has(candidate)) continue;
+                if (near(head, candidate.end)) {
+                    run.unshift({ document: candidate.document, reversed: false });
+                    head = candidate.start;
+                } else if (near(head, candidate.start)) {
+                    run.unshift({ document: candidate.document, reversed: true });
+                    head = candidate.end;
+                } else continue;
+                used.add(candidate);
+                extended = true;
+                break;
+            }
+        }
+        runs.push(run);
+    }
+    return runs;
+}
+
+/**
  * Scene authors frequently build one curved or decorative doorway from two
  * short, connected Wall documents. Collapse those fragments to the chain's
  * first/last extent before grid snapping so one doorway yields one glyph.
@@ -228,6 +325,55 @@ function normalizedDoorSpans(documents) {
  * side, so seeing the same structure from another direction cannot move it to
  * a different map edge.
  */
+/**
+ * True when a wall runs diagonally enough that snapping it to a single grid
+ * boundary per square would leave the stair steps open. A ratio of 0.4 is
+ * roughly 22 degrees off the axis; anything flatter reads as a straight wall
+ * and keeps the original one-edge-per-square treatment.
+ */
+function isDiagonalWall(wallDx, wallDy) {
+    const longer = Math.max(Math.abs(wallDx), Math.abs(wallDy));
+    if (!longer) return false;
+    return (Math.min(Math.abs(wallDx), Math.abs(wallDy)) / longer) >= DIAGONAL_WALL_RATIO;
+}
+
+/**
+ * The two lattice corners a cell boundary runs between. Working in corner
+ * coordinates lets steps be joined by geometry rather than by enumerating
+ * every direction pairing.
+ */
+function edgeNodes({ column, row }, direction) {
+    return {
+        north: [[column, row], [column + 1, row]],
+        south: [[column, row + 1], [column + 1, row + 1]],
+        west: [[column, row], [column, row + 1]],
+        east: [[column + 1, row], [column + 1, row + 1]]
+    }[direction] ?? null;
+}
+
+/**
+ * The boundary that closes the gap between two stair treads, or null when they
+ * already meet or sit too far apart to join. Only ever spans a single cell
+ * boundary, so this can close a step but cannot invent a wall run.
+ */
+function connectingBoundary(fromNodes, toNodes) {
+    let best = null;
+    for (const from of fromNodes) {
+        for (const to of toNodes) {
+            const distance = Math.abs(from[0] - to[0]) + Math.abs(from[1] - to[1]);
+            if (!distance) return null;
+            if (distance === 1 && !best) best = [from, to];
+        }
+    }
+    if (!best) return null;
+    const [[fromX, fromY], [toX, toY]] = best;
+    // A horizontal join is the north boundary of the cell below it; a vertical
+    // join is the west boundary of the cell to its right.
+    return fromY === toY
+        ? { column: Math.min(fromX, toX), row: fromY, direction: 'north' }
+        : { column: fromX, row: Math.min(fromY, toY), direction: 'west' };
+}
+
 function boundaryCandidates(wallPoint, wallDx, wallDy) {
     const cell = gridCellAt(wallPoint);
     if (!cell) return [];
@@ -258,7 +404,13 @@ function wallBoundaryObservations(
     document,
     tokenDocument,
     allowed,
-    { featureOverride = null, requireVisibility = true, midpointOnly = false } = {}
+    {
+        featureOverride = null,
+        requireVisibility = true,
+        midpointOnly = false,
+        reversed = false,
+        carry = null
+    } = {}
 ) {
     const feature = featureOverride ?? classifyWall(document);
     if (!feature || !canvas?.grid) return [];
@@ -281,9 +433,27 @@ function wallBoundaryObservations(
         : Math.max(1, Math.ceil(length / (gridSize * 0.25)));
     const observations = [];
     const seen = new Set();
+    const diagonal = isDiagonalWall(wallDx, wallDy);
+    // Carried across a connected run so the stair-step connector can close the
+    // joins between documents, not just the steps within one.
+    let previousNodes = carry?.nodes ?? null;
+
+    const record = (cell, direction) => {
+        const key = `${cell.column},${cell.row}`;
+        if (!allowed.has(key)) return false;
+        const observationKey = `${key}:${feature}:${direction}`;
+        if (seen.has(observationKey)) return true;
+        seen.add(observationKey);
+        observations.push({ key, code: `${feature}:${direction}` });
+        return true;
+    };
 
     for (let index = 0; index < sampleCount; index++) {
-        const amount = (index + 0.5) / sampleCount;
+        // A run may walk a document against its own stored direction. Sampling
+        // in travel order keeps consecutive samples geometrically adjacent,
+        // which is what the connector relies on.
+        const step = (index + 0.5) / sampleCount;
+        const amount = reversed ? 1 - step : step;
         const wallPoint = {
             x: x1 + (wallDx * amount),
             y: y1 + (wallDy * amount)
@@ -299,14 +469,19 @@ function wallBoundaryObservations(
                 - Math.hypot(rightCenter.x - origin.x, rightCenter.y - origin.y);
         });
         const cell = candidates[0];
-        const key = `${cell.column},${cell.row}`;
-        const direction = cell.direction;
-        const code = `${feature}:${direction}`;
-        const observationKey = `${key}:${code}`;
-        if (seen.has(observationKey)) continue;
-        seen.add(observationKey);
-        observations.push({ key, code });
+        const nodes = edgeNodes(cell, cell.direction);
+        // A diagonal wall snapped to one boundary per square gives a tread with
+        // no riser, so consecutive steps never join up. Where this sample's
+        // boundary lands one cell away from the previous one, add the boundary
+        // that closes the corner between them.
+        if (diagonal && previousNodes && nodes) {
+            const connector = connectingBoundary(previousNodes, nodes);
+            if (connector) record(connector, connector.direction);
+        }
+        record(cell, cell.direction);
+        if (nodes) previousNodes = nodes;
     }
+    if (carry) carry.nodes = previousNodes;
     return observations;
 }
 
@@ -492,6 +667,7 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
     const sources = {};
     const doorDocuments = [];
     const secretDocuments = [];
+    const structuralDocuments = [];
     for (const wall of canvas.walls?.placeables ?? []) {
         if (isSecretDoor(wall.document)) {
             secretDocuments.push(wall.document);
@@ -501,16 +677,30 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             doorDocuments.push(wall.document);
             continue;
         }
-        for (const observation of wallBoundaryObservations(wall.document, tokenDocument, allowed)) {
-            observed[observation.key] ??= [];
-            if (!observed[observation.key].includes(observation.code)) {
-                observed[observation.key].push(observation.code);
-            }
-            const sourceId = `wall:${wall.document.id}`;
-            sources[sourceId] ??= {};
-            sources[sourceId][observation.key] ??= [];
-            if (!sources[sourceId][observation.key].includes(observation.code)) {
-                sources[sourceId][observation.key].push(observation.code);
+        structuralDocuments.push(wall.document);
+    }
+
+    // Walk each connected run as one path so the stair-step connector carries
+    // across the joins between documents. Attribution stays per document, so
+    // deleting one wall still retracts exactly its own linework.
+    for (const run of connectedWallRuns(structuralDocuments)) {
+        const carry = {};
+        for (const { document, reversed } of run) {
+            const observations = wallBoundaryObservations(document, tokenDocument, allowed, {
+                reversed,
+                carry
+            });
+            for (const observation of observations) {
+                observed[observation.key] ??= [];
+                if (!observed[observation.key].includes(observation.code)) {
+                    observed[observation.key].push(observation.code);
+                }
+                const sourceId = `wall:${document.id}`;
+                sources[sourceId] ??= {};
+                sources[sourceId][observation.key] ??= [];
+                if (!sources[sourceId][observation.key].includes(observation.code)) {
+                    sources[sourceId][observation.key].push(observation.code);
+                }
             }
         }
     }
