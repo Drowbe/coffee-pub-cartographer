@@ -342,7 +342,7 @@ function segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd) {
  * stable edge to the old-school secret-door symbol permanently.
  */
 function observeCrossedSecretDoors(tokenDocument, fromCoordinates, toCoordinates, exploredKeys) {
-    if (!fromCoordinates || !toCoordinates || !canvas?.walls) return {};
+    if (!fromCoordinates || !toCoordinates || !canvas?.walls) return { features: {}, sources: {} };
     const tokenShape = {
         id: tokenDocument.id,
         width: Number(tokenDocument.width) || 1,
@@ -352,10 +352,13 @@ function observeCrossedSecretDoors(tokenDocument, fromCoordinates, toCoordinates
     const toToken = { ...tokenShape, x: toCoordinates.x, y: toCoordinates.y };
     const movementStart = tokenCenter(fromToken);
     const movementEnd = tokenCenter(toToken);
-    if (movementStart.x === movementEnd.x && movementStart.y === movementEnd.y) return {};
+    if (movementStart.x === movementEnd.x && movementStart.y === movementEnd.y) {
+        return { features: {}, sources: {} };
+    }
 
     const allowed = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
     const observed = {};
+    const sources = {};
     const secretDocuments = (canvas.walls.placeables ?? [])
         .map(wall => wall.document)
         .filter(isSecretDoor);
@@ -367,6 +370,7 @@ function observeCrossedSecretDoors(tokenDocument, fromCoordinates, toCoordinates
             member.end
         ));
         if (!crossed) continue;
+        const sourceId = `door:${span.members.map(member => member.document.id).sort().join('|')}`;
 
         for (const observation of wallBoundaryObservations(
             span.document,
@@ -378,9 +382,14 @@ function observeCrossedSecretDoors(tokenDocument, fromCoordinates, toCoordinates
             if (!observed[observation.key].includes(observation.code)) {
                 observed[observation.key].push(observation.code);
             }
+            sources[sourceId] ??= {};
+            sources[sourceId][observation.key] ??= [];
+            if (!sources[sourceId][observation.key].includes(observation.code)) {
+                sources[sourceId][observation.key].push(observation.code);
+            }
         }
     }
-    return observed;
+    return { features: observed, sources };
 }
 
 function cellCenter(cell) {
@@ -480,6 +489,7 @@ function visibleRevealKeys(tokenDocument, revealKeys) {
 function observeVisibleFeatures(tokenDocument, revealKeys) {
     const allowed = revealKeys instanceof Set ? revealKeys : new Set(revealKeys ?? []);
     const observed = {};
+    const sources = {};
     const doorDocuments = [];
     const secretDocuments = [];
     for (const wall of canvas.walls?.placeables ?? []) {
@@ -496,9 +506,16 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             if (!observed[observation.key].includes(observation.code)) {
                 observed[observation.key].push(observation.code);
             }
+            const sourceId = `wall:${wall.document.id}`;
+            sources[sourceId] ??= {};
+            sources[sourceId][observation.key] ??= [];
+            if (!sources[sourceId][observation.key].includes(observation.code)) {
+                sources[sourceId][observation.key].push(observation.code);
+            }
         }
     }
     for (const span of normalizedDoorSpans(doorDocuments)) {
+        const sourceId = `door:${span.members.map(member => member.document.id).sort().join('|')}`;
         for (const observation of wallBoundaryObservations(
             span.document,
             tokenDocument,
@@ -509,6 +526,11 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             if (!observed[observation.key].includes(observation.code)) {
                 observed[observation.key].push(observation.code);
             }
+            sources[sourceId] ??= {};
+            sources[sourceId][observation.key] ??= [];
+            if (!sources[sourceId][observation.key].includes(observation.code)) {
+                sources[sourceId][observation.key].push(observation.code);
+            }
         }
     }
     // Until crossed, a secret door is still drawn as an ordinary wall—but it
@@ -516,6 +538,7 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
     // the S. This lets discovery replace the wall on one canonical edge rather
     // than leaving sampled wall fragments beside the revealed symbol.
     for (const span of normalizedDoorSpans(secretDocuments)) {
+        const sourceId = `door:${span.members.map(member => member.document.id).sort().join('|')}`;
         for (const observation of wallBoundaryObservations(
             span.document,
             tokenDocument,
@@ -526,9 +549,14 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             if (!observed[observation.key].includes(observation.code)) {
                 observed[observation.key].push(observation.code);
             }
+            sources[sourceId] ??= {};
+            sources[sourceId][observation.key] ??= [];
+            if (!sources[sourceId][observation.key].includes(observation.code)) {
+                sources[sourceId][observation.key].push(observation.code);
+            }
         }
     }
-    return observed;
+    return { features: observed, sources };
 }
 
 function normalizeFeatures(raw) {
@@ -542,6 +570,17 @@ function normalizeFeatures(raw) {
             return ['wall', 'window', 'door', 'secret-door'].includes(feature) && DIRECTIONS.includes(direction);
         }))];
         if (valid.length) normalized[key] = valid;
+    }
+    return normalized;
+}
+
+function normalizeFeatureSources(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const normalized = {};
+    for (const [sourceId, features] of Object.entries(raw)) {
+        if (typeof sourceId !== 'string' || !/^(?:wall|door):[A-Za-z0-9_|.-]+$/.test(sourceId)) continue;
+        const sourceFeatures = normalizeFeatures(features);
+        if (Object.keys(sourceFeatures).length) normalized[sourceId] = sourceFeatures;
     }
     return normalized;
 }
@@ -562,12 +601,21 @@ function parsedFeatureEdge(key, code) {
     const edgeKey = featureEdgeKey(key, code);
     if (!edgeKey) return null;
     const [orientation, first, second] = edgeKey.split(':');
-    const coordinate = Number(first);
-    const span = Number(second);
-    if (!['h', 'v'].includes(orientation) || !Number.isInteger(coordinate) || !Number.isInteger(span)) {
+    const firstCoordinate = Number(first);
+    const secondCoordinate = Number(second);
+    if (!['h', 'v'].includes(orientation)
+        || !Number.isInteger(firstCoordinate)
+        || !Number.isInteger(secondCoordinate)) {
         return null;
     }
-    return { key: edgeKey, orientation, coordinate, span };
+    return {
+        key: edgeKey,
+        orientation,
+        // Vertical opposing edges move between columns; horizontal opposing
+        // edges move between rows. The span coordinate runs along the edge.
+        coordinate: orientation === 'v' ? firstCoordinate : secondCoordinate,
+        span: orientation === 'v' ? secondCoordinate : firstCoordinate
+    };
 }
 
 function isOpposingEdge(first, second) {
@@ -650,15 +698,85 @@ function mergeFeatures(left, right) {
     return merged;
 }
 
+function mergeSourceFeatures(left, right) {
+    const merged = normalizeFeatures(left);
+    const incoming = normalizeFeatures(right);
+    const incomingEdges = [];
+    const incomingEdgeKeys = new Set();
+    for (const [key, codes] of Object.entries(incoming)) {
+        for (const code of codes) {
+            const edge = parsedFeatureEdge(key, code);
+            if (!edge) continue;
+            incomingEdges.push(edge);
+            incomingEdgeKeys.add(edge.key);
+        }
+    }
+
+    // A single Foundry Wall source cannot simultaneously occupy the two
+    // opposing parallel boundaries of one abstract map square. When a later
+    // view places that source on the other side, replace the provisional edge
+    // instead of retaining both and drawing a false box or double doorway.
+    for (const [key, codes] of Object.entries(merged)) {
+        const retained = codes.filter(code => {
+            const edge = parsedFeatureEdge(key, code);
+            if (!edge || incomingEdgeKeys.has(edge.key)) return true;
+            return !incomingEdges.some(incomingEdge => isOpposingEdge(edge, incomingEdge));
+        });
+        if (retained.length) merged[key] = retained;
+        else delete merged[key];
+    }
+    return mergeFeatures(merged, incoming);
+}
+
+function mergeFeatureSources(left, right) {
+    const merged = normalizeFeatureSources(left);
+    const incoming = normalizeFeatureSources(right);
+    for (const [sourceId, features] of Object.entries(incoming)) {
+        merged[sourceId] = mergeSourceFeatures(merged[sourceId], features);
+        if (!Object.keys(merged[sourceId]).length) delete merged[sourceId];
+    }
+    return merged;
+}
+
+function flattenFeatureSources(raw) {
+    const flattened = {};
+    for (const features of Object.values(normalizeFeatureSources(raw))) {
+        for (const [key, codes] of Object.entries(features)) {
+            flattened[key] ??= [];
+            for (const code of codes) {
+                if (!flattened[key].includes(code)) flattened[key].push(code);
+            }
+        }
+    }
+    return flattened;
+}
+
+function subtractFeatureSources(rawFeatures, rawSources) {
+    const remaining = normalizeFeatures(rawFeatures);
+    for (const features of Object.values(normalizeFeatureSources(rawSources))) {
+        for (const [key, codes] of Object.entries(features)) {
+            if (!remaining[key]) continue;
+            remaining[key] = remaining[key].filter(code => !codes.includes(code));
+            if (!remaining[key].length) delete remaining[key];
+        }
+    }
+    return remaining;
+}
+
 export {
     classifyWall,
     directionBetween,
+    flattenFeatureSources,
     gridTravelPath,
+    mergeFeatureSources,
     mergeFeatures,
+    mergeSourceFeatures,
+    normalizeFeatureSources,
     normalizeFeatures,
     observeCrossedSecretDoors,
     observeVisibleFeatures,
     oppositeDirection,
     orthogonalPath,
+    subtractFeatureSources,
     visibleRevealKeys
 };

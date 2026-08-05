@@ -6,11 +6,16 @@ import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
 import { socketManager } from './manager-sockets.js';
 import {
+    flattenFeatureSources,
     gridTravelPath,
+    mergeFeatureSources,
     mergeFeatures,
+    mergeSourceFeatures,
+    normalizeFeatureSources,
     normalizeFeatures,
     observeCrossedSecretDoors,
     observeVisibleFeatures,
+    subtractFeatureSources,
     visibleRevealKeys
 } from './utils-mapping.js';
 import { notify } from './utils-toast.js';
@@ -40,6 +45,7 @@ class MappingManager {
         this._revealProcessingQueue = Promise.resolve();
         this._authoritativePositions = new Map();
         this._recentTokenPositions = new Map();
+        this._deletedMapIds = new Set();
         this._selectionFrame = null;
         this._closingWindow = false;
         this._catchUpTimer = null;
@@ -66,6 +72,7 @@ class MappingManager {
             gridDistance: 5,
             explored: [],
             features: {},
+            featureSources: {},
             symbols: [],
             lastPosition: null,
             createdAt: 0,
@@ -95,6 +102,7 @@ class MappingManager {
         this.lastGridKey = null;
         this._authoritativePositions.clear();
         this._recentTokenPositions.clear();
+        this._deletedMapIds.clear();
         if (this._selectionFrame) cancelAnimationFrame(this._selectionFrame);
         this._selectionFrame = null;
         if (this._catchUpTimer) clearTimeout(this._catchUpTimer);
@@ -250,7 +258,7 @@ class MappingManager {
         if (Number(raw?.version) >= STATE_VERSION && raw.maps && typeof raw.maps === 'object') {
             for (const value of Object.values(raw.maps)) {
                 const record = this._normalizeRecord(value, scene);
-                if (record.id) this.records.set(record.id, record);
+                if (record.id && !this._deletedMapIds.has(record.id)) this.records.set(record.id, record);
             }
         } else if (Array.isArray(raw?.explored)) {
             this.legacyByScene.set(scene.id, raw);
@@ -289,6 +297,7 @@ class MappingManager {
             gridDistance: 5,
             explored,
             features: normalizeFeatures(raw.features),
+            featureSources: normalizeFeatureSources(raw.featureSources),
             symbols: this._normalizeSymbols(raw.symbols),
             lastPosition: this._normalizePosition(raw.lastPosition),
             createdAt: Number(raw.createdAt) || Number(raw.updatedAt) || 0,
@@ -399,6 +408,11 @@ class MappingManager {
         this.trackedTokenId = token.id;
         this.lastGridKey = null;
         this._selectMapForToken(token);
+        await this._requestMutation({
+            action: 'create',
+            actorId: token.actor.id,
+            sceneId: canvas.scene.id
+        });
         const startPosition = this._gridPosition(token.document);
         this.state = { ...this.state, lastPosition: startPosition };
         await this.openWindow();
@@ -787,6 +801,7 @@ class MappingManager {
         const coordinates = trustedState?.coordinates ?? currentCoordinates;
         if (!coordinates) return;
         const id = this._recordId(actor.id, canvas.scene.id);
+        if (this._deletedMapIds.has(id)) return;
         const existing = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
         const sessionKey = `${data.userId}:${data.sceneId}:${data.tokenId}`;
         const authoritative = this._authoritativePositions.get(sessionKey);
@@ -799,7 +814,7 @@ class MappingManager {
         const path = gridTravelPath(previous, position);
         this._authoritativePositions.set(sessionKey, { mapId: id, position, coordinates });
         const explored = new Set(existing.explored);
-        const observedAlongPath = {};
+        let observedSourcesAlongPath = {};
 
         for (let index = 0; index < path.length; index++) {
             const step = path[index];
@@ -813,12 +828,10 @@ class MappingManager {
             revealKeys.add(`${step.column},${step.row}`);
             for (const key of revealKeys) explored.add(key);
             const observed = observeVisibleFeatures(sampleToken, revealKeys);
-            for (const [key, codes] of Object.entries(observed)) {
-                observedAlongPath[key] ??= [];
-                for (const code of codes) {
-                    if (!observedAlongPath[key].includes(code)) observedAlongPath[key].push(code);
-                }
-            }
+            observedSourcesAlongPath = mergeFeatureSources(
+                observedSourcesAlongPath,
+                observed.sources
+            );
 
             // Very long drags are intentionally allowed to lag like a person
             // catching up on a paper map, but yield periodically so Foundry's
@@ -834,12 +847,10 @@ class MappingManager {
             coordinates,
             explored
         );
-        for (const [key, codes] of Object.entries(crossedSecretDoors)) {
-            observedAlongPath[key] ??= [];
-            for (const code of codes) {
-                if (!observedAlongPath[key].includes(code)) observedAlongPath[key].push(code);
-            }
-        }
+        observedSourcesAlongPath = mergeFeatureSources(
+            observedSourcesAlongPath,
+            crossedSecretDoors.sources
+        );
 
         // A map annotation can be placed while a long movement path is still
         // catching up. Rebase the completed reveal onto the latest record so
@@ -847,7 +858,15 @@ class MappingManager {
         // concurrent rename.
         const latest = this.records.get(id) ?? existing;
         const combinedExplored = new Set([...(latest.explored ?? []), ...explored]);
-        const features = mergeFeatures(latest.features, observedAlongPath);
+        const featureSources = mergeFeatureSources(latest.featureSources, observedSourcesAlongPath);
+        const incomingFeatures = flattenFeatureSources(observedSourcesAlongPath);
+        let features = subtractFeatureSources(latest.features, latest.featureSources);
+        // Records from builds before source tracking contain unattributed
+        // geometry. Re-observing the area lets the current source-aware set
+        // replace an opposing provisional edge and progressively repairs the
+        // old map without requiring a reset.
+        features = mergeSourceFeatures(features, incomingFeatures);
+        features = mergeFeatures(features, flattenFeatureSources(featureSources));
         const dimensions = this._sceneGridDimensions(canvas.scene);
         const next = {
             ...latest,
@@ -855,6 +874,7 @@ class MappingManager {
             rows: dimensions.rows,
             explored: [...combinedExplored],
             features,
+            featureSources,
             lastPosition: position,
             createdAt: latest.createdAt || Date.now(),
             updatedAt: Date.now(),
@@ -990,7 +1010,14 @@ class MappingManager {
         else await socketManager.broadcast('mapping', 'mutation-request', data);
     }
 
-    async _handleMutationRequest(data, { allowLocalGM = false } = {}) {
+    _handleMutationRequest(data, { allowLocalGM = false } = {}) {
+        this._revealProcessingQueue = this._revealProcessingQueue
+            .catch(error => console.error(`${MODULE.NAME}: Failed to process an earlier map operation`, error))
+            .then(() => this._processMutationRequest(data, { allowLocalGM }));
+        return this._revealProcessingQueue;
+    }
+
+    async _processMutationRequest(data, { allowLocalGM = false } = {}) {
         if (!game.user.isGM || (!allowLocalGM && !game.users.activeGM?.isSelf) || !data) return;
         const user = game.users.get(data.userId);
         if (!user?.active) return;
@@ -1002,6 +1029,7 @@ class MappingManager {
                 ?.find(token => token.actor?.id === data.actorId)?.actor;
             if (!this._canManageActor(actor, user)) return;
             const id = this._recordId(actor.id, data.sceneId);
+            this._deletedMapIds.delete(id);
             record = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
             const now = Date.now();
             record = { ...record, createdAt: record.createdAt || now, updatedAt: now, updatedBy: user.id };
@@ -1052,6 +1080,7 @@ class MappingManager {
                 ...record,
                 explored: [],
                 features: {},
+                featureSources: {},
                 symbols: [],
                 lastPosition: null,
                 updatedAt: Date.now(),
@@ -1059,6 +1088,7 @@ class MappingManager {
             };
             this.records.set(record.id, record);
         } else if (data.action === 'delete') {
+            this._deletedMapIds.add(record.id);
             this.records.delete(record.id);
         } else return;
 
