@@ -1194,6 +1194,24 @@ export class MappingWindow extends ToolWindowBase {
         return true;
     }
 
+    /**
+     * Without the menubar button the window is the only way to stop recording,
+     * so closing it ends the session -- and that is worth confirming rather
+     * than doing silently.
+     */
+    async close(options = {}) {
+        if (this.manager?.active && !this.manager.menubarEnabled && !options.force) {
+            const confirmed = await foundry.applications.api.DialogV2.confirm({
+                window: { title: game.i18n.localize(`${MODULE.ID}.mapping.closeStopsTitle`) },
+                content: `<p>${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.closeStopsHint`))}</p>`,
+                rejectClose: false,
+                modal: true
+            });
+            if (!confirmed) return this;
+        }
+        return super.close(options);
+    }
+
     _onClose(options) {
         this._pan = null;
         this._targetZoom = null;

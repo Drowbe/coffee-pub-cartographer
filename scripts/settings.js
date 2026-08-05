@@ -138,6 +138,21 @@ export const registerSettings = () => {
         group: WORKFLOW_GROUPS.CONFIGURATION
     });
 
+    // Client scope: it is this user's own menubar, and it decides whether
+    // closing the map window can leave recording running for them.
+    game.settings.register(MODULE.ID, 'mapping.menubarButton', {
+        name: MODULE.ID + '.mapping.menubarButton-Label',
+        hint: MODULE.ID + '.mapping.menubarButton-Hint',
+        scope: 'client',
+        config: true,
+        default: true,
+        type: Boolean,
+        group: WORKFLOW_GROUPS.CONFIGURATION,
+        onChange: () => {
+            import('./manager-mapping.js').then(({ mappingManager }) => mappingManager.refreshMenubarTool());
+        }
+    });
+
 
 	// --------------------------------------
 	// -- H2: DRAWING

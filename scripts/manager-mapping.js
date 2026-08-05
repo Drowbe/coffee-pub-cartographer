@@ -40,6 +40,7 @@ const SETTLE_ATTEMPTS = 4;
 const MAPPING_MODES = ['view', 'follow', 'record'];
 /** Mutations any party member may make, rather than only the Actor's owner. */
 const ANNOTATION_ACTIONS = ['place-symbol', 'remove-symbol'];
+const MENUBAR_TOOL_ID = `${MODULE.ID}-mapping-menubar`;
 
 class MappingManager {
     constructor() {
@@ -124,6 +125,7 @@ class MappingManager {
         this._registerSocketHandlers();
         this.loadMapRecords();
         this._seedRecentTokenPositions();
+        this.refreshMenubarTool();
         console.log(`${MODULE.NAME}: Mapping tool initialized`);
     }
 
@@ -157,6 +159,81 @@ class MappingManager {
             open: async () => this.openWindow()
         });
         return true;
+    }
+
+    /**
+     * A left-zone menubar button for the mapper.
+     *
+     * Its purpose is to make recording independent of the window: left-click
+     * opens the map, right-click starts or stops recording, and the icon
+     * reports which mode is running. That is what lets a user close the map and
+     * keep mapping, so it is also what decides whether closing the window has
+     * to stop recording.
+     */
+    get menubarEnabled() {
+        try {
+            return game.settings.get(MODULE.ID, 'mapping.menubarButton') === true;
+        } catch {
+            return false;
+        }
+    }
+
+    _menubarAppearance() {
+        if (this.paused) {
+            return { icon: 'fa-solid fa-circle-pause', color: '#e8a34a' };
+        }
+        if (this.active) {
+            return { icon: 'fa-solid fa-circle-dot', color: '#c9412d' };
+        }
+        return { icon: 'fa-solid fa-map', color: null };
+    }
+
+    refreshMenubarTool() {
+        const api = game.modules.get('coffee-pub-blacksmith')?.api;
+        if (typeof api?.registerMenubarTool !== 'function') return;
+        // There is no update-in-place for a tool's icon, so the button is
+        // replaced. Mode changes are user-driven and rare, so this is cheap.
+        api.unregisterMenubarTool?.(MENUBAR_TOOL_ID);
+        if (!this.menubarEnabled || !game.settings.get(MODULE.ID, 'mapping.enabled')) return;
+
+        const appearance = this._menubarAppearance();
+        api.registerMenubarTool(MENUBAR_TOOL_ID, {
+            icon: appearance.icon,
+            iconColor: appearance.color,
+            name: 'cartographer-mapping',
+            tooltip: game.i18n.localize(`${MODULE.ID}.mapping.menubarTooltip`),
+            zone: 'left',
+            group: 'party',
+            order: 2,
+            moduleId: MODULE.ID,
+            gmOnly: false,
+            visible: true,
+            onClick: () => void this.openWindow(),
+            contextMenuItems: () => this._menubarMenuItems()
+        });
+    }
+
+    _menubarMenuItems() {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.mapping.${key}`);
+        const items = [{
+            name: localize('openMap'),
+            icon: 'fa-solid fa-map',
+            callback: () => void this.openWindow()
+        }, { separator: true }];
+        if (this.active) {
+            items.push({
+                name: localize('stopRecording'),
+                icon: 'fa-solid fa-stop',
+                callback: () => void this.setMode('view')
+            });
+        } else {
+            items.push({
+                name: localize('startRecording'),
+                icon: 'fa-solid fa-circle',
+                callback: () => void this.setMode('record')
+            });
+        }
+        return items;
     }
 
     _registerToolbarTool() {
@@ -469,6 +546,7 @@ class MappingManager {
     }
 
     _announceMode() {
+        this.refreshMenubarTool();
         const key = { view: 'statusViewing', follow: 'statusFollowing', record: 'statusActive' }[this.mode];
         if (key) notify(game.i18n.localize(`${MODULE.ID}.mapping.${key}`), { type: 'info' });
     }
@@ -550,6 +628,7 @@ class MappingManager {
         this.paused = false;
         this.lastGridKey = null;
         this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
+        this.refreshMenubarTool();
         if (closeWindow && this.window?.rendered) {
             this._closingWindow = true;
             try {
@@ -564,7 +643,20 @@ class MappingManager {
 
     async onWindowClosed(window) {
         if (this.window === window) this.window = null;
-        if (!this._closingWindow && this.active) await this.stopMapping({ closeWindow: false });
+        if (this._closingWindow || !this.active) return;
+        // With the menubar button available there is still a way to stop, so
+        // closing the map leaves recording running rather than ending the
+        // session. Without it, the window is the only control and closing it
+        // has to stop.
+        if (!this.menubarEnabled) {
+            await this.stopMapping({ closeWindow: false });
+            return;
+        }
+        this.refreshMenubarTool();
+        notify(game.i18n.localize(`${MODULE.ID}.mapping.recordingContinues`), {
+            subtitle: game.i18n.localize(`${MODULE.ID}.mapping.recordingContinuesHint`),
+            type: 'info'
+        });
     }
 
     async openWindow() {
@@ -611,6 +703,7 @@ class MappingManager {
         if (!this.active || this.paused) return false;
         this.paused = true;
         this.lastGridKey = null;
+        this.refreshMenubarTool();
         if (this._catchUpTimer) {
             clearTimeout(this._catchUpTimer);
             this._catchUpTimer = null;
@@ -627,6 +720,7 @@ class MappingManager {
 
         this.paused = false;
         this.lastGridKey = null;
+        this.refreshMenubarTool();
         this.window?.armFollow();
         const position = this._gridPosition(token.document);
         await this._requestReveal(token.document, position, {
