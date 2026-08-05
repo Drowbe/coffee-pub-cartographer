@@ -12,6 +12,9 @@
   - Display the accumulated map in a separate Glass-themed Blacksmith Tool window.
   - Begin with placeholder tiles that can be replaced by hand-drawn artwork.
 - [ ] Improve mapped-floor, grid, and wall contrast in Dark and Glass themes so the initial reveal is as legible as it is in Light mode.
+- [ ] Harden very long token moves so routed or unusually large drags cannot skip intermediate mapping samples.
+- [x] Prevent floor and wall leakage at closed wall endpoints by requiring a visible footprint within each revealed square instead of trusting one center-point ray.
 - [ ] Replace the scene-sized mapping grid with an endless canvas that renders only the active drawing bounds plus a three-grid margin, expanding automatically as exploration reaches an edge.
-- [ ] Add a **Place** context menu with nested symbol categories based on the official old-school map key (doors, passages, hazards, structures, terrain, and furnishings), then place the chosen symbol with the next map click.
+- [x] Add an initial **Place** context menu on explored grid cells with old-school Stairs, Trap, and Treasure symbols.
+- [ ] Expand **Place** into the full official symbol categories: doors, passages, hazards, structures, terrain, and furnishings.
 - [ ] Phase 2: reuse the mapping renderer and symbol vocabulary to draw ad-hoc old-school maps directly on the Foundry canvas.

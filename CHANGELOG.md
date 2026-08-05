@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Menubar quick actions**: Right-clicking Cartographer's menubar button now opens a native quick menu for Party Maps, every drawing mode, and role-appropriate drawing cleanup without opening the full secondary toolbar.
+- **Map placeables**: Right-clicking an explored map square now opens Blacksmith's shared context menu with a nested Place menu for Stairs, Trap, and Treasure. Actor owners and GMs can replace or remove the square's persisted symbol.
+- **Discovered secret doors**: Secret doors continue to look like ordinary walls until the tracked token actually crosses their Foundry wall segment, after which the map permanently promotes that edge to the official S-style secret-door symbol.
 - **Old-school party mapper**: Added a Mapping tool for square-grid scenes. It opens a separate Glass-themed Blacksmith Tool window where recording permanently maps the 5×5 grid area surrounding one controlled token as it moves.
 - **Shared persistent maps**: Maps are stored as party-visible Actor+Scene records and synchronized to connected users. The Recorded Maps view lists maps from every scene, while recording remains limited to the current scene.
 - **Map ownership controls**: Everyone can view the party's maps. An Actor owner or GM can add, continue, rename, reset, or delete that Actor's maps.
@@ -17,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Placeholder map presentation**: Added theme-aware grid tiles and a party marker using Blacksmith's Tool content-surface variables, ready for later hand-drawn asset replacement.
 
 ### Fixed
+- **Corner-safe floor visibility**: Candidate floor squares now require visibility to their center and at least two nearby cardinal samples. Rays that merely graze a closed wall endpoint no longer reveal thin floor slivers or structure behind the join; the token's occupied square remains guaranteed for narrow passages.
 - **Mapper initialization order**: The Mapping window is now imported lazily when opened, after Blacksmith's ready-time API is available, instead of reading `game.modules` during Foundry's early ES module loading phase.
 - **Mapping from secondary GM clients**: A GM now applies and persists discoveries from their own controlled token locally instead of being blocked when another connected GM is Foundry's designated `activeGM`. Player-originated discoveries still require active-GM validation.
 - **Foundry v13 grid coordinates**: Mapping now calls `getOffset({x, y})` and reads its `{i, j}` row/column result. The former legacy-shaped call produced `NaN,NaN` cell keys, which were discarded by state validation and left the map visually empty.
@@ -32,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reliable discovery accumulation**: Ordinary mapping updates now merge explored cells instead of replacing them with queued scene snapshots. Rapid movement can no longer let an older persistence update erase the newly mapped cells in front of the tracked token; explicit map resets still replace the state normally.
 - **Floor grid**: Added a very light graph-paper grid to explored floor cells, preserving spatial scale without competing with the heavier hand-drawn wall, window, and door strokes.
 - **Map interaction cleanup**: The Cartographer Mapping tool now opens the map for viewing instead of toggling recording. Record/Stop lives inside the map window, right-drag pans like the Foundry canvas, native scrollbars are hidden, and Street View identifies the launcher and tracked party position.
-- **Rebased default zoom**: Reduced the base map-cell size so the former 70% presentation is now the clearer 100% default scale.
+- **Rebased default zoom**: Increased the base map-cell size so the former 160% presentation is now the clearer 100% default scale, while retaining the same zoom controls and range.
 - **Selected-token map context**: Opening Mapping with one selected token now loads the existing scene map with that token marked and centered before recording begins. Record adds its movement; Stop retains the selected-token view, and changing selection while viewing updates the map context.
 - **Cursor-centered wheel zoom**: The mouse wheel now zooms the map around the tile beneath the cursor like the Foundry canvas. Rapid wheel input is batched and serialized instead of scrolling the hidden viewport or launching overlapping renders.
 - **Tile reveal animation**: Newly discovered floor and linework tiles fade and settle into place without replaying the animation on existing tiles during zoom, pan, wall updates, or ordinary rerenders. Reduced-motion preferences disable the effect.

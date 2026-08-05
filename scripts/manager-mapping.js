@@ -9,6 +9,7 @@ import {
     gridTravelPath,
     mergeFeatures,
     normalizeFeatures,
+    observeCrossedSecretDoors,
     observeVisibleFeatures,
     visibleRevealKeys
 } from './utils-mapping.js';
@@ -18,6 +19,7 @@ const FLAG_KEY = 'mapping';
 const TOOL_ID = `${MODULE.ID}-mapping`;
 const WINDOW_ID = `${MODULE.ID}-mapper`;
 const STATE_VERSION = 2;
+const MAP_SYMBOL_TYPES = new Set(['stairs', 'trap', 'treasure']);
 
 class MappingManager {
     constructor() {
@@ -287,7 +289,7 @@ class MappingManager {
             gridDistance: 5,
             explored,
             features: normalizeFeatures(raw.features),
-            symbols: Array.isArray(raw.symbols) ? foundry.utils.deepClone(raw.symbols) : [],
+            symbols: this._normalizeSymbols(raw.symbols),
             lastPosition: this._normalizePosition(raw.lastPosition),
             createdAt: Number(raw.createdAt) || Number(raw.updatedAt) || 0,
             updatedAt: Number(raw.updatedAt) || 0,
@@ -575,6 +577,30 @@ class MappingManager {
         return Number.isInteger(column) && Number.isInteger(row) ? { column, row } : null;
     }
 
+    _normalizeSymbols(symbols) {
+        if (!Array.isArray(symbols)) return [];
+        const normalized = [];
+        const occupied = new Set();
+        for (const symbol of symbols) {
+            const type = String(symbol?.type ?? '');
+            const column = Number(symbol?.column);
+            const row = Number(symbol?.row);
+            if (!MAP_SYMBOL_TYPES.has(type) || !Number.isInteger(column) || !Number.isInteger(row)) continue;
+            const key = `${column},${row}`;
+            if (occupied.has(key)) continue;
+            occupied.add(key);
+            normalized.push({
+                id: typeof symbol.id === 'string' && symbol.id ? symbol.id : foundry.utils.randomID(),
+                type,
+                column,
+                row,
+                createdAt: Number(symbol.createdAt) || 0,
+                createdBy: typeof symbol.createdBy === 'string' ? symbol.createdBy : null
+            });
+        }
+        return normalized;
+    }
+
     _tokenCoordinates(tokenDocument) {
         const x = Number(tokenDocument?.x);
         const y = Number(tokenDocument?.y);
@@ -802,16 +828,35 @@ class MappingManager {
             }
         }
 
-        const features = mergeFeatures(existing.features, observedAlongPath);
+        const crossedSecretDoors = observeCrossedSecretDoors(
+            tokenDocument,
+            previousCoordinates,
+            coordinates,
+            explored
+        );
+        for (const [key, codes] of Object.entries(crossedSecretDoors)) {
+            observedAlongPath[key] ??= [];
+            for (const code of codes) {
+                if (!observedAlongPath[key].includes(code)) observedAlongPath[key].push(code);
+            }
+        }
+
+        // A map annotation can be placed while a long movement path is still
+        // catching up. Rebase the completed reveal onto the latest record so
+        // that delayed linework cannot overwrite a newly placed symbol or a
+        // concurrent rename.
+        const latest = this.records.get(id) ?? existing;
+        const combinedExplored = new Set([...(latest.explored ?? []), ...explored]);
+        const features = mergeFeatures(latest.features, observedAlongPath);
         const dimensions = this._sceneGridDimensions(canvas.scene);
         const next = {
-            ...existing,
+            ...latest,
             columns: dimensions.columns,
             rows: dimensions.rows,
-            explored: [...explored],
+            explored: [...combinedExplored],
             features,
             lastPosition: position,
-            createdAt: existing.createdAt || Date.now(),
+            createdAt: latest.createdAt || Date.now(),
             updatedAt: Date.now(),
             updatedBy: data.userId
         };
@@ -908,6 +953,37 @@ class MappingManager {
         return true;
     }
 
+    async placeMapSymbol(type, column, row) {
+        if (!MAP_SYMBOL_TYPES.has(type)) return false;
+        const record = this.records.get(this.currentMapId);
+        const cellKey = `${Number(column)},${Number(row)}`;
+        if (!record || !record.explored.includes(cellKey) || !this.canManageRecord(record)) return false;
+        await this._requestMutation({
+            action: 'place-symbol',
+            mapId: record.id,
+            type,
+            column: Number(column),
+            row: Number(row)
+        });
+        return true;
+    }
+
+    async removeMapSymbol(column, row) {
+        const record = this.records.get(this.currentMapId);
+        if (!record || !this.canManageRecord(record)) return false;
+        await this._requestMutation({
+            action: 'remove-symbol',
+            mapId: record.id,
+            column: Number(column),
+            row: Number(row)
+        });
+        return true;
+    }
+
+    hasMapSymbol(column, row) {
+        return this.state.symbols.some(symbol => symbol.column === Number(column) && symbol.row === Number(row));
+    }
+
     async _requestMutation(mutation) {
         const data = { ...mutation, userId: game.user.id };
         if (game.user.isGM) await this._handleMutationRequest(data, { allowLocalGM: true });
@@ -941,6 +1017,35 @@ class MappingManager {
             const name = String(data.name ?? '').trim().slice(0, 100);
             if (!name) return;
             record = { ...record, name, updatedAt: Date.now(), updatedBy: user.id };
+            this.records.set(record.id, record);
+        } else if (data.action === 'place-symbol') {
+            const type = String(data.type ?? '');
+            const column = Number(data.column);
+            const row = Number(data.row);
+            const cellKey = `${column},${row}`;
+            if (!MAP_SYMBOL_TYPES.has(type)
+                || !Number.isInteger(column)
+                || !Number.isInteger(row)
+                || !record.explored.includes(cellKey)) return;
+            const symbols = this._normalizeSymbols(record.symbols)
+                .filter(symbol => symbol.column !== column || symbol.row !== row);
+            symbols.push({
+                id: foundry.utils.randomID(),
+                type,
+                column,
+                row,
+                createdAt: Date.now(),
+                createdBy: user.id
+            });
+            record = { ...record, symbols, updatedAt: Date.now(), updatedBy: user.id };
+            this.records.set(record.id, record);
+        } else if (data.action === 'remove-symbol') {
+            const column = Number(data.column);
+            const row = Number(data.row);
+            if (!Number.isInteger(column) || !Number.isInteger(row)) return;
+            const symbols = this._normalizeSymbols(record.symbols)
+                .filter(symbol => symbol.column !== column || symbol.row !== row);
+            record = { ...record, symbols, updatedAt: Date.now(), updatedBy: user.id };
             this.records.set(record.id, record);
         } else if (data.action === 'reset') {
             record = {

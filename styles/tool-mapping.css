@@ -3,7 +3,7 @@
 /* ------------------------------------ */
 
 .application.blacksmith-window-tool.cartographer-mapping-window {
-    --cartographer-map-cell-size: 22.4px;
+    --cartographer-map-cell-size: 36px;
     --cartographer-map-wall: #000;
     --cartographer-map-window: #4c93cc;
     --cartographer-map-floor-grid: color-mix(in srgb, var(--blacksmith-tool-divider) 28%, transparent);
@@ -190,8 +190,63 @@
     stroke-width: 5;
 }
 
-.cartographer-mapping-party {
+.cartographer-mapping-secret-door-line {
+    fill: none;
+    stroke: var(--cartographer-map-wall);
+    stroke-width: 12;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.cartographer-mapping-secret-door-line.is-sketch-echo {
+    opacity: 0.25;
+    stroke-width: 5;
+}
+
+.cartographer-mapping-secret-door-letter {
+    fill: var(--cartographer-map-wall);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 48px;
+    font-weight: 700;
+    text-anchor: middle;
+    dominant-baseline: middle;
+}
+
+.cartographer-mapping-placeable {
+    position: absolute;
     z-index: 3;
+    inset: 10%;
+    width: 80%;
+    height: 80%;
+    overflow: visible;
+    pointer-events: none;
+    fill: none;
+    stroke: var(--cartographer-map-wall);
+    stroke-width: 7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.cartographer-mapping-placeable .is-stairs polyline {
+    stroke-width: 6;
+}
+
+.cartographer-mapping-placeable text.is-trap {
+    fill: var(--cartographer-map-wall);
+    stroke: none;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 72px;
+    font-weight: 700;
+    text-anchor: middle;
+    dominant-baseline: middle;
+}
+
+.cartographer-mapping-placeable .is-treasure rect {
+    fill: var(--blacksmith-tool-scrim);
+}
+
+.cartographer-mapping-party {
+    z-index: 4;
     pointer-events: none;
     color: var(--blacksmith-tool-accent);
     font-size: calc(18px * var(--cartographer-map-zoom));

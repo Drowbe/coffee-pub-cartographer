@@ -78,7 +78,12 @@
 	"mapping.mapName": "Map name",
 	"mapping.deleteMap": "Delete map",
 	"mapping.deleteTitle": "Delete Party Map",
-	"mapping.deleteConfirm": "Delete {name}? This cannot be undone."
+	"mapping.deleteConfirm": "Delete {name}? This cannot be undone.",
+	"mapping.placeSymbol": "Place",
+	"mapping.removeSymbol": "Remove Symbol",
+	"mapping.symbolStairs": "Stairs",
+	"mapping.symbolTrap": "Trap",
+	"mapping.symbolTreasure": "Treasure"
 	}
 }
 

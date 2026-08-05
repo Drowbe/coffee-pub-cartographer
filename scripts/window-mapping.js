@@ -61,7 +61,7 @@ export class MappingWindow extends ToolWindowBase {
         this._handlePanMove = this._handlePanMove.bind(this);
         this._handlePanEnd = this._handlePanEnd.bind(this);
         this._handleWheelZoom = this._handleWheelZoom.bind(this);
-        this._preventPanMenu = event => event.preventDefault();
+        this._handleMapContextMenu = this._handleMapContextMenu.bind(this);
     }
 
     static async open(manager) {
@@ -186,6 +186,9 @@ export class MappingWindow extends ToolWindowBase {
 
     _buildMapModel() {
         const explored = new Set(this.manager.state.explored);
+        const placedSymbols = new Map(
+            (this.manager.state.symbols ?? []).map(symbol => [`${symbol.column},${symbol.row}`, symbol])
+        );
         const animateNewTiles = this._hasBuiltMap;
         const newTiles = animateNewTiles
             ? new Set([...explored].filter(key => !this._renderedExplored.has(key)))
@@ -225,6 +228,7 @@ export class MappingWindow extends ToolWindowBase {
             const key = `${column},${row}`;
             const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
             const isNew = newTiles.has(key);
+            const symbol = placedSymbols.get(key);
             return {
                 key,
                 gridColumn: column + 1,
@@ -232,7 +236,15 @@ export class MappingWindow extends ToolWindowBase {
                 className: `is-explored${isNew ? ' is-new' : ''}${isParty ? ' is-party' : ''}`,
                 segments: mappedGeometry.segmentsByCell.get(key) ?? [],
                 doorSymbols: mappedGeometry.doorSymbolsByCell.get(key) ?? [],
-                hasLinework: mappedGeometry.segmentsByCell.has(key) || mappedGeometry.doorSymbolsByCell.has(key),
+                secretDoorSymbols: mappedGeometry.secretDoorSymbolsByCell.get(key) ?? [],
+                hasLinework: mappedGeometry.segmentsByCell.has(key)
+                    || mappedGeometry.doorSymbolsByCell.has(key)
+                    || mappedGeometry.secretDoorSymbolsByCell.has(key),
+                symbol: symbol ? {
+                    isStairs: symbol.type === 'stairs',
+                    isTrap: symbol.type === 'trap',
+                    isTreasure: symbol.type === 'treasure'
+                } : null,
                 isParty
             };
         });
@@ -251,7 +263,8 @@ export class MappingWindow extends ToolWindowBase {
     _getMappedTileGeometry(explored, features) {
         const segmentsByCell = new Map();
         const doorSymbolsByCell = new Map();
-        const priorities = { wall: 1, window: 2, door: 3 };
+        const secretDoorSymbolsByCell = new Map();
+        const priorities = { wall: 1, window: 2, door: 3, 'secret-door': 4 };
         const edges = new Map();
         for (const [key, codes] of Object.entries(features ?? {})) {
             if (!explored.has(key)) continue;
@@ -280,12 +293,35 @@ export class MappingWindow extends ToolWindowBase {
                 ]);
                 continue;
             }
+            if (edge.feature === 'secret-door') {
+                secretDoorSymbolsByCell.set(edge.key, [
+                    ...(secretDoorSymbolsByCell.get(edge.key) ?? []),
+                    this._secretDoorSymbol(edge.direction)
+                ]);
+                continue;
+            }
             const segment = this._tileSegment(edge.feature, edge.direction, priorities[edge.feature]);
             if (segment) {
                 segmentsByCell.set(edge.key, [...(segmentsByCell.get(edge.key) ?? []), segment]);
             }
         }
-        return { segmentsByCell, doorSymbolsByCell };
+        return { segmentsByCell, doorSymbolsByCell, secretDoorSymbolsByCell };
+    }
+
+    _secretDoorSymbol(direction) {
+        const transforms = {
+            north: 'translate(0 0)',
+            south: 'translate(100 100) rotate(180)',
+            west: 'translate(0 100) rotate(-90)',
+            east: 'translate(100 0) rotate(90)'
+        };
+        return {
+            transform: transforms[direction] ?? transforms.north,
+            lines: [
+                { points: '0,0 38,0', echoPoints: '0,-1.2 38,0.8' },
+                { points: '62,0 100,0', echoPoints: '62,-0.9 100,1' }
+            ]
+        };
     }
 
     _doorSymbol(direction) {
@@ -405,7 +441,7 @@ export class MappingWindow extends ToolWindowBase {
         viewport.addEventListener('pointerup', this._handlePanEnd);
         viewport.addEventListener('pointercancel', this._handlePanEnd);
         viewport.addEventListener('wheel', this._handleWheelZoom, { passive: false });
-        viewport.addEventListener('contextmenu', this._preventPanMenu);
+        viewport.addEventListener('contextmenu', this._handleMapContextMenu);
     }
 
     _handlePanStart(event) {
@@ -419,7 +455,8 @@ export class MappingWindow extends ToolWindowBase {
             x: event.clientX,
             y: event.clientY,
             left: viewport.scrollLeft,
-            top: viewport.scrollTop
+            top: viewport.scrollTop,
+            moved: false
         };
     }
 
@@ -427,6 +464,9 @@ export class MappingWindow extends ToolWindowBase {
         if (!this._pan || event.pointerId !== this._pan.pointerId) return;
         event.preventDefault();
         const viewport = event.currentTarget;
+        if (Math.hypot(event.clientX - this._pan.x, event.clientY - this._pan.y) > 4) {
+            this._pan.moved = true;
+        }
         viewport.scrollLeft = this._pan.left - (event.clientX - this._pan.x);
         viewport.scrollTop = this._pan.top - (event.clientY - this._pan.y);
     }
@@ -436,7 +476,51 @@ export class MappingWindow extends ToolWindowBase {
         const viewport = event.currentTarget;
         viewport.releasePointerCapture?.(event.pointerId);
         viewport.classList.remove('is-panning');
+        this._suppressContextMenu = this._pan.moved;
         this._pan = null;
+        if (this._suppressContextMenu) {
+            setTimeout(() => { this._suppressContextMenu = false; }, 100);
+        }
+    }
+
+    _handleMapContextMenu(event) {
+        event.preventDefault();
+        if (this._suppressContextMenu || this.viewMode !== 'map') return;
+        const cell = event.target.closest('.cartographer-mapping-cell.is-explored');
+        if (!cell || !this.manager.canManageRecord()) return;
+        const [column, row] = String(cell.dataset.cell ?? '').split(',').map(Number);
+        if (!Number.isInteger(column) || !Number.isInteger(row)) return;
+
+        const contextMenu = game.modules.get('coffee-pub-blacksmith')?.api?.uiContextMenu;
+        if (typeof contextMenu?.show !== 'function') return;
+        const localize = key => game.i18n.localize(`${MODULE.ID}.${key}`);
+        const place = type => () => this.manager.placeMapSymbol(type, column, row);
+        const items = [{
+            name: localize('mapping.placeSymbol'),
+            icon: 'fa-solid fa-location-dot',
+            submenu: [
+                { name: localize('mapping.symbolStairs'), icon: 'fa-solid fa-stairs', callback: place('stairs') },
+                { name: localize('mapping.symbolTrap'), icon: 'fa-solid fa-triangle-exclamation', callback: place('trap') },
+                { name: localize('mapping.symbolTreasure'), icon: 'fa-solid fa-gem', callback: place('treasure') }
+            ]
+        }];
+        if (this.manager.hasMapSymbol(column, row)) {
+            items.push({ separator: true });
+            items.push({
+                name: localize('mapping.removeSymbol'),
+                icon: 'fa-solid fa-trash-can',
+                callback: () => this.manager.removeMapSymbol(column, row)
+            });
+        }
+        const root = this.element?.ownerDocument?.body ?? document.body;
+        contextMenu.show({
+            id: `${MODULE.ID}-mapping-cell-context`,
+            x: event.clientX,
+            y: event.clientY,
+            root,
+            zones: { module: items },
+            className: 'cartographer-mapping-cell-context'
+        });
     }
 
     _handleWheelZoom(event) {

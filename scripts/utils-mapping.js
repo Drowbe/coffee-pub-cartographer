@@ -4,6 +4,12 @@
 
 const DIRECTIONS = ['north', 'east', 'south', 'west'];
 
+function isSecretDoor(document) {
+    const source = document?._source ?? document;
+    const doorTypes = CONST.WALL_DOOR_TYPES ?? {};
+    return Number(source?.door) === Number(doorTypes.SECRET);
+}
+
 function classifyWall(document) {
     const source = document?._source ?? document;
     if (!source) return null;
@@ -152,8 +158,13 @@ function boundaryCandidates(wallPoint, wallDx, wallDy) {
  * midpoint because the official symbol represents a doorway, not every
  * quarter-grid sample of its wall document.
  */
-function wallBoundaryObservations(document, tokenDocument, allowed) {
-    const feature = classifyWall(document);
+function wallBoundaryObservations(
+    document,
+    tokenDocument,
+    allowed,
+    { featureOverride = null, requireVisibility = true } = {}
+) {
+    const feature = featureOverride ?? classifyWall(document);
     if (!feature || !canvas?.grid) return [];
     const coordinates = document?.c ?? document?._source?.c;
     if (!Array.isArray(coordinates) || coordinates.length < 4) return [];
@@ -169,7 +180,7 @@ function wallBoundaryObservations(document, tokenDocument, allowed) {
         canvas.grid.sizeX ?? canvas.grid.size,
         canvas.grid.sizeY ?? canvas.grid.size
     );
-    const sampleCount = feature === 'door'
+    const sampleCount = ['door', 'secret-door'].includes(feature)
         ? 1
         : Math.max(1, Math.ceil(length / (gridSize * 0.25)));
     const observations = [];
@@ -181,7 +192,7 @@ function wallBoundaryObservations(document, tokenDocument, allowed) {
             x: x1 + (wallDx * amount),
             y: y1 + (wallDy * amount)
         };
-        if (!visibleFromToken(tokenDocument, wallPoint)) continue;
+        if (requireVisibility && !visibleFromToken(tokenDocument, wallPoint)) continue;
         const candidates = boundaryCandidates(wallPoint, wallDx, wallDy)
             .filter(candidate => allowed.has(`${candidate.column},${candidate.row}`));
         if (!candidates.length) continue;
@@ -201,6 +212,80 @@ function wallBoundaryObservations(document, tokenDocument, allowed) {
         observations.push({ key, code });
     }
     return observations;
+}
+
+function segmentOrientation(a, b, c) {
+    return ((b.y - a.y) * (c.x - b.x)) - ((b.x - a.x) * (c.y - b.y));
+}
+
+function pointOnSegment(a, b, point, epsilon = 0.001) {
+    return point.x <= Math.max(a.x, b.x) + epsilon
+        && point.x >= Math.min(a.x, b.x) - epsilon
+        && point.y <= Math.max(a.y, b.y) + epsilon
+        && point.y >= Math.min(a.y, b.y) - epsilon;
+}
+
+function segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd) {
+    const epsilon = 0.001;
+    const o1 = segmentOrientation(firstStart, firstEnd, secondStart);
+    const o2 = segmentOrientation(firstStart, firstEnd, secondEnd);
+    const o3 = segmentOrientation(secondStart, secondEnd, firstStart);
+    const o4 = segmentOrientation(secondStart, secondEnd, firstEnd);
+    if (((o1 > epsilon && o2 < -epsilon) || (o1 < -epsilon && o2 > epsilon))
+        && ((o3 > epsilon && o4 < -epsilon) || (o3 < -epsilon && o4 > epsilon))) return true;
+    if (Math.abs(o1) <= epsilon && pointOnSegment(firstStart, firstEnd, secondStart)) return true;
+    if (Math.abs(o2) <= epsilon && pointOnSegment(firstStart, firstEnd, secondEnd)) return true;
+    if (Math.abs(o3) <= epsilon && pointOnSegment(secondStart, secondEnd, firstStart)) return true;
+    if (Math.abs(o4) <= epsilon && pointOnSegment(secondStart, secondEnd, firstEnd)) return true;
+    return false;
+}
+
+/**
+ * A secret door remains ordinary wall linework until the tracked token's
+ * center actually crosses its Foundry wall segment. Crossing promotes that
+ * stable edge to the old-school secret-door symbol permanently.
+ */
+function observeCrossedSecretDoors(tokenDocument, fromCoordinates, toCoordinates, exploredKeys) {
+    if (!fromCoordinates || !toCoordinates || !canvas?.walls) return {};
+    const tokenShape = {
+        id: tokenDocument.id,
+        width: Number(tokenDocument.width) || 1,
+        height: Number(tokenDocument.height) || 1
+    };
+    const fromToken = { ...tokenShape, x: fromCoordinates.x, y: fromCoordinates.y };
+    const toToken = { ...tokenShape, x: toCoordinates.x, y: toCoordinates.y };
+    const movementStart = tokenCenter(fromToken);
+    const movementEnd = tokenCenter(toToken);
+    if (movementStart.x === movementEnd.x && movementStart.y === movementEnd.y) return {};
+
+    const allowed = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
+    const observed = {};
+    for (const wall of canvas.walls.placeables ?? []) {
+        if (!isSecretDoor(wall.document)) continue;
+        const coordinates = wall.document?.c ?? wall.document?._source?.c;
+        if (!Array.isArray(coordinates) || coordinates.length < 4) continue;
+        const [x1, y1, x2, y2] = coordinates.map(Number);
+        if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+        if (!segmentsIntersect(
+            movementStart,
+            movementEnd,
+            { x: x1, y: y1 },
+            { x: x2, y: y2 }
+        )) continue;
+
+        for (const observation of wallBoundaryObservations(
+            wall.document,
+            toToken,
+            allowed,
+            { featureOverride: 'secret-door', requireVisibility: false }
+        )) {
+            observed[observation.key] ??= [];
+            if (!observed[observation.key].includes(observation.code)) {
+                observed[observation.key].push(observation.code);
+            }
+        }
+    }
+    return observed;
 }
 
 function cellCenter(cell) {
@@ -266,11 +351,33 @@ function visibleFromToken(tokenDocument, point, { insetTarget = true } = {}) {
 function visibleRevealKeys(tokenDocument, revealKeys) {
     const candidates = revealKeys instanceof Set ? revealKeys : new Set(revealKeys ?? []);
     const visible = new Set();
+    const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
+    const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
     for (const key of candidates) {
         const [column, row] = key.split(',').map(Number);
         if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
-        const target = cellCenter({ column, row });
-        if (visibleFromToken(tokenDocument, target, { insetTarget: false })) visible.add(key);
+        const center = cellCenter({ column, row });
+        if (!visibleFromToken(tokenDocument, center, { insetTarget: false })) continue;
+
+        // A single ray can graze a shared wall endpoint and make a square
+        // behind that corner look visible. Confirm that the token can see a
+        // small footprint within the square as well. Cardinal samples are
+        // intentionally close to center: requiring two keeps narrow corridors
+        // mappable while rejecting the one-ray slivers created at wall joins.
+        const insetX = sizeX * 0.18;
+        const insetY = sizeY * 0.18;
+        const footprint = [
+            { x: center.x, y: center.y - insetY },
+            { x: center.x + insetX, y: center.y },
+            { x: center.x, y: center.y + insetY },
+            { x: center.x - insetX, y: center.y }
+        ];
+        let visibleSamples = 0;
+        for (const point of footprint) {
+            if (visibleFromToken(tokenDocument, point, { insetTarget: false })) visibleSamples++;
+            if (visibleSamples >= 2) break;
+        }
+        if (visibleSamples >= 2) visible.add(key);
     }
     return visible;
 }
@@ -297,7 +404,7 @@ function normalizeFeatures(raw) {
         const valid = [...new Set(codes.filter(code => {
             if (typeof code !== 'string') return false;
             const [feature, direction] = code.split(':');
-            return ['wall', 'window', 'door'].includes(feature) && DIRECTIONS.includes(direction);
+            return ['wall', 'window', 'door', 'secret-door'].includes(feature) && DIRECTIONS.includes(direction);
         }))];
         if (valid.length) normalized[key] = valid;
     }
@@ -330,8 +437,22 @@ function mergeFeatures(left, right) {
     // An edge that has been seen again is current information. Replace its
     // former wall/window/door classification instead of accumulating stale
     // classifications forever.
+    const incomingSecretEdges = new Set();
+    for (const [key, codes] of Object.entries(incoming)) {
+        for (const code of codes) {
+            if (!code.startsWith('secret-door:')) continue;
+            const edgeKey = featureEdgeKey(key, code);
+            if (edgeKey) incomingSecretEdges.add(edgeKey);
+        }
+    }
     for (const [key, codes] of Object.entries(merged)) {
-        const retained = codes.filter(code => !observedEdges.has(featureEdgeKey(key, code)));
+        const retained = codes.filter(code => {
+            const edgeKey = featureEdgeKey(key, code);
+            if (!observedEdges.has(edgeKey)) return true;
+            // Discovering a secret door is permanent map knowledge. A later
+            // ordinary wall observation must not conceal it again.
+            return code.startsWith('secret-door:') && !incomingSecretEdges.has(edgeKey);
+        });
         if (retained.length) merged[key] = retained;
         else delete merged[key];
     }
@@ -348,6 +469,7 @@ export {
     gridTravelPath,
     mergeFeatures,
     normalizeFeatures,
+    observeCrossedSecretDoors,
     observeVisibleFeatures,
     oppositeDirection,
     orthogonalPath,
