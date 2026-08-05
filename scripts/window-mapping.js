@@ -599,7 +599,7 @@ export class MappingWindow extends ToolWindowBase {
         });
     }
 
-    followParty(position) {
+    followParty(position, { behavior = 'smooth' } = {}) {
         if (!this.rendered || !position || this.viewMode !== 'map') return false;
         const key = `${position.column},${position.row}`;
         const selector = `.cartographer-mapping-cell[data-cell="${CSS.escape(key)}"]`;
@@ -615,11 +615,7 @@ export class MappingWindow extends ToolWindowBase {
             marker.setAttribute('aria-hidden', 'true');
             partyCell.append(marker);
         }
-        if (this._followFrame) cancelAnimationFrame(this._followFrame);
-        this._followFrame = requestAnimationFrame(() => {
-            this._followFrame = null;
-            this.centerOnParty({ behavior: 'smooth' });
-        });
+        this.centerOnParty({ behavior });
         return true;
     }
 
@@ -657,8 +653,6 @@ export class MappingWindow extends ToolWindowBase {
     _onClose(options) {
         this._pan = null;
         this._targetZoom = null;
-        if (this._followFrame) cancelAnimationFrame(this._followFrame);
-        this._followFrame = null;
         void this.manager?.onWindowClosed(this);
         return super._onClose?.(options);
     }

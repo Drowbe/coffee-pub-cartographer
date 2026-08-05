@@ -138,7 +138,7 @@ class MappingManager {
     }
 
     _registerHooks() {
-        const updateToken = Hooks.on('updateToken', (tokenDocument, changes) => {
+        const updateToken = Hooks.on('updateToken', (tokenDocument, changes, operation) => {
             const moved = ('x' in changes) || ('y' in changes);
             const movementDocument = moved
                 ? {
@@ -161,36 +161,31 @@ class MappingManager {
             }
             if (tokenDocument.id !== this.trackedTokenId) return;
             const visionChanged = ('rotation' in changes) || ('sight' in changes);
-            if (moved || !visionChanged) return;
+            if (!moved && !visionChanged) return;
             if (!this.active || this.paused) return;
-            void this._requestReveal(movementDocument, position, { force: true }).catch(error => {
-                console.error(`${MODULE.NAME}: Failed to update the map for changed token vision`, error);
-            });
-        });
-        this._hooks.push({ name: 'updateToken', id: updateToken });
-
-        const moveToken = Hooks.on('moveToken', (tokenDocument, movement) => {
-            if (tokenDocument.id !== this.trackedTokenId) return;
-            if (!this.active || this.paused) return;
-
+            // Recording and viewport following must originate from updateToken,
+            // which is emitted on the controlling player's client. Movement
+            // metadata is used only to suppress interpolation for teleports.
+            const movement = operation?._movement?.[tokenDocument.id] ?? operation?.movement;
             const teleported = this._isTeleportMovement(movement);
             if (teleported && this._catchUpTimer) {
                 clearTimeout(this._catchUpTimer);
                 this._catchUpTimer = null;
             }
 
-            const position = this._gridPosition(tokenDocument);
-            this._followRecordedPosition = position;
-            if (this.window?.followParty(position)) this._followRecordedPosition = null;
-            void this._requestReveal(tokenDocument, position, {
-                force: teleported,
+            if (moved) {
+                this._followRecordedPosition = position;
+                this.window?.followParty(position, { behavior: 'smooth' });
+            }
+            void this._requestReveal(movementDocument, position, {
+                force: visionChanged || teleported,
                 resetPath: teleported
             }).catch(error => {
-                console.error(`${MODULE.NAME}: Failed to map token movement`, error);
+                console.error(`${MODULE.NAME}: Failed to update the map for token movement or vision`, error);
             });
-            if (!teleported) this._scheduleCatchUp(tokenDocument.id);
+            if (moved && !teleported) this._scheduleCatchUp(tokenDocument.id);
         });
-        this._hooks.push({ name: 'moveToken', id: moveToken });
+        this._hooks.push({ name: 'updateToken', id: updateToken });
 
         const updateScene = Hooks.on('updateScene', (scene, changes) => {
             if (!changes?.flags?.[MODULE.ID]?.[FLAG_KEY]) return;
@@ -539,6 +534,7 @@ class MappingManager {
         this.paused = false;
         this.lastGridKey = null;
         const position = this._gridPosition(token.document);
+        this._followRecordedPosition = position;
         await this._requestReveal(token.document, position, {
             force: true,
             resetPath: true
@@ -559,7 +555,7 @@ class MappingManager {
                     await new Promise(resolve => requestAnimationFrame(resolve));
                     if (this.window !== window || !window.rendered) return;
                     if (centerOnParty) window.centerOnParty({ behavior: centerBehavior });
-                    if (followPosition && window.followParty(followPosition)) {
+                    if (followPosition && window.followParty(followPosition, { behavior: 'auto' })) {
                         const pending = this._followRecordedPosition;
                         if (pending?.column === followPosition.column && pending?.row === followPosition.row) {
                             this._followRecordedPosition = null;
@@ -992,7 +988,16 @@ class MappingManager {
         });
         if (!confirmed) return false;
         if (this.active && mapId === this.currentMapId) await this.stopMapping();
-        await this._requestMutation({ action: 'delete', mapId });
+        await this._requestMutation({
+            action: 'delete',
+            mapId,
+            actorId: record.actorId,
+            sceneId: record.sceneId
+        });
+        if (!game.user.isGM) {
+            this._removeMapRecordLocally(record);
+            await this.renderWindow();
+        }
         return true;
     }
 
@@ -1043,6 +1048,9 @@ class MappingManager {
 
     async _requestMutation(mutation) {
         const data = { ...mutation, userId: game.user.id };
+        if (data.action === 'create' && data.actorId && data.sceneId) {
+            this._deletedMapIds.delete(this._recordId(data.actorId, data.sceneId));
+        }
         if (game.user.isGM) await this._handleMutationRequest(data, { allowLocalGM: true });
         else await socketManager.broadcast('mapping', 'mutation-request', data);
     }
@@ -1060,6 +1068,26 @@ class MappingManager {
         if (!user?.active) return;
 
         let record = data.mapId ? this.records.get(data.mapId) : null;
+        if (data.action === 'delete') {
+            const actorId = String(data.actorId ?? record?.actorId ?? '');
+            const sceneId = String(data.sceneId ?? record?.sceneId ?? '');
+            const actor = game.actors?.get(actorId);
+            if (!actorId || !sceneId || data.mapId !== this._recordId(actorId, sceneId)) return;
+            if (!this._canManageActor(actor, user)) return;
+            record ??= this._normalizeRecord(
+                game.scenes?.get(sceneId)?.getFlag(MODULE.ID, FLAG_KEY)?.maps?.[actorId],
+                game.scenes?.get(sceneId)
+            );
+            this._removeMapRecordLocally(record.id ? record : {
+                id: data.mapId,
+                actorId,
+                sceneId
+            });
+            void this.renderWindow();
+            await this._persistMapDeletion(sceneId, actorId);
+            return;
+        }
+
         if (data.action === 'create') {
             if (data.sceneId !== canvas?.scene?.id) return;
             const actor = game.actors?.get(data.actorId) ?? canvas.tokens?.placeables
@@ -1124,18 +1152,12 @@ class MappingManager {
                 updatedBy: user.id
             };
             this.records.set(record.id, record);
-        } else if (data.action === 'delete') {
-            this._deletedMapIds.add(record.id);
-            this.records.delete(record.id);
         } else return;
 
         if (this.currentMapId === record.id) {
-            if (data.action === 'delete') {
-                this.currentMapId = null;
-                this.state = this._emptyRecord();
-            } else this.state = record;
+            this.state = record;
         }
-        if (data.action === 'reset' || data.action === 'delete') {
+        if (data.action === 'reset') {
             for (const [key, value] of this._authoritativePositions) {
                 if (value.mapId === record.id) this._authoritativePositions.delete(key);
             }
@@ -1143,6 +1165,40 @@ class MappingManager {
         void this.renderWindow();
         await this._persistSceneRecords(record.sceneId);
         if (data.action === 'reset') notify(game.i18n.localize(`${MODULE.ID}.mapping.resetDone`), { type: 'info' });
+    }
+
+    _removeMapRecordLocally(record) {
+        if (!record?.id) return;
+        this._deletedMapIds.add(record.id);
+        this.records.delete(record.id);
+        for (const [key, value] of this._authoritativePositions) {
+            if (value.mapId === record.id) this._authoritativePositions.delete(key);
+        }
+        if (this.currentMapId !== record.id) return;
+        this.currentMapId = null;
+        this.state = this._emptyRecord();
+    }
+
+    async _persistMapDeletion(sceneId, actorId) {
+        const scene = game.scenes?.get(sceneId);
+        if (!scene || !game.user.isGM) return;
+        this._saveQueue = this._saveQueue
+            .then(async () => {
+                const stored = scene.getFlag(MODULE.ID, FLAG_KEY);
+                const maps = Number(stored?.version) >= STATE_VERSION && stored?.maps
+                    ? foundry.utils.deepClone(stored.maps)
+                    : {};
+                delete maps[actorId];
+                const container = { version: STATE_VERSION, maps };
+                await scene.setFlag(MODULE.ID, FLAG_KEY, container);
+                await socketManager.broadcast('mapping', 'registry-updated', {
+                    userId: game.user.id,
+                    sceneId,
+                    container
+                });
+            })
+            .catch(error => console.error(`${MODULE.NAME}: Failed to delete the stored map`, error));
+        return this._saveQueue;
     }
 
     async _persistSceneRecords(sceneId) {
