@@ -10,6 +10,10 @@ const ToolWindowBase = game.modules.get('coffee-pub-blacksmith')?.api?.Blacksmit
     constructor() { throw new Error('Coffee Pub Blacksmith Tool Window API is unavailable'); }
 };
 const APP_ID = `${MODULE.ID}-mapper`;
+/** Fallback cell edge in pixels, used until --cartographer-map-cell-size is read. */
+const MAP_CELL_SIZE = 36;
+/** Fraction of the remaining distance the camera covers each frame. */
+const CAMERA_EASING = 0.28;
 
 export class MappingWindow extends ToolWindowBase {
     static DEFAULT_OPTIONS = foundry.utils.mergeObject(
@@ -55,9 +59,15 @@ export class MappingWindow extends ToolWindowBase {
         this.viewMode = 'map';
         this._hasBuiltMap = false;
         this._renderedExplored = new Set();
-        this._mapScroll = { left: 0, top: 0, gridMargin: '' };
         this._listScrollTop = 0;
         this._pan = null;
+        // Camera state lives here, not in the DOM. See the camera section below.
+        this.camera = { x: 0, y: 0 };
+        this._cameraTarget = { x: 0, y: 0 };
+        this._cameraFrame = null;
+        this._followArmed = true;
+        this._hasPaintedMap = false;
+        this._cellSize = MAP_CELL_SIZE;
         this._handlePanStart = this._handlePanStart.bind(this);
         this._handlePanMove = this._handlePanMove.bind(this);
         this._handlePanEnd = this._handlePanEnd.bind(this);
@@ -404,27 +414,24 @@ export class MappingWindow extends ToolWindowBase {
         if (!this.manager.selectMap(mapId, { render: false })) return;
         this.viewMode = 'map';
         this._hasBuiltMap = false;
+        this._hasPaintedMap = false;
         this._renderedExplored = new Set();
-        this._mapScroll = { left: 0, top: 0, gridMargin: '' };
         await this.manager.renderWindow();
-        await new Promise(resolve => requestAnimationFrame(resolve));
         this.centerOnMap();
     }
 
+    /**
+     * Zoom about the viewport centre. The camera is the centre point, so
+     * changing only the scale cannot move the map -- zoom never recentres.
+     */
     setZoom(value) {
         const zoom = Math.max(0.4, Math.min(2.5, Number(value) || 1));
-        const anchor = this._captureViewportAnchor();
         this._targetZoom = zoom;
+        this.zoom = zoom;
+        this._applyCamera();
         this._zoomQueue = (this._zoomQueue ?? Promise.resolve())
             .catch(error => console.error(`${MODULE.NAME}: Failed to zoom mapping window`, error))
-            .then(async () => {
-                this.zoom = zoom;
-                await this.manager.renderWindow();
-                if (!anchor) return;
-                this._ensureScrollMargin();
-                await new Promise(resolve => requestAnimationFrame(resolve));
-                this._restoreZoomAnchor(anchor);
-            });
+            .then(() => this.manager.renderWindow());
         return this._zoomQueue.then(() => this);
     }
 
@@ -437,6 +444,28 @@ export class MappingWindow extends ToolWindowBase {
         viewport.addEventListener('pointerup', this._handlePanEnd);
         viewport.addEventListener('pointercancel', this._handlePanEnd);
         viewport.addEventListener('contextmenu', this._handleMapContextMenu);
+
+        // The grid element is brand new on every render. Re-establish the view
+        // before the browser paints, otherwise the map flashes at the origin.
+        const grid = viewport.querySelector('.cartographer-mapping-grid');
+        if (!grid) return;
+        // CSS owns the cell size, so read it rather than duplicating the value.
+        const cellSize = Number.parseFloat(
+            getComputedStyle(grid).getPropertyValue('--cartographer-map-cell-size')
+        );
+        if (cellSize > 0) this._cellSize = cellSize;
+        const tracked = this.manager.active ? this.manager.getTrackedPositionForCurrentMap() : null;
+        if (tracked && this._followArmed) {
+            const { x, y } = this._cellCenter(tracked);
+            // Snap the first time the map is drawn, glide once it is on screen.
+            this._setCamera(x, y, { animate: this._hasPaintedMap });
+        } else {
+            this._applyCamera();
+        }
+        // The window can be measured as zero-width before it has been laid out,
+        // which would place the map by half a viewport it does not have yet.
+        if (viewport.clientWidth > 0) this._hasPaintedMap = true;
+        else requestAnimationFrame(() => this._applyCamera());
     }
 
     _handlePanStart(event) {
@@ -445,12 +474,15 @@ export class MappingWindow extends ToolWindowBase {
         event.preventDefault();
         viewport.setPointerCapture?.(event.pointerId);
         viewport.classList.add('is-panning');
+        // A manual pan takes over the view until the party moves again.
+        this._stopCameraAnimation();
+        this._followArmed = false;
         this._pan = {
             pointerId: event.pointerId,
             x: event.clientX,
             y: event.clientY,
-            left: viewport.scrollLeft,
-            top: viewport.scrollTop,
+            cameraX: this.camera.x,
+            cameraY: this.camera.y,
             moved: false
         };
     }
@@ -458,12 +490,14 @@ export class MappingWindow extends ToolWindowBase {
     _handlePanMove(event) {
         if (!this._pan || event.pointerId !== this._pan.pointerId) return;
         event.preventDefault();
-        const viewport = event.currentTarget;
-        if (Math.hypot(event.clientX - this._pan.x, event.clientY - this._pan.y) > 4) {
-            this._pan.moved = true;
-        }
-        viewport.scrollLeft = this._pan.left - (event.clientX - this._pan.x);
-        viewport.scrollTop = this._pan.top - (event.clientY - this._pan.y);
+        const deltaX = event.clientX - this._pan.x;
+        const deltaY = event.clientY - this._pan.y;
+        if (Math.hypot(deltaX, deltaY) > 4) this._pan.moved = true;
+        // Dragging right moves the map right, so the camera moves left.
+        this._setCamera(
+            this._pan.cameraX - (deltaX / this.zoom),
+            this._pan.cameraY - (deltaY / this.zoom)
+        );
     }
 
     _handlePanEnd(event) {
@@ -520,139 +554,143 @@ export class MappingWindow extends ToolWindowBase {
         });
     }
 
-    _captureViewportAnchor() {
-        const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
-        const grid = this.element?.querySelector('.cartographer-mapping-grid');
-        if (!viewport || !grid) return null;
-        const viewportRect = viewport.getBoundingClientRect();
-        const gridRect = grid.getBoundingClientRect();
-        const renderedZoom = Number.parseFloat(grid.style.getPropertyValue('--cartographer-map-zoom')) || this.zoom;
-        const clientX = viewportRect.left + (viewport.clientWidth / 2);
-        const clientY = viewportRect.top + (viewport.clientHeight / 2);
+    // ==============================================================
+    // ===== CAMERA =================================================
+    // ==============================================================
+    //
+    // The map is positioned by a transform computed from `this.camera`,
+    // which is plain JavaScript state on this window instance.
+    //
+    // This is deliberate. The Blacksmith tool window renders a single
+    // ApplicationV2 part whose template inlines the whole map body, so every
+    // render(false) replaces the viewport and grid elements. Any view state
+    // stored in the DOM -- a scroll offset, an inline margin, an in-flight
+    // CSS transition -- is destroyed on each reveal. ApplicationV2 has no
+    // _saveScrollPositions equivalent (that is ApplicationV1 only), so there
+    // is nothing to restore it. Keeping the camera outside the DOM and
+    // re-applying it after each render is what makes the view survive.
+
+    /** Map-space centre of a grid cell, in unzoomed pixels. */
+    _cellCenter(position) {
         return {
-            clientX,
-            clientY,
-            mapX: (clientX - gridRect.left) / renderedZoom,
-            mapY: (clientY - gridRect.top) / renderedZoom
+            x: (position.column + 0.5) * this._cellSize,
+            y: (position.row + 0.5) * this._cellSize
         };
     }
 
-    _restoreZoomAnchor(anchor) {
+    /**
+     * Write the current camera to the DOM. Safe to call at any time: it
+     * re-queries the elements, so a grid replaced by a render simply picks up
+     * the transform on the next call.
+     */
+    _applyCamera() {
         const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
         const grid = this.element?.querySelector('.cartographer-mapping-grid');
-        if (!viewport || !grid || !anchor) return;
-        const gridRect = grid.getBoundingClientRect();
-        viewport.scrollLeft += gridRect.left + (anchor.mapX * this.zoom) - anchor.clientX;
-        viewport.scrollTop += gridRect.top + (anchor.mapY * this.zoom) - anchor.clientY;
+        if (!viewport || !grid) return false;
+        const offsetX = (viewport.clientWidth / 2) - (this.camera.x * this.zoom);
+        const offsetY = (viewport.clientHeight / 2) - (this.camera.y * this.zoom);
+        grid.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${this.zoom})`;
+        return true;
     }
 
-    _ensureScrollMargin() {
-        const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
-        const grid = this.element?.querySelector('.cartographer-mapping-grid');
-        if (!viewport || !grid) return null;
-        grid.style.margin = `${viewport.clientHeight / 2}px ${viewport.clientWidth / 2}px`;
-        return { viewport, grid };
+    /**
+     * Move the camera so that map point (x, y) sits at the viewport centre.
+     * Animated moves are driven by requestAnimationFrame rather than a CSS
+     * transition, because a transition dies with the element it is running on
+     * and the grid element is replaced on every reveal.
+     */
+    _setCamera(x, y, { animate = false } = {}) {
+        this._cameraTarget = { x, y };
+        if (!animate) {
+            this._stopCameraAnimation();
+            this.camera = { x, y };
+            this._applyCamera();
+            return;
+        }
+        // A running loop picks up the new target on its next frame, but the
+        // grid may have just been replaced, so paint the current camera now to
+        // avoid a one-frame flash at the origin.
+        this._applyCamera();
+        if (this._cameraFrame) return;
+        const step = () => {
+            const target = this._cameraTarget;
+            const deltaX = target.x - this.camera.x;
+            const deltaY = target.y - this.camera.y;
+            if (Math.hypot(deltaX, deltaY) * this.zoom < 0.5) {
+                this._cameraFrame = null;
+                this.camera = { ...target };
+                this._applyCamera();
+                return;
+            }
+            this.camera = {
+                x: this.camera.x + (deltaX * CAMERA_EASING),
+                y: this.camera.y + (deltaY * CAMERA_EASING)
+            };
+            this._applyCamera();
+            this._cameraFrame = requestAnimationFrame(step);
+        };
+        this._cameraFrame = requestAnimationFrame(step);
     }
 
-    centerOnParty({ behavior = 'auto' } = {}) {
-        const elements = this._ensureScrollMargin();
-        const partyCell = this.element?.querySelector('.cartographer-mapping-cell.is-party');
-        if (!elements || !partyCell) return false;
-        const { viewport } = elements;
-        const viewportRect = viewport.getBoundingClientRect();
-        const partyRect = partyCell.getBoundingClientRect();
-        viewport.scrollTo({
-            left: viewport.scrollLeft + partyRect.left - viewportRect.left
-                + (partyRect.width / 2) - (viewport.clientWidth / 2),
-            top: viewport.scrollTop + partyRect.top - viewportRect.top
-                + (partyRect.height / 2) - (viewport.clientHeight / 2),
-            behavior
-        });
+    _stopCameraAnimation() {
+        if (this._cameraFrame) cancelAnimationFrame(this._cameraFrame);
+        this._cameraFrame = null;
+    }
+
+    /**
+     * Re-arm centred following. Called when the tracked token completes a
+     * step, so that a manual pan is honoured until the party moves again.
+     */
+    armFollow() {
+        this._followArmed = true;
+    }
+
+    /** Centre on the party marker, which renders at the last mapped step. */
+    centerOnParty({ animate = false } = {}) {
+        const position = this.manager.getTrackedPositionForCurrentMap();
+        if (!position) return false;
+        this._followArmed = true;
+        const { x, y } = this._cellCenter(position);
+        this._setCamera(x, y, { animate });
         return true;
     }
 
     centerView() {
-        if (this.manager.getTrackedPositionForCurrentMap()) this.centerOnParty();
-        else this.centerOnMap();
+        if (!this.centerOnParty()) this.centerOnMap();
     }
 
-    centerOnMap({ behavior = 'auto' } = {}) {
-        const elements = this._ensureScrollMargin();
-        const cells = [...(this.element?.querySelectorAll('.cartographer-mapping-cell.is-explored') ?? [])];
-        if (!elements || !cells.length) return;
-        const { viewport } = elements;
-        const viewportRect = viewport.getBoundingClientRect();
-        const bounds = cells.reduce((result, cell) => {
-            const rect = cell.getBoundingClientRect();
-            result.left = Math.min(result.left, rect.left);
-            result.top = Math.min(result.top, rect.top);
-            result.right = Math.max(result.right, rect.right);
-            result.bottom = Math.max(result.bottom, rect.bottom);
-            return result;
-        }, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
-        viewport.scrollTo({
-            left: viewport.scrollLeft + ((bounds.left + bounds.right) / 2)
-                - viewportRect.left - (viewport.clientWidth / 2),
-            top: viewport.scrollTop + ((bounds.top + bounds.bottom) / 2)
-                - viewportRect.top - (viewport.clientHeight / 2),
-            behavior
-        });
-    }
-
-    followParty(position, { behavior = 'smooth' } = {}) {
-        if (!this.rendered || !position || this.viewMode !== 'map') return false;
-        const key = `${position.column},${position.row}`;
-        const selector = `.cartographer-mapping-cell[data-cell="${CSS.escape(key)}"]`;
-        const partyCell = this.element?.querySelector(selector);
-        if (!partyCell) return false;
-        const previousCell = this.element?.querySelector('.cartographer-mapping-cell.is-party');
-        if (previousCell !== partyCell) {
-            previousCell?.classList.remove('is-party');
-            previousCell?.querySelector('.cartographer-mapping-party')?.remove();
-            partyCell.classList.add('is-party');
-            const marker = document.createElement('i');
-            marker.className = 'fa-solid fa-street-view cartographer-mapping-party';
-            marker.setAttribute('aria-hidden', 'true');
-            partyCell.append(marker);
+    /**
+     * Centre on the explored bounds. Computed from the record rather than
+     * from element rectangles, so it does not depend on layout having settled.
+     */
+    centerOnMap() {
+        const explored = this.manager.state.explored ?? [];
+        if (!explored.length) return false;
+        let minColumn = Infinity;
+        let minRow = Infinity;
+        let maxColumn = -Infinity;
+        let maxRow = -Infinity;
+        for (const key of explored) {
+            const [column, row] = key.split(',').map(Number);
+            if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
+            minColumn = Math.min(minColumn, column);
+            minRow = Math.min(minRow, row);
+            maxColumn = Math.max(maxColumn, column);
+            maxRow = Math.max(maxRow, row);
         }
-        this.centerOnParty({ behavior });
+        if (!Number.isFinite(minColumn)) return false;
+        this._followArmed = false;
+        this._setCamera(
+            ((minColumn + maxColumn + 1) / 2) * this._cellSize,
+            ((minRow + maxRow + 1) / 2) * this._cellSize
+        );
         return true;
-    }
-
-    _saveScrollPositions() {
-        const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
-        const grid = this.element?.querySelector('.cartographer-mapping-grid');
-        const list = this.element?.querySelector('.cartographer-mapping-list');
-        if (viewport) {
-            this._mapScroll = {
-                left: viewport.scrollLeft,
-                top: viewport.scrollTop,
-                gridMargin: grid?.style.margin ?? ''
-            };
-        }
-        if (list) this._listScrollTop = list.scrollTop;
-        return {
-            ...this._mapScroll,
-            listTop: this._listScrollTop
-        };
-    }
-
-    _restoreScrollPositions(saved) {
-        const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
-        if (!saved) return;
-        const grid = this.element?.querySelector('.cartographer-mapping-grid');
-        if (grid) grid.style.margin = saved.gridMargin ?? '';
-        if (viewport) {
-            viewport.scrollLeft = saved.left ?? 0;
-            viewport.scrollTop = saved.top ?? 0;
-        }
-        const list = this.element?.querySelector('.cartographer-mapping-list');
-        if (list) list.scrollTop = saved.listTop ?? 0;
     }
 
     _onClose(options) {
         this._pan = null;
         this._targetZoom = null;
+        this._stopCameraAnimation();
         void this.manager?.onWindowClosed(this);
         return super._onClose?.(options);
     }

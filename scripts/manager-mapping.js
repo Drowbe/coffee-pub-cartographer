@@ -25,6 +25,8 @@ const FLAG_KEY = 'mapping';
 const TOOL_ID = `${MODULE.ID}-mapping`;
 const WINDOW_ID = `${MODULE.ID}-mapper`;
 const STATE_VERSION = 2;
+/** How long an optimistic local deletion suppresses a map before it is reconciled. */
+const DELETE_TOMBSTONE_MS = 15000;
 
 class MappingManager {
     constructor() {
@@ -45,11 +47,14 @@ class MappingManager {
         this._revealProcessingQueue = Promise.resolve();
         this._authoritativePositions = new Map();
         this._recentTokenPositions = new Map();
-        this._deletedMapIds = new Set();
+        // Map id -> expiry timestamp. A tombstone only has to outlive a
+        // registry broadcast that was already in flight when the delete
+        // happened; it is cleared as soon as an authoritative container
+        // confirms the removal, and expires if the delete never took effect.
+        this._deletedMapIds = new Map();
         this._selectionFrame = null;
         this._closingWindow = false;
         this._catchUpTimer = null;
-        this._followRecordedPosition = null;
     }
 
     _recordId(actorId, sceneId) {
@@ -108,7 +113,6 @@ class MappingManager {
         this._selectionFrame = null;
         if (this._catchUpTimer) clearTimeout(this._catchUpTimer);
         this._catchUpTimer = null;
-        this._followRecordedPosition = null;
         this.window = null;
     }
 
@@ -173,12 +177,16 @@ class MappingManager {
                 this._catchUpTimer = null;
             }
 
-            if (moved) {
-                this._followRecordedPosition = position;
-                this.window?.followParty(position, { behavior: 'smooth' });
-            }
+            // A completed step re-arms centred following, so a manual pan is
+            // respected only until the party moves again.
+            if (moved) this.window?.armFollow();
             void this._requestReveal(movementDocument, position, {
-                force: visionChanged || teleported,
+                // Foundry turns tokens to face their movement, so a move
+                // almost always reports a rotation change too. Only a
+                // vision-only change is worth forcing a re-sample; forcing on
+                // every move would defeat the same-cell guard in
+                // _requestReveal and re-walk the path on every nudge.
+                force: (visionChanged && !moved) || teleported,
                 resetPath: teleported
             }).catch(error => {
                 console.error(`${MODULE.NAME}: Failed to update the map for token movement or vision`, error);
@@ -271,13 +279,28 @@ class MappingManager {
         }
         this.legacyByScene.delete(scene.id);
 
+        const incoming = new Map();
         if (Number(raw?.version) >= STATE_VERSION && raw.maps && typeof raw.maps === 'object') {
             for (const value of Object.values(raw.maps)) {
                 const record = this._normalizeRecord(value, scene);
-                if (record.id && !this._deletedMapIds.has(record.id)) this.records.set(record.id, record);
+                if (record.id) incoming.set(record.id, record);
             }
         } else if (Array.isArray(raw?.explored)) {
             this.legacyByScene.set(scene.id, raw);
+        }
+
+        // Reconcile pending deletions against this authoritative container.
+        // An id the container no longer carries is confirmed deleted, so the
+        // tombstone has done its job and must be dropped -- otherwise the map
+        // could never be recorded again on this client. An id that is still
+        // present after the tombstone expired means the delete did not take,
+        // and the honest thing is to show the map again.
+        for (const [id, expiry] of this._deletedMapIds) {
+            if (!id.endsWith(`::${scene.id}`)) continue;
+            if (!incoming.has(id) || expiry <= Date.now()) this._deletedMapIds.delete(id);
+        }
+        for (const [id, record] of incoming) {
+            if (!this._deletedMapIds.has(id)) this.records.set(id, record);
         }
 
         if (this.currentMapId) {
@@ -433,6 +456,7 @@ class MappingManager {
         this.state = { ...this.state, lastPosition: startPosition };
         await this.openWindow();
         this.window?.showMap?.();
+        this.window?.armFollow();
         await this._requestReveal(token.document, startPosition, {
             force: true,
             resetPath: true
@@ -453,7 +477,6 @@ class MappingManager {
         }
         this.active = false;
         this.paused = false;
-        this._followRecordedPosition = null;
         this.lastGridKey = null;
         this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
         if (closeWindow && this.window?.rendered) {
@@ -485,8 +508,9 @@ class MappingManager {
         }
         const { MappingWindow } = await import('./window-mapping.js');
         this.window = await MappingWindow.open(this);
-        await new Promise(resolve => requestAnimationFrame(resolve));
-        this.window?.centerOnMap?.();
+        // centerOnMap works from the record rather than element rectangles, so
+        // it can run immediately and the map never paints at the origin first.
+        if (!this.active) this.window?.centerOnMap?.();
         return this.window;
     }
 
@@ -506,16 +530,12 @@ class MappingManager {
             await this.window?.showMap?.();
         }
         await this.renderWindow();
-        if (selected && this.window?.rendered) {
-            await new Promise(resolve => requestAnimationFrame(resolve));
-            this.window.centerOnMap?.();
-        }
+        if (selected && this.window?.rendered) this.window.centerOnMap?.();
     }
 
     async pauseMapping() {
         if (!this.active || this.paused) return false;
         this.paused = true;
-        this._followRecordedPosition = null;
         this.lastGridKey = null;
         if (this._catchUpTimer) {
             clearTimeout(this._catchUpTimer);
@@ -533,35 +553,26 @@ class MappingManager {
 
         this.paused = false;
         this.lastGridKey = null;
+        this.window?.armFollow();
         const position = this._gridPosition(token.document);
-        this._followRecordedPosition = position;
         await this._requestReveal(token.document, position, {
             force: true,
             resetPath: true
         });
-        await this.renderWindow();
+        await this.renderWindow({ centerOnParty: true });
         return true;
     }
 
-    async renderWindow({ centerOnParty = false, centerBehavior = 'auto' } = {}) {
+    // The window re-establishes its own camera in _onRender, including centred
+    // following, so rendering no longer has to chase the view afterwards.
+    async renderWindow({ centerOnParty = false } = {}) {
         this._renderQueue = this._renderQueue
             .catch(error => console.error(`${MODULE.NAME}: Failed to render mapping window`, error))
             .then(async () => {
                 const window = this.window;
                 if (!window?.rendered) return;
                 await window.render(false);
-                const followPosition = this.active ? this._followRecordedPosition : null;
-                if ((centerOnParty || followPosition) && this.window === window && window.rendered) {
-                    await new Promise(resolve => requestAnimationFrame(resolve));
-                    if (this.window !== window || !window.rendered) return;
-                    if (centerOnParty) window.centerOnParty({ behavior: centerBehavior });
-                    if (followPosition && window.followParty(followPosition, { behavior: 'auto' })) {
-                        const pending = this._followRecordedPosition;
-                        if (pending?.column === followPosition.column && pending?.row === followPosition.row) {
-                            this._followRecordedPosition = null;
-                        }
-                    }
-                }
+                if (centerOnParty && this.window === window && window.rendered) window.centerOnParty();
             });
         return this._renderQueue;
     }
@@ -834,7 +845,7 @@ class MappingManager {
         const coordinates = trustedState?.coordinates ?? currentCoordinates;
         if (!coordinates) return;
         const id = this._recordId(actor.id, canvas.scene.id);
-        if (this._deletedMapIds.has(id)) return;
+        if (this._isTombstoned(id)) return;
         const existing = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
         const sessionKey = `${data.userId}:${data.sceneId}:${data.tokenId}`;
         const authoritative = this._authoritativePositions.get(sessionKey);
@@ -1167,9 +1178,17 @@ class MappingManager {
         if (data.action === 'reset') notify(game.i18n.localize(`${MODULE.ID}.mapping.resetDone`), { type: 'info' });
     }
 
+    _isTombstoned(id) {
+        const expiry = this._deletedMapIds.get(id);
+        if (expiry === undefined) return false;
+        if (expiry > Date.now()) return true;
+        this._deletedMapIds.delete(id);
+        return false;
+    }
+
     _removeMapRecordLocally(record) {
         if (!record?.id) return;
-        this._deletedMapIds.add(record.id);
+        this._deletedMapIds.set(record.id, Date.now() + DELETE_TOMBSTONE_MS);
         this.records.delete(record.id);
         for (const [key, value] of this._authoritativePositions) {
             if (value.mapId === record.id) this._authoritativePositions.delete(key);
@@ -1177,6 +1196,22 @@ class MappingManager {
         if (this.currentMapId !== record.id) return;
         this.currentMapId = null;
         this.state = this._emptyRecord();
+    }
+
+    /**
+     * Write the map container to a Scene flag.
+     *
+     * Document#setFlag is update({flags: {scope: {key: value}}}), and document
+     * updates merge recursively. A container whose `maps` object is simply
+     * missing an Actor key therefore reads as "no change to that key", not as
+     * a deletion, so a removed map survives in the database and returns on
+     * reload. The "==" prefix forces replacement of the whole flag instead of
+     * merging into it, which is the only way a removal actually persists.
+     */
+    async _writeSceneContainer(scene, container) {
+        await scene.update({
+            [`flags.${MODULE.ID}.==${FLAG_KEY}`]: container
+        });
     }
 
     async _persistMapDeletion(sceneId, actorId) {
@@ -1190,7 +1225,7 @@ class MappingManager {
                     : {};
                 delete maps[actorId];
                 const container = { version: STATE_VERSION, maps };
-                await scene.setFlag(MODULE.ID, FLAG_KEY, container);
+                await this._writeSceneContainer(scene, container);
                 await socketManager.broadcast('mapping', 'registry-updated', {
                     userId: game.user.id,
                     sceneId,
@@ -1210,7 +1245,7 @@ class MappingManager {
         }
         const container = { version: STATE_VERSION, maps };
         this._saveQueue = this._saveQueue
-            .then(() => scene.setFlag(MODULE.ID, FLAG_KEY, container))
+            .then(() => this._writeSceneContainer(scene, container))
             .then(() => socketManager.broadcast('mapping', 'registry-updated', {
                 userId: game.user.id,
                 sceneId,
