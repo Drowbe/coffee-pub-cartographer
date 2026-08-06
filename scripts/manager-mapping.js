@@ -8,16 +8,20 @@ import { socketManager } from './manager-sockets.js';
 import {
     flattenFeatureSources,
     gridTravelPath,
+    mergeFeatureGeometry,
     mergeFeatureSources,
     mergeFeatures,
     mergeSourceFeatures,
+    normalizeFeatureGeometry,
     normalizeFeatureSources,
     normalizeFeatures,
     contiguousFloorRegion,
     propagateFloors,
     observeCrossedSecretDoors,
     observeVisibleFeatures,
+    pruneFeatureGeometry,
     retractCrossedBoundaries,
+    retractGeometryOnBoundaries,
     retractStaleSourceEdges,
     subtractFeatureSources,
     visibleRevealKeys
@@ -136,6 +140,7 @@ class MappingManager {
             explored: [],
             features: {},
             featureSources: {},
+            geometry: {},
             symbols: [],
             floors: {},
             lastPosition: null,
@@ -488,6 +493,10 @@ class MappingManager {
             explored,
             features: normalizeFeatures(raw.features),
             featureSources: normalizeFeatureSources(raw.featureSources),
+            // The true wall lines, drawn instead of the boundary lattice wherever
+            // they exist. Additive: a record written before geometry simply has
+            // none and still renders from the lattice alone.
+            geometry: normalizeFeatureGeometry(raw.geometry),
             symbols: this._normalizeSymbols(raw.symbols),
             floors: this._normalizeFloors(raw.floors),
             lastPosition: this._normalizePosition(raw.lastPosition),
@@ -1323,6 +1332,7 @@ class MappingManager {
         const existing = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
         const explored = new Set(existing.explored);
         let observedSourcesAlongPath = {};
+        let observedGeometryAlongPath = {};
         let candidateSquares = 0;
         let visibleSquares = 0;
         // Every square the party had a clear line to at some point along this
@@ -1349,6 +1359,10 @@ class MappingManager {
             observedSourcesAlongPath = mergeFeatureSources(
                 observedSourcesAlongPath,
                 observed.sources
+            );
+            observedGeometryAlongPath = mergeFeatureGeometry(
+                observedGeometryAlongPath,
+                observed.geometry
             );
 
             // Very long drags are intentionally allowed to lag like a person
@@ -1429,6 +1443,14 @@ class MappingManager {
         const walked = retractCrossedBoundaries(features, featureSources, path);
         features = walked.features;
         featureSources = walked.sources;
+        // The drawn lines follow the lattice ruling for ruling: fold in what was
+        // just seen, cut whatever a boundary retraction disproved -- whether by
+        // restatement or by being walked through -- and drop anything whose wall
+        // the lattice no longer carries at all.
+        let geometry = mergeFeatureGeometry(latest.geometry, observedGeometryAlongPath);
+        geometry = retractGeometryOnBoundaries(geometry, pruned.removedBySource);
+        geometry = retractGeometryOnBoundaries(geometry, walked.removedBySource);
+        geometry = pruneFeatureGeometry(geometry, featureSources);
         // What this pass unlearned. Steadily non-zero means the snapping is
         // placing boundaries it then has to take back, which is a detection
         // problem rather than a merge one.
@@ -1456,6 +1478,7 @@ class MappingManager {
             explored: [...combinedExplored],
             features,
             featureSources,
+            geometry,
             floors,
             lastPosition: position,
             createdAt: latest.createdAt || Date.now(),
@@ -1810,6 +1833,7 @@ class MappingManager {
                 explored: [],
                 features: {},
                 featureSources: {},
+                geometry: {},
                 symbols: [],
                 floors: {},
                 lastPosition: null,

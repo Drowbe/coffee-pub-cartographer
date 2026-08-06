@@ -377,7 +377,12 @@ export class MappingWindow extends ToolWindowBase {
             ? new Set([...explored].filter(key => !this._renderedExplored.has(key)))
             : new Set();
         const trackedPosition = this.manager.getTrackedPositionForCurrentMap();
-        const mappedGeometry = this._getMappedTileGeometry(explored, this.manager.state.features);
+        const mappedGeometry = this._getMappedTileGeometry(
+            explored,
+            this.manager.state.features,
+            this.manager.state.geometry,
+            this.manager.state.featureSources
+        );
         const canRecord = this.manager.canRecordCurrentMap();
         const common = {
             canRecord,
@@ -563,8 +568,23 @@ export class MappingWindow extends ToolWindowBase {
         return sides.find(side => explored.has(`${side.column},${side.row}`)) ?? null;
     }
 
-    _getMappedTileGeometry(explored, features) {
+    _getMappedTileGeometry(explored, features, geometry, featureSources) {
         const segmentsByCell = new Map();
+        // Boundaries whose wall is drawn from its own recorded line instead.
+        // The lattice still decides what the party knows -- these edges are
+        // real, and floors and blocking still read them -- but drawing them as
+        // one of four sides of a square would put a staircase on top of the
+        // wall it is standing in for.
+        const supersededEdges = new Set();
+        for (const [sourceId, sourceFeatures] of Object.entries(featureSources ?? {})) {
+            if (!geometry?.[sourceId]?.length) continue;
+            for (const [key, codes] of Object.entries(sourceFeatures ?? {})) {
+                for (const code of codes) {
+                    const edgeKey = this._latticeEdgeKey(key, code);
+                    if (edgeKey) supersededEdges.add(edgeKey);
+                }
+            }
+        }
         const doorSymbolsByCell = new Map();
         const secretDoorSymbolsByCell = new Map();
         const windowSymbolsByCell = new Map();
@@ -604,6 +624,10 @@ export class MappingWindow extends ToolWindowBase {
 
         const edges = new Map();
         for (const [edgeKey, edge] of latticeEdges) {
+            // Only plain wall gives way to a recorded line. A doorway that won
+            // this boundary is drawn as its symbol whatever the wall beneath it
+            // is doing.
+            if (edge.feature === 'wall' && supersededEdges.has(edgeKey)) continue;
             const side = this._drawableSide(edgeKey, explored);
             if (!side) continue;
             edges.set(edgeKey, {
@@ -611,6 +635,10 @@ export class MappingWindow extends ToolWindowBase {
                 feature: edge.feature,
                 direction: side.direction
             });
+        }
+
+        for (const [key, segment] of this._geometrySegments(geometry, explored)) {
+            segmentsByCell.set(key, [...(segmentsByCell.get(key) ?? []), segment]);
         }
 
         // Wide openings mark every square they cross, so join those marks back
@@ -641,6 +669,118 @@ export class MappingWindow extends ToolWindowBase {
             }
         }
         return { segmentsByCell, doorSymbolsByCell, secretDoorSymbolsByCell, windowSymbolsByCell };
+    }
+
+    /** The lattice edge a stored "feature:direction" code names. */
+    _latticeEdgeKey(key, code) {
+        const [column, row] = key.split(',').map(Number);
+        const [, direction] = code.split(':');
+        if (!Number.isInteger(column) || !Number.isInteger(row)) return null;
+        return {
+            north: `h:${column}:${row}`,
+            south: `h:${column}:${row + 1}`,
+            west: `v:${column}:${row}`,
+            east: `v:${column + 1}:${row}`
+        }[direction] ?? null;
+    }
+
+    /**
+     * The portion of a segment lying inside one square, as a pair of positions
+     * along it, or null when it misses the square entirely. Liang-Barsky: each
+     * of the square's four sides trims the run of the line that survives, and
+     * the moment nothing survives the square is rejected.
+     */
+    _clipToCell(x0, y0, x1, y1, column, row) {
+        const dx = x1 - x0;
+        const dy = y1 - y0;
+        let enter = 0;
+        let exit = 1;
+        const limits = [
+            [-dx, x0 - column],
+            [dx, column + 1 - x0],
+            [-dy, y0 - row],
+            [dy, row + 1 - y0]
+        ];
+        for (const [edge, distance] of limits) {
+            if (edge === 0) {
+                if (distance < 0) return null;
+                continue;
+            }
+            const crossing = distance / edge;
+            if (edge < 0) {
+                if (crossing > exit) return null;
+                if (crossing > enter) enter = crossing;
+            } else {
+                if (crossing < enter) return null;
+                if (crossing < exit) exit = crossing;
+            }
+        }
+        // A line that only grazes a corner contributes nothing worth drawing.
+        return exit - enter > 0.0001 ? [enter, exit] : null;
+    }
+
+    /**
+     * Cut each recorded wall line into the squares it passes through, as
+     * polylines in that square's own coordinates.
+     *
+     * The map is a grid of cells that each own a small SVG, so a wall crossing
+     * five squares is drawn as five pieces. They meet exactly, because every
+     * piece is measured from the same line -- the seam is invisible, and in
+     * return the geometry layer needs no overlay, no separate zoom handling and
+     * no changes to the template.
+     *
+     * The bow through the middle is the same hand-drawn wobble the boundary
+     * strokes use, turned to run across whatever angle the wall actually sits
+     * at rather than always north or west.
+     */
+    * _geometrySegments(geometry, explored) {
+        for (const segments of Object.values(geometry ?? {})) {
+            for (const segment of segments) {
+                const [[x0, y0], [x1, y1]] = segment;
+                if (![x0, y0, x1, y1].every(Number.isFinite)) continue;
+                const firstColumn = Math.floor(Math.min(x0, x1));
+                const lastColumn = Math.floor(Math.max(x0, x1));
+                const firstRow = Math.floor(Math.min(y0, y1));
+                const lastRow = Math.floor(Math.max(y0, y1));
+                // Walls are short, or long and axis-aligned, so the box around
+                // one is a thin strip. A pathological diagonal is skipped
+                // rather than allowed to cost more than the map it draws.
+                if ((lastColumn - firstColumn + 1) * (lastRow - firstRow + 1) > 4096) continue;
+
+                const dx = x1 - x0;
+                const dy = y1 - y0;
+                const length = Math.hypot(dx, dy);
+                if (!length) continue;
+                // Perpendicular to the wall, in the cell's 0-100 coordinates.
+                const bowX = (-dy / length) * 1.6;
+                const bowY = (dx / length) * 1.6;
+
+                for (let row = firstRow; row <= lastRow; row++) {
+                    for (let column = firstColumn; column <= lastColumn; column++) {
+                        const key = `${column},${row}`;
+                        if (!explored.has(key)) continue;
+                        const span = this._clipToCell(x0, y0, x1, y1, column, row);
+                        if (!span) continue;
+                        const [enter, exit] = span;
+                        // Rounded because these go straight into markup, and a
+                        // clip lands on values like 30.00000000000007.
+                        const local = amount => ({
+                            x: Math.round(((x0 + (dx * amount)) - column) * 10000) / 100,
+                            y: Math.round(((y0 + (dy * amount)) - row) * 10000) / 100
+                        });
+                        const start = local(enter);
+                        const end = local(exit);
+                        const middle = local((enter + exit) / 2);
+                        yield [key, {
+                            className: 'is-wall',
+                            priority: 1,
+                            points: `${start.x},${start.y} ${middle.x + bowX},${middle.y + bowY} ${end.x},${end.y}`,
+                            echoPoints: `${start.x},${start.y} ${middle.x - (bowX * 0.7)},${middle.y - (bowY * 0.7)} ${end.x},${end.y}`
+                        }];
+                    }
+                }
+            }
+        }
     }
 
     /**

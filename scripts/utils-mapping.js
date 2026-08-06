@@ -174,6 +174,28 @@ function gridCellAt(point) {
     return Number.isInteger(column) && Number.isInteger(row) ? { column, row } : null;
 }
 
+/**
+ * A canvas point as a fractional grid position, so column 10.5 is the middle of
+ * column 10. Recorded geometry is held in these units rather than pixels: they
+ * are the same units the rest of the record already speaks, they survive a
+ * scene whose grid size changes, and the renderer needs no scale factor to
+ * place them.
+ *
+ * Derived from the containing cell rather than by dividing, so a grid whose
+ * origin is offset from the canvas origin still lands correctly.
+ */
+function gridFractionalPoint(point) {
+    const cell = gridCellAt(point);
+    if (!cell) return null;
+    const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
+    const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
+    const center = cellCenter(cell);
+    return {
+        column: cell.column + 0.5 + ((point.x - center.x) / sizeX),
+        row: cell.row + 0.5 + ((point.y - center.y) / sizeY)
+    };
+}
+
 function wallSegment(document) {
     const coordinates = document?.c ?? document?._source?.c;
     if (!Array.isArray(coordinates) || coordinates.length < 4) return null;
@@ -559,19 +581,21 @@ function wallBoundaryObservations(
         requireVisibility = true,
         midpointOnly = false,
         reversed = false,
-        carry = null
+        carry = null,
+        collectGeometry = false
     } = {}
 ) {
+    const empty = { observations: [], segments: [] };
     const feature = featureOverride ?? classifyWall(document);
-    if (!feature || !canvas?.grid) return [];
+    if (!feature || !canvas?.grid) return empty;
     const coordinates = document?.c ?? document?._source?.c;
-    if (!Array.isArray(coordinates) || coordinates.length < 4) return [];
+    if (!Array.isArray(coordinates) || coordinates.length < 4) return empty;
     const [x1, y1, x2, y2] = coordinates.map(Number);
-    if (![x1, y1, x2, y2].every(Number.isFinite)) return [];
+    if (![x1, y1, x2, y2].every(Number.isFinite)) return empty;
     const wallDx = x2 - x1;
     const wallDy = y2 - y1;
     const length = Math.hypot(wallDx, wallDy);
-    if (!length) return [];
+    if (!length) return empty;
 
     const origin = tokenCenter(tokenDocument);
     const gridSize = Math.min(
@@ -639,7 +663,14 @@ function wallBoundaryObservations(
         return true;
     };
 
-    for (const wallPoint of samples) {
+    // Which samples were actually taken into the record. A Foundry wall
+    // document is a straight segment, so a contiguous stretch of accepted
+    // samples is itself a straight segment and is described exactly by its two
+    // ends -- no simplification, and nothing lost. A curve is authored as a fan
+    // of such documents, so it comes out as the chain of chords that drew it.
+    const accepted = [];
+
+    for (const [sampleIndex, wallPoint] of samples.entries()) {
         // Which squares this sample could be recorded against is a set lookup;
         // whether it can be seen is a raycast. Ask the cheap question first, so
         // a wider detection window does not pay for sightlines to boundaries it
@@ -667,10 +698,45 @@ function wallBoundaryObservations(
             if (connector) record(connector, connector.direction);
         }
         record(cell, cell.direction);
+        accepted.push(sampleIndex);
         if (nodes) previousNodes = nodes;
     }
     if (carry) carry.nodes = previousNodes;
-    return observations;
+
+    const segments = [];
+    if (collectGeometry && accepted.length) {
+        // A sample stands for the slice of wall around it, so a run covers its
+        // slices end to end rather than stopping at the outermost midpoints.
+        // Measuring midpoint to midpoint would leave every stretch an eighth of
+        // a square short at each end: a nick at the frontier of what has been
+        // seen, and -- worse -- a gap too wide for the merge to close, so a wall
+        // discovered in two passes would never join into one line.
+        //
+        // It also means a run that reaches the first or last slice reaches the
+        // wall's own end, which is what makes corners meet.
+        const from = reversed ? { x: x2, y: y2 } : { x: x1, y: y1 };
+        const to = reversed ? { x: x1, y: y1 } : { x: x2, y: y2 };
+        const pointAt = amount => gridFractionalPoint({
+            x: from.x + ((to.x - from.x) * amount),
+            y: from.y + ((to.y - from.y) * amount)
+        });
+        const flush = (first, last) => {
+            const start = pointAt(first / sampleCount);
+            const end = pointAt((last + 1) / sampleCount);
+            if (start && end) segments.push([[start.column, start.row], [end.column, end.row]]);
+        };
+        let runStart = accepted[0];
+        let previous = accepted[0];
+        for (const index of accepted.slice(1)) {
+            if (index !== previous + 1) {
+                flush(runStart, previous);
+                runStart = index;
+            }
+            previous = index;
+        }
+        flush(runStart, previous);
+    }
+    return { observations, segments };
 }
 
 function segmentOrientation(a, b, c) {
@@ -755,7 +821,7 @@ function observeCrossedSecretDoors(tokenDocument, fromCoordinates, toCoordinates
             toToken,
             allowed,
             { featureOverride: 'secret-door', requireVisibility: false }
-        )) {
+        ).observations) {
             observed[observation.key] ??= [];
             if (!observed[observation.key].includes(observation.code)) {
                 observed[observation.key].push(observation.code);
@@ -868,6 +934,7 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
     const allowed = revealKeys instanceof Set ? revealKeys : new Set(revealKeys ?? []);
     const observed = {};
     const sources = {};
+    const geometry = {};
     // Glyph features cluster only with their own kind, so a locked door beside
     // a plain one -- or a window beside a door -- cannot be collapsed into a
     // single mislabelled symbol.
@@ -900,21 +967,28 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
     for (const run of connectedWallRuns(structuralDocuments)) {
         const carry = {};
         for (const { document, reversed } of run) {
-            const observations = wallBoundaryObservations(document, tokenDocument, allowed, {
+            const result = wallBoundaryObservations(document, tokenDocument, allowed, {
                 reversed,
-                carry
+                carry,
+                // Only ordinary structure carries true geometry. Doorways and
+                // windows are drawn as symbols on an old-school map, not as
+                // their real slope, so they stay on the boundary lattice.
+                collectGeometry: true
             });
-            for (const observation of observations) {
+            const sourceId = `wall:${document.id}`;
+            for (const observation of result.observations) {
                 observed[observation.key] ??= [];
                 if (!observed[observation.key].includes(observation.code)) {
                     observed[observation.key].push(observation.code);
                 }
-                const sourceId = `wall:${document.id}`;
                 sources[sourceId] ??= {};
                 sources[sourceId][observation.key] ??= [];
                 if (!sources[sourceId][observation.key].includes(observation.code)) {
                     sources[sourceId][observation.key].push(observation.code);
                 }
+            }
+            if (result.segments.length) {
+                geometry[sourceId] = mergeSourceGeometry(geometry[sourceId], result.segments);
             }
         }
     }
@@ -929,7 +1003,7 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
                 tokenDocument,
                 allowed,
                 { featureOverride: feature }
-            )) {
+            ).observations) {
                 observed[observation.key] ??= [];
                 if (!observed[observation.key].includes(observation.code)) {
                     observed[observation.key].push(observation.code);
@@ -953,7 +1027,7 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             tokenDocument,
             allowed,
             { featureOverride: 'wall', midpointOnly: true }
-        )) {
+        ).observations) {
             observed[observation.key] ??= [];
             if (!observed[observation.key].includes(observation.code)) {
                 observed[observation.key].push(observation.code);
@@ -965,7 +1039,7 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
             }
         }
     }
-    return { features: observed, sources };
+    return { features: observed, sources, geometry };
 }
 
 /**
@@ -1142,6 +1216,193 @@ function isSecretDoorCode(code) {
     return featureOfCode(code) === 'secret-door';
 }
 
+// ==================================================================
+// ===== TRUE WALL GEOMETRY =========================================
+// ==================================================================
+//
+// The boundary lattice above answers what the map has to *reason* about --
+// which squares a room joins, where a doorway sits, what blocks movement. It
+// cannot answer what a wall *looks* like, because it only ever knows which of
+// four sides of a square a wall was nearest to, and a wall at 30 degrees is
+// near all of them in turn.
+//
+// So alongside it, and attributed to the same wall sources, the mapper keeps
+// the line itself. Nothing new is sampled for this: the snapping pass already
+// walks each wall at quarter-square intervals and already knows which of those
+// samples the party could see. It simply used to throw the positions away.
+//
+// A Foundry wall document is a straight segment, so a run of consecutive seen
+// samples is exactly described by its two ends. Curves are authored as fans of
+// short straight documents, so they arrive as the chain of chords that drew
+// them -- angled walls and round walls are the same thing, stored at full
+// fidelity, in four numbers per seen stretch.
+
+/** A hundredth of a square: finer than a foot on a five-foot grid. */
+function roundCoordinate(value) {
+    return Math.round(value * 100) / 100;
+}
+
+/** How far off a wall's line stored linework may sit and still be the same wall. */
+const GEOMETRY_COLLINEAR_TOLERANCE = 0.15;
+/** How wide a gap between two stretches of the same wall is closed up. */
+const GEOMETRY_JOIN_TOLERANCE = 0.02;
+
+function normalizeFeatureGeometry(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const normalized = {};
+    for (const [sourceId, segments] of Object.entries(raw)) {
+        if (typeof sourceId !== 'string' || !FEATURE_SOURCE_PATTERN.test(sourceId)) continue;
+        if (!Array.isArray(segments)) continue;
+        const valid = [];
+        for (const segment of segments) {
+            if (!Array.isArray(segment) || segment.length !== 2) continue;
+            const points = segment.map(point => (Array.isArray(point) ? point.map(Number) : null));
+            if (points.some(point => point?.length !== 2 || !point.every(Number.isFinite))) continue;
+            const [[ax, ay], [bx, by]] = points;
+            if (ax === bx && ay === by) continue;
+            valid.push([
+                [roundCoordinate(ax), roundCoordinate(ay)],
+                [roundCoordinate(bx), roundCoordinate(by)]
+            ]);
+        }
+        if (valid.length) normalized[sourceId] = valid;
+    }
+    return normalized;
+}
+
+/** A frame for measuring along and away from a segment's line. */
+function segmentFrame([[ax, ay], [bx, by]]) {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const length = Math.hypot(dx, dy);
+    if (!length) return null;
+    const ux = dx / length;
+    const uy = dy / length;
+    return {
+        length,
+        origin: [ax, ay],
+        along: ([px, py]) => ((px - ax) * ux) + ((py - ay) * uy),
+        away: ([px, py]) => Math.abs(((px - ax) * -uy) + ((py - ay) * ux)),
+        at: amount => [roundCoordinate(ax + (ux * amount)), roundCoordinate(ay + (uy * amount))]
+    };
+}
+
+/**
+ * Fold newly seen stretches of one wall into what was already recorded of it.
+ *
+ * Everything here belongs to a single Foundry wall document, so it all lies on
+ * one line and the merge collapses to joining intervals along that line. Seeing
+ * the far half of a wall you had only seen the near half of yields one stretch,
+ * not two, and seeing the same stretch again changes nothing at all.
+ *
+ * Linework that no longer sits on the line the wall now reports is dropped: a
+ * wall has one position at a time, so that is where the GM moved it from.
+ */
+function mergeSourceGeometry(stored, incoming) {
+    if (!incoming?.length) return stored ?? [];
+    const frame = segmentFrame(incoming[0]);
+    if (!frame) return stored ?? [];
+
+    const intervals = [];
+    for (const segment of [...(stored ?? []), ...incoming]) {
+        if (segment.some(point => frame.away(point) > GEOMETRY_COLLINEAR_TOLERANCE)) continue;
+        const first = frame.along(segment[0]);
+        const second = frame.along(segment[1]);
+        intervals.push([Math.min(first, second), Math.max(first, second)]);
+    }
+    if (!intervals.length) return [];
+
+    intervals.sort((left, right) => left[0] - right[0]);
+    const merged = [intervals[0]];
+    for (const [start, end] of intervals.slice(1)) {
+        const last = merged.at(-1);
+        if (start <= last[1] + GEOMETRY_JOIN_TOLERANCE) last[1] = Math.max(last[1], end);
+        else merged.push([start, end]);
+    }
+    return merged.map(([start, end]) => [frame.at(start), frame.at(end)]);
+}
+
+function mergeFeatureGeometry(left, right) {
+    const merged = normalizeFeatureGeometry(left);
+    for (const [sourceId, segments] of Object.entries(normalizeFeatureGeometry(right))) {
+        const next = mergeSourceGeometry(merged[sourceId], segments);
+        if (next.length) merged[sourceId] = next;
+        else delete merged[sourceId];
+    }
+    return merged;
+}
+
+/** The two lattice corners a stored boundary runs between, in grid units. */
+function edgeEndpoints(edgeKey) {
+    const [orientation, first, second] = String(edgeKey).split(':');
+    const a = Number(first);
+    const b = Number(second);
+    if (!Number.isInteger(a) || !Number.isInteger(b)) return null;
+    return orientation === 'h' ? [[a, b], [a + 1, b]] : [[a, b], [a, b + 1]];
+}
+
+/**
+ * Cut out the stretch of a wall that runs along a boundary the party walked
+ * through, so the drawn line gains the same gap its boundary record just did.
+ *
+ * Only walls that lost a boundary here are touched, and such a wall lies along
+ * that boundary by construction, so subtracting the boundary's own extent
+ * removes exactly the square's worth of line that was disproved -- never a
+ * wall that merely happens to meet this one end-on.
+ */
+function retractGeometryOnBoundaries(geometry, removedBySource) {
+    const normalized = normalizeFeatureGeometry(geometry);
+    if (!removedBySource?.size) return normalized;
+    for (const [sourceId, edgeKeys] of removedBySource) {
+        let segments = normalized[sourceId];
+        if (!segments?.length) continue;
+        for (const edgeKey of edgeKeys) {
+            const boundary = edgeEndpoints(edgeKey);
+            if (!boundary) continue;
+            const remaining = [];
+            for (const segment of segments) {
+                const frame = segmentFrame(segment);
+                if (!frame || boundary.some(point => frame.away(point) > GEOMETRY_COLLINEAR_TOLERANCE)) {
+                    remaining.push(segment);
+                    continue;
+                }
+                const first = frame.along(boundary[0]);
+                const second = frame.along(boundary[1]);
+                const cutStart = Math.min(first, second);
+                const cutEnd = Math.max(first, second);
+                if (cutEnd <= 0 || cutStart >= frame.length) {
+                    remaining.push(segment);
+                    continue;
+                }
+                if (cutStart > GEOMETRY_JOIN_TOLERANCE) remaining.push([frame.at(0), frame.at(cutStart)]);
+                if (cutEnd < frame.length - GEOMETRY_JOIN_TOLERANCE) {
+                    remaining.push([frame.at(cutEnd), frame.at(frame.length)]);
+                }
+            }
+            segments = remaining;
+        }
+        if (segments.length) normalized[sourceId] = segments;
+        else delete normalized[sourceId];
+    }
+    return normalized;
+}
+
+/**
+ * Drop the drawn line for any wall the boundary record no longer carries.
+ *
+ * The lattice stays the authority on what the party knows. Geometry is how that
+ * knowledge is drawn, so a source retracted from the lattice must not keep a
+ * line on the map.
+ */
+function pruneFeatureGeometry(geometry, sources) {
+    const normalized = normalizeFeatureGeometry(geometry);
+    const known = normalizeFeatureSources(sources);
+    for (const sourceId of Object.keys(normalized)) {
+        if (!known[sourceId]) delete normalized[sourceId];
+    }
+    return normalized;
+}
+
 /** The two squares a lattice edge separates. */
 function edgeFlankingKeys(edgeKey) {
     const [orientation, first, second] = String(edgeKey).split(':');
@@ -1200,7 +1461,13 @@ function retractCrossedBoundaries(features, sources, path) {
         if (edgeKey) crossed.add(edgeKey);
     }
     const normalizedSources = normalizeFeatureSources(sources);
-    if (!crossed.size) return { features: normalizeFeatures(features), sources: normalizedSources, removed: 0 };
+    const unchanged = {
+        features: normalizeFeatures(features),
+        sources: normalizedSources,
+        removedBySource: new Map(),
+        removed: 0
+    };
+    if (!crossed.size) return unchanged;
 
     for (const [sourceId, sourceFeatures] of Object.entries(normalizedSources)) {
         if (!sourceId.startsWith('door:')) continue;
@@ -1208,16 +1475,31 @@ function retractCrossedBoundaries(features, sources, path) {
             for (const code of codes) crossed.delete(featureEdgeKey(key, code));
         }
     }
-    if (!crossed.size) return { features: normalizeFeatures(features), sources: normalizedSources, removed: 0 };
+    if (!crossed.size) return unchanged;
 
     const solid = feature => feature === 'wall' || feature === 'window';
     const nextSources = {};
+    // Which wall lost which boundary, so the drawn line can be cut to match.
+    const removedBySource = new Map();
     for (const [sourceId, sourceFeatures] of Object.entries(normalizedSources)) {
+        const lost = new Set();
+        for (const [key, codes] of Object.entries(sourceFeatures)) {
+            for (const code of codes) {
+                const edgeKey = featureEdgeKey(key, code);
+                if (edgeKey && crossed.has(edgeKey) && solid(featureOfCode(code))) lost.add(edgeKey);
+            }
+        }
+        if (lost.size) removedBySource.set(sourceId, lost);
         const kept = withoutEdges(sourceFeatures, crossed, solid).features;
         if (Object.keys(kept).length) nextSources[sourceId] = kept;
     }
     const flattened = withoutEdges(features, crossed, solid);
-    return { features: flattened.features, sources: nextSources, removed: flattened.removed };
+    return {
+        features: flattened.features,
+        sources: nextSources,
+        removedBySource,
+        removed: flattened.removed
+    };
 }
 
 /**
@@ -1243,6 +1525,10 @@ function retractStaleSourceEdges(sources, observedSources, observableKeys) {
     const observed = normalizeFeatureSources(observedSources);
     const observable = observableKeys instanceof Set ? observableKeys : new Set(observableKeys ?? []);
     const next = {};
+    // Which wall lost which boundary, so its drawn line can be cut to match.
+    // The two layers describe the same wall and must never disagree about
+    // where it is.
+    const removedBySource = new Map();
     let removed = 0;
 
     for (const [sourceId, sourceFeatures] of Object.entries(stored)) {
@@ -1274,11 +1560,12 @@ function retractStaleSourceEdges(sources, observedSources, observableKeys) {
             next[sourceId] = sourceFeatures;
             continue;
         }
+        removedBySource.set(sourceId, stale);
         const result = withoutEdges(sourceFeatures, stale, () => true);
         removed += result.removed;
         if (Object.keys(result.features).length) next[sourceId] = result.features;
     }
-    return { sources: next, removed };
+    return { sources: next, removedBySource, removed };
 }
 
 function mergeFeatures(left, right) {
@@ -1427,11 +1714,15 @@ export {
     contiguousFloorRegion,
     propagateFloors,
     gridTravelPath,
+    mergeFeatureGeometry,
     mergeFeatureSources,
     mergeFeatures,
     mergeSourceFeatures,
+    normalizeFeatureGeometry,
     normalizeFeatureSources,
     normalizeFeatures,
+    pruneFeatureGeometry,
+    retractGeometryOnBoundaries,
     observeCrossedSecretDoors,
     observeVisibleFeatures,
     oppositeDirection,
