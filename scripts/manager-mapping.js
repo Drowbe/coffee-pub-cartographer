@@ -17,6 +17,8 @@ import {
     propagateFloors,
     observeCrossedSecretDoors,
     observeVisibleFeatures,
+    retractCrossedBoundaries,
+    retractStaleSourceEdges,
     subtractFeatureSources,
     visibleRevealKeys
 } from './utils-mapping.js';
@@ -1171,11 +1173,35 @@ class MappingManager {
         await this._flushMovementPath();
     }
 
+    /**
+     * How far from the token the mapper looks, as a radius in squares.
+     *
+     * Configured as the width of the square window it produces -- 11 reads as
+     * "11x11" -- because that is the shape a user sees on the map. A wider
+     * window is not only more of the room per step: every boundary it covers is
+     * re-examined, so it is also what lets a mistaken reading be corrected from
+     * further away.
+     */
+    _detectionRadius() {
+        let size = 11;
+        try {
+            size = Number(game.settings.get(MODULE.ID, 'mapping.detectionSize'));
+        } catch {
+            size = 11;
+        }
+        if (!Number.isFinite(size)) size = 11;
+        size = Math.min(15, Math.max(3, Math.round(size)));
+        // Only odd sizes centre on the token's own square.
+        if (size % 2 === 0) size -= 1;
+        return (size - 1) / 2;
+    }
+
     _revealKeys(position) {
         const keys = [];
+        const radius = this._detectionRadius();
         const dimensions = this._sceneGridDimensions(canvas?.scene);
-        for (let rowOffset = -2; rowOffset <= 2; rowOffset++) {
-            for (let columnOffset = -2; columnOffset <= 2; columnOffset++) {
+        for (let rowOffset = -radius; rowOffset <= radius; rowOffset++) {
+            for (let columnOffset = -radius; columnOffset <= radius; columnOffset++) {
                 const column = position.column + columnOffset;
                 const row = position.row + rowOffset;
                 if (column >= 0 && row >= 0 && column < dimensions.columns && row < dimensions.rows) {
@@ -1299,6 +1325,10 @@ class MappingManager {
         let observedSourcesAlongPath = {};
         let candidateSquares = 0;
         let visibleSquares = 0;
+        // Every square the party had a clear line to at some point along this
+        // route. Retraction needs it: forgetting a boundary is only honest
+        // where they could actually see there was nothing there.
+        const observableKeys = new Set();
 
         for (let index = 0; index < path.length; index++) {
             const step = path[index];
@@ -1311,7 +1341,10 @@ class MappingManager {
             // cell-center ray may therefore hit that wall even though the token
             // is standing in the square, so the occupied square is always known.
             revealKeys.add(`${step.column},${step.row}`);
-            for (const key of revealKeys) explored.add(key);
+            for (const key of revealKeys) {
+                explored.add(key);
+                observableKeys.add(key);
+            }
             const observed = observeVisibleFeatures(sampleToken, revealKeys);
             observedSourcesAlongPath = mergeFeatureSources(
                 observedSourcesAlongPath,
@@ -1344,7 +1377,9 @@ class MappingManager {
             // means the client mis-collected it, not that we guessed wrong.
             `route=${path.map(step => cell(step)).join('>')}`,
             // blocked=0 across a path that crosses walls means the visibility
-            // filter is passing everything and the 5x5 is bleeding through.
+            // filter is passing everything and the whole detection window is
+            // bleeding through.
+            `window=${(this._detectionRadius() * 2) + 1}`,
             `seen=${visibleSquares}/${candidateSquares}`,
             `blocked=${candidateSquares - visibleSquares}`
         ].join('  '));
@@ -1371,7 +1406,16 @@ class MappingManager {
         // concurrent rename.
         const latest = this.records.get(id) ?? existing;
         const combinedExplored = new Set([...(latest.explored ?? []), ...explored]);
-        const featureSources = mergeFeatureSources(latest.featureSources, observedSourcesAlongPath);
+        // Re-reading a wall is only worth something if the reading is allowed
+        // to overrule what was recorded before. Boundaries a re-observed wall
+        // no longer claims, in squares the party has just had a clear view of,
+        // are dropped before the new observations are merged in.
+        const pruned = retractStaleSourceEdges(
+            latest.featureSources,
+            observedSourcesAlongPath,
+            observableKeys
+        );
+        let featureSources = mergeFeatureSources(pruned.sources, observedSourcesAlongPath);
         const incomingFeatures = flattenFeatureSources(observedSourcesAlongPath);
         let features = subtractFeatureSources(latest.features, latest.featureSources);
         // Records from builds before source tracking contain unattributed
@@ -1380,6 +1424,20 @@ class MappingManager {
         // old map without requiring a reset.
         features = mergeSourceFeatures(features, incomingFeatures);
         features = mergeFeatures(features, flattenFeatureSources(featureSources));
+        // Last, and outranking every observation: the party walked through
+        // these boundaries, so nothing solid stands on them.
+        const walked = retractCrossedBoundaries(features, featureSources, path);
+        features = walked.features;
+        featureSources = walked.sources;
+        // What this pass unlearned. Steadily non-zero means the snapping is
+        // placing boundaries it then has to take back, which is a detection
+        // problem rather than a merge one.
+        if (pruned.removed || walked.removed) {
+            this._debug(
+                'Mapping | Retracted',
+                `restated=${pruned.removed}  walked-through=${walked.removed}`
+            );
+        }
         // Squares that have just joined an area adopt the surface already
         // chosen for it, so revealing the rest of a room does not leave it
         // half-surfaced. New areas stay default until they are named.

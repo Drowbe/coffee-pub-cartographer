@@ -195,6 +195,55 @@ function pointDistance(first, second) {
     return Math.hypot(first.x - second.x, first.y - second.y);
 }
 
+/**
+ * The canvas rectangle a set of grid squares covers, grown by a margin.
+ *
+ * Every sampled step re-examines the scene's walls, and a sample costs a sight
+ * raycast, so a wall-heavy scene was paying for its whole wall list at every
+ * square the party walked. Nothing outside the detection window can be
+ * recorded, so bounding it first is what makes a wider window affordable. The
+ * margin keeps connected runs and clustered doorway fragments intact across the
+ * edge of the window, where truncating them would change how they snap.
+ */
+function gridWindowBounds(keys, margin = 0) {
+    let minColumn = Infinity;
+    let maxColumn = -Infinity;
+    let minRow = Infinity;
+    let maxRow = -Infinity;
+    for (const key of keys) {
+        const [column, row] = String(key).split(',').map(Number);
+        if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
+        minColumn = Math.min(minColumn, column);
+        maxColumn = Math.max(maxColumn, column);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+    }
+    if (!Number.isFinite(minColumn) || !Number.isFinite(minRow)) return null;
+    const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
+    const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
+    const first = cellCenter({ column: minColumn, row: minRow });
+    const last = cellCenter({ column: maxColumn, row: maxRow });
+    return {
+        minX: first.x - (sizeX / 2) - margin,
+        maxX: last.x + (sizeX / 2) + margin,
+        minY: first.y - (sizeY / 2) - margin,
+        maxY: last.y + (sizeY / 2) + margin
+    };
+}
+
+/** True when a wall's extent overlaps the bounds at all. */
+function wallWithinBounds(document, bounds) {
+    if (!bounds) return true;
+    const coordinates = document?.c ?? document?._source?.c;
+    if (!Array.isArray(coordinates) || coordinates.length < 4) return false;
+    const [x1, y1, x2, y2] = coordinates.map(Number);
+    if (![x1, y1, x2, y2].every(Number.isFinite)) return false;
+    return Math.min(x1, x2) <= bounds.maxX
+        && Math.max(x1, x2) >= bounds.minX
+        && Math.min(y1, y2) <= bounds.maxY
+        && Math.max(y1, y2) >= bounds.minY;
+}
+
 function farthestEndpointPair(segments) {
     const points = segments.flatMap(segment => [segment.start, segment.end]);
     let pair = [points[0], points[1] ?? points[0]];
@@ -462,6 +511,40 @@ function boundaryCandidates(wallPoint, wallDx, wallDy) {
 }
 
 /**
+ * Which grid boundaries a spanning opening really occupies, or null when the
+ * feature is not one that spans.
+ *
+ * An opening is drawn as wide as the squares it marks, so the question is not
+ * "does any part of this doorway touch that boundary" but "does enough of it".
+ * A boundary carrying less than a bit over half a square of the opening is
+ * overspill from an off-grid author, and marking it is what turns one doorway
+ * into a double one.
+ */
+function spanningEdgeCoverage(feature, samples, { wallDx, wallDy, length, gridSize, sampleCount, edgeKeyFor }) {
+    if (!SPANNING_GLYPH_FEATURES.includes(feature) || sampleCount < 2 || !length) return null;
+    const tally = new Map();
+    for (const point of samples) {
+        const [candidate] = boundaryCandidates(point, wallDx, wallDy);
+        if (!candidate) continue;
+        const edgeKey = edgeKeyFor(candidate, candidate.direction);
+        if (edgeKey) tally.set(edgeKey, (tally.get(edgeKey) ?? 0) + 1);
+    }
+    if (!tally.size) return null;
+    // Samples are evenly spaced, so a boundary's share of them is its share of
+    // the opening's length.
+    const minimumSamples = (sampleCount * gridSize * 0.6) / length;
+    const occupied = new Set(
+        [...tally].filter(([, count]) => count >= minimumSamples).map(([edgeKey]) => edgeKey)
+    );
+    if (occupied.size) return occupied;
+    let best = null;
+    for (const [edgeKey, count] of tally) {
+        if (!best || count > best[1]) best = [edgeKey, count];
+    }
+    return new Set([best[0]]);
+}
+
+/**
  * Snap a visible Foundry wall segment to stable old-school grid boundaries.
  * Curved walls are sampled into stair steps. Doors deliberately use only their
  * midpoint because the official symbol represents a doorway, not every
@@ -506,6 +589,43 @@ function wallBoundaryObservations(
     // joins between documents, not just the steps within one.
     let previousNodes = carry?.nodes ?? null;
 
+    // Sampled in travel order: a run may walk a document against its own stored
+    // direction, and consecutive samples have to stay geometrically adjacent
+    // for the stair-step connector to work.
+    const samples = [];
+    for (let index = 0; index < sampleCount; index++) {
+        const step = (index + 0.5) / sampleCount;
+        const amount = reversed ? 1 - step : step;
+        samples.push({ x: x1 + (wallDx * amount), y: y1 + (wallDy * amount) });
+    }
+
+    const edgeKeyFor = (cell, direction) => {
+        const canonical = canonicalBoundary({ ...cell, direction });
+        return featureEdgeKey(
+            `${canonical.column},${canonical.row}`,
+            `${feature}:${canonical.direction}`
+        );
+    };
+
+    // A spanning opening marks every square it crosses. A one-square doorway
+    // authored across a square boundary therefore used to be recorded at twice
+    // its real width and drawn as a double door. Weigh each boundary by how
+    // much of the opening actually lies on it and keep only the ones it
+    // genuinely occupies, with the best-covered boundary always surviving so a
+    // narrow opening still records somewhere.
+    //
+    // Measured from the wall geometry alone, never from what happens to be
+    // visible, so an opening seen again from a new angle snaps to the same
+    // width rather than growing or shrinking with the sightline.
+    const occupied = spanningEdgeCoverage(feature, samples, {
+        wallDx,
+        wallDy,
+        length,
+        gridSize,
+        sampleCount,
+        edgeKeyFor
+    });
+
     const record = (cell, direction) => {
         // The square the party had to see is the one that was chosen; the
         // boundary is then stored canonically, which may name its neighbour.
@@ -519,17 +639,12 @@ function wallBoundaryObservations(
         return true;
     };
 
-    for (let index = 0; index < sampleCount; index++) {
-        // A run may walk a document against its own stored direction. Sampling
-        // in travel order keeps consecutive samples geometrically adjacent,
-        // which is what the connector relies on.
-        const step = (index + 0.5) / sampleCount;
-        const amount = reversed ? 1 - step : step;
-        const wallPoint = {
-            x: x1 + (wallDx * amount),
-            y: y1 + (wallDy * amount)
-        };
-        if (requireVisibility && !visibleFromToken(tokenDocument, wallPoint)) continue;
+    for (const wallPoint of samples) {
+        // Which squares this sample could be recorded against is a set lookup;
+        // whether it can be seen is a raycast. Ask the cheap question first, so
+        // a wider detection window does not pay for sightlines to boundaries it
+        // was never going to record. A wall is culled to the window plus a
+        // margin, and the margin is where most of these land.
         const candidates = boundaryCandidates(wallPoint, wallDx, wallDy)
             .filter(candidate => allowed.has(`${candidate.column},${candidate.row}`));
         if (!candidates.length) continue;
@@ -540,6 +655,8 @@ function wallBoundaryObservations(
                 - Math.hypot(rightCenter.x - origin.x, rightCenter.y - origin.y);
         });
         const cell = candidates[0];
+        if (occupied && !occupied.has(edgeKeyFor(cell, cell.direction))) continue;
+        if (requireVisibility && !visibleFromToken(tokenDocument, wallPoint)) continue;
         const nodes = edgeNodes(cell, cell.direction);
         // A diagonal wall snapped to one boundary per square gives a tread with
         // no riser, so consecutive steps never join up. Where this sample's
@@ -605,9 +722,24 @@ function observeCrossedSecretDoors(tokenDocument, fromCoordinates, toCoordinates
     const allowed = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
     const observed = {};
     const sources = {};
+    // Only a secret door the move could physically have crossed is worth
+    // testing, so the leg's own extent bounds the search. The margin is wider
+    // than a doorway cluster can span, so no cluster is ever split by the cull
+    // -- a split one would be attributed to a different source id and the
+    // record would carry the same doorway twice.
+    const gridSize = Math.min(
+        canvas.grid.sizeX ?? canvas.grid.size,
+        canvas.grid.sizeY ?? canvas.grid.size
+    );
+    const legBounds = {
+        minX: Math.min(movementStart.x, movementEnd.x) - (gridSize * 3),
+        maxX: Math.max(movementStart.x, movementEnd.x) + (gridSize * 3),
+        minY: Math.min(movementStart.y, movementEnd.y) - (gridSize * 3),
+        maxY: Math.max(movementStart.y, movementEnd.y) + (gridSize * 3)
+    };
     const secretDocuments = (canvas.walls.placeables ?? [])
         .map(wall => wall.document)
-        .filter(isSecretDoor);
+        .filter(document => isSecretDoor(document) && wallWithinBounds(document, legBounds));
     for (const span of normalizedDoorSpans(secretDocuments)) {
         const crossed = span.members.some(member => segmentsIntersect(
             movementStart,
@@ -742,7 +874,13 @@ function observeVisibleFeatures(tokenDocument, revealKeys) {
     const glyphGroups = new Map();
     const secretDocuments = [];
     const structuralDocuments = [];
+    const gridSize = Math.min(
+        canvas.grid.sizeX ?? canvas.grid.size,
+        canvas.grid.sizeY ?? canvas.grid.size
+    );
+    const bounds = gridWindowBounds(allowed, gridSize * 3);
     for (const wall of canvas.walls?.placeables ?? []) {
+        if (!wallWithinBounds(wall.document, bounds)) continue;
         if (isSecretDoor(wall.document)) {
             secretDocuments.push(wall.document);
             continue;
@@ -1004,6 +1142,145 @@ function isSecretDoorCode(code) {
     return featureOfCode(code) === 'secret-door';
 }
 
+/** The two squares a lattice edge separates. */
+function edgeFlankingKeys(edgeKey) {
+    const [orientation, first, second] = String(edgeKey).split(':');
+    const a = Number(first);
+    const b = Number(second);
+    if (!Number.isInteger(a) || !Number.isInteger(b)) return [];
+    return orientation === 'h' ? [`${a},${b}`, `${a},${b - 1}`] : [`${a},${b}`, `${a - 1},${b}`];
+}
+
+/**
+ * Drop the codes a set of lattice edges carries, keeping everything else.
+ * `retractable` decides which feature names may be forgotten, so evidence that
+ * disproves solid structure cannot also erase a doorway.
+ */
+function withoutEdges(rawFeatures, edgeKeys, retractable) {
+    const remaining = {};
+    let removed = 0;
+    for (const [key, codes] of Object.entries(normalizeFeatures(rawFeatures))) {
+        const retained = codes.filter(code => {
+            const edgeKey = featureEdgeKey(key, code);
+            if (!edgeKey || !edgeKeys.has(edgeKey)) return true;
+            if (!retractable(featureOfCode(code))) return true;
+            removed++;
+            return false;
+        });
+        if (retained.length) remaining[key] = retained;
+    }
+    return { features: remaining, removed };
+}
+
+/** The lattice edge between two orthogonally adjacent squares, or null. */
+function boundaryEdgeKey(from, to) {
+    const direction = directionBetween(from, to);
+    if (!direction) return null;
+    return featureEdgeKey(`${from.column},${from.row}`, `wall:${direction}`);
+}
+
+/**
+ * Forget solid structure on boundaries the party physically walked through.
+ *
+ * This is the strongest evidence the mapper ever gets, and it was previously
+ * spent only on secret doors. A token that steps from one square to the next
+ * has proved that nothing solid stands between them, so a wall or window
+ * recorded there was a mis-snap and must go rather than sit across the corridor
+ * the party just walked down.
+ *
+ * A boundary any doorway source has claimed is left alone. Doors are walked
+ * through by design, and an undiscovered secret door is still held as ordinary
+ * wall linework -- forgetting it would quietly delete the only mark showing
+ * where the party crossed.
+ */
+function retractCrossedBoundaries(features, sources, path) {
+    const crossed = new Set();
+    for (let index = 1; index < (path?.length ?? 0); index++) {
+        const edgeKey = boundaryEdgeKey(path[index - 1], path[index]);
+        if (edgeKey) crossed.add(edgeKey);
+    }
+    const normalizedSources = normalizeFeatureSources(sources);
+    if (!crossed.size) return { features: normalizeFeatures(features), sources: normalizedSources, removed: 0 };
+
+    for (const [sourceId, sourceFeatures] of Object.entries(normalizedSources)) {
+        if (!sourceId.startsWith('door:')) continue;
+        for (const [key, codes] of Object.entries(sourceFeatures)) {
+            for (const code of codes) crossed.delete(featureEdgeKey(key, code));
+        }
+    }
+    if (!crossed.size) return { features: normalizeFeatures(features), sources: normalizedSources, removed: 0 };
+
+    const solid = feature => feature === 'wall' || feature === 'window';
+    const nextSources = {};
+    for (const [sourceId, sourceFeatures] of Object.entries(normalizedSources)) {
+        const kept = withoutEdges(sourceFeatures, crossed, solid).features;
+        if (Object.keys(kept).length) nextSources[sourceId] = kept;
+    }
+    const flattened = withoutEdges(features, crossed, solid);
+    return { features: flattened.features, sources: nextSources, removed: flattened.removed };
+}
+
+/**
+ * Forget geometry a wall no longer puts where the record says it is.
+ *
+ * A wall is re-read from scratch at every square the party crosses, but until
+ * now a stale boundary could only ever be replaced by an observation landing on
+ * that exact edge, or on the one parallel boundary beside it. Anything further
+ * out -- a doorway that snapped a square along, linework left by a wall the GM
+ * has since moved -- stayed on the map for good.
+ *
+ * So when a wall reports in again, its older boundaries are re-tested. One that
+ * sits between two squares the party has just had a clear view of, and which
+ * that wall no longer claims, is wrong: they are looking straight at it and it
+ * is not there. Boundaries beyond the detection window are untouched, because
+ * not seeing something you cannot see is not evidence.
+ *
+ * Only sources observed on this pass are re-tested, so a wall that has merely
+ * gone out of view keeps everything it ever contributed.
+ */
+function retractStaleSourceEdges(sources, observedSources, observableKeys) {
+    const stored = normalizeFeatureSources(sources);
+    const observed = normalizeFeatureSources(observedSources);
+    const observable = observableKeys instanceof Set ? observableKeys : new Set(observableKeys ?? []);
+    const next = {};
+    let removed = 0;
+
+    for (const [sourceId, sourceFeatures] of Object.entries(stored)) {
+        const fresh = observed[sourceId];
+        if (!fresh) {
+            next[sourceId] = sourceFeatures;
+            continue;
+        }
+        const freshEdges = new Set();
+        for (const [key, codes] of Object.entries(fresh)) {
+            for (const code of codes) {
+                const edgeKey = featureEdgeKey(key, code);
+                if (edgeKey) freshEdges.add(edgeKey);
+            }
+        }
+        const stale = new Set();
+        for (const [key, codes] of Object.entries(sourceFeatures)) {
+            for (const code of codes) {
+                const edgeKey = featureEdgeKey(key, code);
+                if (!edgeKey || freshEdges.has(edgeKey)) continue;
+                // Both squares the boundary separates had to be in view. An
+                // edge with one side beyond the frontier could simply be
+                // occluded, and dropping it would flicker the map's outline.
+                if (!edgeFlankingKeys(edgeKey).every(flank => observable.has(flank))) continue;
+                stale.add(edgeKey);
+            }
+        }
+        if (!stale.size) {
+            next[sourceId] = sourceFeatures;
+            continue;
+        }
+        const result = withoutEdges(sourceFeatures, stale, () => true);
+        removed += result.removed;
+        if (Object.keys(result.features).length) next[sourceId] = result.features;
+    }
+    return { sources: next, removed };
+}
+
 function mergeFeatures(left, right) {
     const merged = normalizeFeatures(left);
     const incoming = normalizeFeatures(right);
@@ -1159,6 +1436,8 @@ export {
     observeVisibleFeatures,
     oppositeDirection,
     orthogonalPath,
+    retractCrossedBoundaries,
+    retractStaleSourceEdges,
     subtractFeatureSources,
     visibleRevealKeys
 };

@@ -128,6 +128,25 @@ export const registerSettings = () => {
         group: WORKFLOW_GROUPS.CONFIGURATION
     });
 
+    // The width of the square detection window, in grid squares, so 11 means
+    // 11x11 centred on the token. Only odd values centre, hence the step of 2.
+    // Wider is not just more map per step: every boundary inside the window is
+    // re-examined, so it is also how a mistaken reading gets corrected.
+    game.settings.register(MODULE.ID, 'mapping.detectionSize', {
+        name: MODULE.ID + '.mapping.detectionSize-Label',
+        hint: MODULE.ID + '.mapping.detectionSize-Hint',
+        scope: 'world',
+        config: true,
+        default: 11,
+        type: Number,
+        range: {
+            min: 3,
+            max: 15,
+            step: 2
+        },
+        group: WORKFLOW_GROUPS.CONFIGURATION
+    });
+
     game.settings.register(MODULE.ID, 'mapping.allowPlayers', {
         name: MODULE.ID + '.mapping.allowPlayers-Label',
         hint: MODULE.ID + '.mapping.allowPlayers-Hint',
