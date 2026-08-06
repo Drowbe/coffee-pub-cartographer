@@ -113,8 +113,9 @@ Rules:
 - Ignore movement on gridless or unsupported scenes and show a clear status message.
 - Require exactly one controlled token when Record is pressed; otherwise leave recording stopped and explain what is needed.
 - Reveal the starting 5×5 area as soon as Record is pressed.
-- Long drags are interpolated through every crossed grid square. Each queued square receives the same 5×5 reveal and visibility-filtered structural sampling as a normal one-cell move.
-- While recording, the party marker follows the last completed mapping step while queued drawing catches up to the live token. A settled-movement pass guarantees the final mapped step reaches the token's real cell.
+- A move is reported as the **route the token actually took**, not as a destination. Foundry supplies the waypoints; the client fills in the squares of each straight leg between them and sends the whole list. Each square receives the same 5×5 reveal and visibility-filtered structural sampling as a one-cell move, sampled from the middle of that square.
+- Reporting waits until the token has been still briefly, so one move produces one report. Stopping recording flushes whatever route is still in flight.
+- While recording, the party marker is where the token is. It fades out while the token is moving — the square it will stop on is genuinely unknown — and fades back in where it came to rest. A spinner says the drawing is still catching up.
 - The party marker is hidden whenever recording is stopped.
 - Each active user contributes discoveries from their own controlled token to the shared party map.
 - An active GM client is authoritative for validating contributors, calculating discoveries, and persisting the map.
@@ -199,7 +200,7 @@ Responsibilities:
 
 - `manager-sockets.js`
   - Add mapper state/update messages using the existing Cartographer socket pattern.
-  - Send reveal requests to the authoritative GM when an active user's token enters a new grid cell.
+  - Send reveal requests to the authoritative GM once a move settles, carrying the whole route the token took rather than only where it ended up.
   - Treat socket messages as notifications; the persisted scene flag remains the source of truth.
 
 ## Rendering Strategy
@@ -264,7 +265,7 @@ Mapping start and stop belong to the menubar toggle. Map reset belongs in the wi
 ## Permissions and Safety
 
 - A player may start mapping only from a token they own and control.
-- The authoritative GM validates the user/token relationship and calculates the revealed coordinates from actual token movement.
+- The authoritative GM validates the user/token relationship, then computes discoveries from the route the reporting client sends. It does not second-guess that route: see "The client sends the route, not the destination". The trust boundary is the ownership check.
 - Only a GM may reset the shared map.
 - Player clients render only the explored coordinate set sent by the GM or read from scene flags.
 - Do not send wall, door, light, room, or unexplored-cell data to players.
@@ -354,6 +355,78 @@ change. **Follow mode is the collaboration path instead** — following never
 writes, so it is ungated by ownership, and one player can act as the party's
 cartographer while others simply follow along on that map.
 
+### The client sends the route, not the destination
+
+This is the single most expensive lesson in the tool's history, so it is worth
+stating plainly.
+
+The reveal protocol originally sent one square: where the token ended up. The
+GM then had to work out how it got there, which meant reconstructing a straight
+line from wherever it believed the token had previously been. Both halves of
+that are wrong:
+
+- **A move is not a straight line.** Walking around a corner produced a
+  reconstructed diagonal through the wall between the two legs. Every reveal
+  along that phantom route sampled from a position the token never occupied.
+- **"Previously been" is not knowable at the far end.** It was variously the
+  stored `lastPosition`, a per-session cache of the last accepted report, or
+  the destination itself for teleports. Each of these is a guess about another
+  client's state, and each new failure mode added another one.
+
+An attempt to make the guessing safer made it worse. Reports were corroborated
+against the GM's own copy of the token plus a short history of its moves; but
+that history holds only the *endpoints* of moves, so an intermediate square the
+token genuinely crossed could never be confirmed. Uncorroborated reports were
+dropped, retries stalled a serialized queue, and everything behind the stall
+went stale too. Real movement was being discarded for want of evidence that was
+never going to arrive.
+
+Foundry already reports the route. `TokenDocument` movement carries the
+waypoints the token passed through, and each leg between two consecutive
+waypoints *is* straight — so filling in the squares of a leg is exact where
+filling in a whole cornered move at once is not. The client fills those in and
+sends the list; the GM walks exactly the squares it was given and samples each
+from the middle of that square. Nothing is inferred.
+
+What this deleted is as important as what it added: the session position cache,
+the `lastPosition` fallback, the teleport reset flag, the coordinate
+interpolation, the move history, and the corroboration pass. A teleport is now
+simply a leg with nothing filled in behind it. Every one of those existed only
+to make a guess less wrong, and none of them is needed once there is nothing to
+guess.
+
+Note that `passed.waypoints` is **cumulative**: each update during a movement
+restates the route so far. The current movement's squares are therefore
+*replaced* on each update and committed only when the movement id changes.
+Accumulating them instead reads as the token doubling back over ground it had
+already covered — which is exactly how it looked on screen.
+
+Two things follow for anyone extending this. The trust boundary is the
+**ownership check**, not the route: the token must belong to the reporting user
+and be controlled by them. Second-guessing the route was never security
+anyway — Foundry sends every wall to every client, because that is how
+client-side vision works.
+
+### Honesty belongs in the chrome, not in the marker
+
+The marker used to render at the last square the map had reached, so that it
+could not claim more than the map knew. That is a defensible principle and it
+produced an indefensible result: the marker lagged the token by a full network
+round trip and then jumped when the drawing caught up. Users do not read a
+lagging marker as epistemic caution. They read it as the tool being broken, and
+where the token is happens to be the one thing that must be right.
+
+The marker is now simply true — it is where the token is. The honesty is
+carried by state that can say something the position cannot: the marker fades
+out while the token is in transit, because the square it will stop on is
+genuinely unknown, and a spinner marks the interval between the token arriving
+and the linework for its route arriving. An area that has not filled in yet
+reads as still being drawn rather than as a square the map missed.
+
+The general form: when a display has to convey both a value and its staleness,
+distorting the value to imply the staleness fails at both. Show the value and
+say the staleness separately.
+
 ### Boundaries are stored canonically
 
 A boundary between two squares can be named two ways — south of the upper
@@ -439,6 +512,8 @@ any override layer rather than bolted on separately.
 - Verify everyone can view, while only the Actor owner or GM can add, rename, reset, or delete.
 - Walk near nested walls and verify only the first experienced wall is recorded; terrain walls remain absent.
 - Connect as a player and verify synchronized updates.
+- **Record as a player, not as the GM.** Every route bug this tool has had showed up only on a player client, because a GM recording locally never exercises the socket round trip and never has a stale copy of anything. Walk an L-shaped corridor in one drag and confirm the map follows the corner rather than the diagonal, then compare the same walk recorded by the GM — the two maps must be identical.
+- Drag a token through several corners without pausing and confirm no square is mapped that the token did not cross.
 - Verify players receive no undiscovered geometry.
 - Test Light, Dark, and Glass themes with the map window open.
 - Test window resizing, minimizing, right-drag pan, zoom, and position restoration with hidden scrollbars.

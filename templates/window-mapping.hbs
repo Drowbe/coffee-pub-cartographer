@@ -51,6 +51,14 @@
         {{! Stays visible while the bars are hidden, so it is always obvious
             that movement is being recorded. }}
         <span class="cartographer-mapping-rec{{#if isPaused}} is-paused{{/if}}" aria-hidden="true"></span>
+        {{! The marker arrives at the stop square as soon as the token does. This
+            says the linework for the route is still being drawn, so an area
+            that has not filled in yet reads as pending rather than missed.
+            Shown by toggling is-mapping on the viewport. }}
+        <span class="cartographer-mapping-drawing" aria-hidden="true">
+            <i class="fa-solid fa-compass-drafting fa-spin"></i>
+            <span>{{drawingLabel}}</span>
+        </span>
         {{/if}}
         {{#if empty}}
         <div class="cartographer-mapping-empty">

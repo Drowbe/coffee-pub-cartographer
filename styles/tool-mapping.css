@@ -497,6 +497,15 @@
     color: var(--cartographer-map-party);
     font-size: 18px;
     filter: drop-shadow(0 1px 1px rgb(0 0 0 / 55%));
+    transition: opacity 160ms ease-in-out;
+}
+
+/* From the first sign of movement until the map confirms where the token
+   ended, the marker is hidden rather than drawn somewhere provisional. A
+   wrong square is worse than no square, and there is nothing on screen to
+   appear to jump when the confirmed position arrives. */
+.cartographer-mapping-viewport.is-transit .cartographer-mapping-party {
+    opacity: 0;
 }
 
 /* The pinned marker sits at the exact centre of the viewport rather than in a
@@ -753,9 +762,38 @@
     50% { opacity: 0.25; }
 }
 
+/* The marker arrives with the token; the linework arrives a round trip later.
+   This says so, so a corridor that has not filled in yet reads as still being
+   drawn rather than as a square the map missed. Sits beside the REC dot. */
+.cartographer-mapping-drawing {
+    position: absolute;
+    top: 6px;
+    left: 26px;
+    z-index: 6;
+    display: none;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--blacksmith-background-primary, #000) 72%, transparent);
+    color: var(--cartographer-map-ink);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    gap: 6px;
+    pointer-events: none;
+}
+
+.cartographer-mapping-viewport.is-mapping .cartographer-mapping-drawing {
+    display: flex;
+}
+
 @media (prefers-reduced-motion: reduce) {
-    .cartographer-mapping-rec {
+    .cartographer-mapping-rec,
+    .cartographer-mapping-drawing .fa-spin {
         animation: none;
+    }
+
+    .cartographer-mapping-party {
+        transition: none;
     }
 }
 

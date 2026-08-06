@@ -383,6 +383,7 @@ export class MappingWindow extends ToolWindowBase {
             canRecord,
             isRecording: this.manager.active,
             isPaused: this.manager.paused,
+            drawingLabel: game.i18n.localize(`${MODULE.ID}.mapping.drawing`),
             zoom: this.zoom,
             // Following and recording both track a token on this scene, so a
             // map belonging to another scene can only be viewed.
@@ -857,6 +858,7 @@ export class MappingWindow extends ToolWindowBase {
         });
         this._resizeObserver.observe(viewport);
         this._applyCompactChrome();
+        this.refreshMarkerState();
 
         // The grid element is brand new on every render. Re-establish the view
         // before the browser paints, otherwise the map flashes at the origin.
@@ -879,6 +881,22 @@ export class MappingWindow extends ToolWindowBase {
         // which would place the map by half a viewport it does not have yet.
         if (viewport.clientWidth > 0) this._hasPaintedMap = true;
         else requestAnimationFrame(() => this._applyCamera());
+    }
+
+    /**
+     * Reflect where the token is in relation to where the ink has got.
+     *
+     * Deliberately a class toggle rather than a re-render: it is called as a
+     * move starts and as it settles, and re-rendering the whole map to fade an
+     * icon would rebuild every cell twice per step.
+     */
+    refreshMarkerState() {
+        const viewport = this.element?.querySelector('.cartographer-mapping-viewport');
+        if (!viewport) return;
+        // In transit the stop square is genuinely unknown, so the marker fades
+        // out rather than sliding to a square the token is only passing through.
+        viewport.classList.toggle('is-transit', this.manager.tokenInTransit);
+        viewport.classList.toggle('is-mapping', this.manager.mappingPending);
     }
 
     _handlePanStart(event) {

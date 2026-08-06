@@ -41,6 +41,9 @@ const ANNOTATION_ACTIONS = ['place-symbol', 'remove-symbol'];
 const MENUBAR_TOOL_ID = `${MODULE.ID}-mapping-menubar`;
 /** How still a token must be before its move is reported, in milliseconds. */
 const MOVE_SETTLE_MS = 220;
+// How long the marker will wait for the map to confirm a move before giving up
+// and showing itself at whatever the map does know.
+const PENDING_REVEAL_TIMEOUT_MS = 8000;
 
 /** Compact "column,row" for diagnostic output. */
 function formatCell(position) {
@@ -69,8 +72,17 @@ class MappingManager {
         this._renderQueue = Promise.resolve();
         this._outgoingRevealQueue = Promise.resolve();
         this._revealProcessingQueue = Promise.resolve();
-        this._authoritativePositions = new Map();
-        this._recentTokenPositions = new Map();
+        // Squares the tracked token has crossed since the last report, in the
+        // order it crossed them. Emptied each time a path is sent.
+        this._movementPath = [];
+        // The Foundry movement currently being collected, and how much of the
+        // path belongs to movements before it. See _collectMovement.
+        this._movementId = null;
+        this._movementCommitted = 0;
+        // The square of the route most recently sent. The map has caught up
+        // once the record's lastPosition reaches it.
+        this._pendingDestination = null;
+        this._pendingTimer = null;
         // Map id -> expiry timestamp. A tombstone only has to outlive a
         // registry broadcast that was already in flight when the delete
         // happened; it is cleared as soon as an authoritative container
@@ -79,7 +91,6 @@ class MappingManager {
         this._selectionFrame = null;
         this._closingWindow = false;
         this._settleTimer = null;
-        this._settleTeleported = false;
     }
 
     /** True only while recording. */
@@ -139,7 +150,6 @@ class MappingManager {
         this._registerHooks();
         this._registerSocketHandlers();
         this.loadMapRecords();
-        this._seedRecentTokenPositions();
         this.refreshMenubarTool();
         console.log(`${MODULE.NAME}: Mapping tool initialized`);
     }
@@ -154,8 +164,7 @@ class MappingManager {
         this.trackedTokenId = null;
         this.currentMapId = null;
         this.lastGridKey = null;
-        this._authoritativePositions.clear();
-        this._recentTokenPositions.clear();
+        this._resetMovementPath();
         this._deletedMapIds.clear();
         if (this._selectionFrame) cancelAnimationFrame(this._selectionFrame);
         this._selectionFrame = null;
@@ -269,7 +278,12 @@ class MappingManager {
 
     _registerHooks() {
         const updateToken = Hooks.on('updateToken', (tokenDocument, changes, operation) => {
+            if (tokenDocument.id !== this.trackedTokenId) return;
             const moved = ('x' in changes) || ('y' in changes);
+            const visionChanged = ('rotation' in changes) || ('sight' in changes);
+            if (!moved && !visionChanged) return;
+            // Read the move from the change set rather than the document, which
+            // need not have settled to the new coordinates yet.
             const movementDocument = moved
                 ? {
                     id: tokenDocument.id,
@@ -282,16 +296,6 @@ class MappingManager {
                 }
                 : tokenDocument;
             const position = this._gridPosition(movementDocument);
-            if (game.user.isGM && this._isSquareGrid()) {
-                this._rememberTokenPosition(
-                    tokenDocument.id,
-                    position,
-                    this._tokenCoordinates(movementDocument)
-                );
-            }
-            if (tokenDocument.id !== this.trackedTokenId) return;
-            const visionChanged = ('rotation' in changes) || ('sight' in changes);
-            if (!moved && !visionChanged) return;
 
             // Following moves the view and nothing else. It deliberately runs
             // before the recording gate, so a user can follow along on a map
@@ -305,27 +309,23 @@ class MappingManager {
                 return;
             }
             if (!this.active || this.paused) return;
-            // Recording and viewport following must originate from updateToken,
-            // which is emitted on the controlling player's client. Movement
-            // metadata is used only to suppress interpolation for teleports.
             const movement = operation?._movement?.[tokenDocument.id] ?? operation?.movement;
-            const teleported = this._isTeleportMovement(movement);
-            // A completed step re-arms centred following, so a manual pan is
-            // respected only until the party moves again.
-            if (moved) this.window?.armFollow();
 
             if (moved) {
-                this._scheduleSettledReveal(tokenDocument.id, { teleported });
+                // A completed step re-arms centred following, so a manual pan
+                // is respected only until the party moves again.
+                this.window?.armFollow();
+                // Foundry reports the real route it took. Collect it rather
+                // than letting the far end guess a straight line between where
+                // the token was and where it ended up -- that guess cut corners
+                // and walked through walls.
+                this._collectMovement(movementDocument, movement);
+                this._scheduleSettledReveal(tokenDocument.id);
                 return;
             }
-            void this._requestReveal(movementDocument, position, {
-                // Foundry turns tokens to face their movement, so a move
-                // almost always reports a rotation change too. Only a
-                // vision-only change is worth forcing a re-sample; forcing on
-                // every move would defeat the same-cell guard in
-                // _requestReveal and re-walk the path on every nudge.
-                force: visionChanged,
-                resetPath: false
+            // Vision changed without moving: re-sample where the token stands.
+            void this._requestReveal(tokenDocument, [position], {
+                force: visionChanged
             }).catch(error => {
                 console.error(`${MODULE.NAME}: Failed to update the map for token vision`, error);
             });
@@ -361,8 +361,7 @@ class MappingManager {
         const canvasReady = Hooks.on('canvasReady', () => {
             if (this.active) void this.stopMapping();
             this.trackedTokenId = null;
-            this._recentTokenPositions.clear();
-            this._seedRecentTokenPositions();
+            this._resetMovementPath();
             this.loadMapRecords();
             const selected = this._getSingleControlledToken();
             if (selected) this._selectMapForToken(selected);
@@ -374,7 +373,7 @@ class MappingManager {
             const hookId = Hooks.on(hookName, () => {
                 const token = this._getTrackedToken();
                 if (!this.active || this.paused || !token) return;
-                void this._requestReveal(token.document, this._gridPosition(token.document), { force: true });
+                void this._requestReveal(token.document, [this._gridPosition(token.document)], { force: true });
             });
             this._hooks.push({ name: hookName, id: hookId });
         }
@@ -443,14 +442,14 @@ class MappingManager {
         if (this.currentMapId) {
             const current = this.records.get(this.currentMapId);
             if (current) {
-                // The marker renders from lastPosition, so this is the value
-                // whose movement is visible on screen. Logging every change
-                // shows a jump directly, including where it jumped to.
+                // How far the drawing has got, which is what clears the
+                // mapping spinner. Logging every change shows the map falling
+                // behind the marker, and by how much.
                 const before = this._normalizePosition(this.state.lastPosition);
                 const after = this._normalizePosition(current.lastPosition);
                 if (formatCell(before) !== formatCell(after)) {
                     this._debug(
-                        'Mapping | Marker',
+                        'Mapping | Mapped',
                         `${formatCell(before)} -> ${formatCell(after)}  updatedBy=${current.updatedBy ?? '-'}`
                     );
                 }
@@ -627,6 +626,9 @@ class MappingManager {
         this.paused = false;
         this.trackedTokenId = token.id;
         this.lastGridKey = null;
+        // Recording starts from where the token stands, not from whatever
+        // route it walked before anyone was recording it.
+        this._resetMovementPath();
         this._selectMapForToken(token);
         const startPosition = this._gridPosition(token.document);
         await this._requestMutation({
@@ -646,10 +648,7 @@ class MappingManager {
         await this.openWindow();
         this.window?.showMap?.();
         this.window?.armFollow();
-        await this._requestReveal(token.document, startPosition, {
-            force: true,
-            resetPath: true
-        });
+        await this._requestReveal(token.document, [startPosition], { force: true });
         await this.renderWindow({ centerOnParty: true });
         return true;
     }
@@ -741,6 +740,11 @@ class MappingManager {
 
     async pauseMapping() {
         if (!this.active || this.paused) return false;
+        // A move can still be settling when the token is deselected. Report the
+        // route collected so far rather than discarding it on the way out.
+        await this._flushCatchUp().catch(error => {
+            console.error(`${MODULE.NAME}: Failed to finish the map path before pausing`, error);
+        });
         this.paused = true;
         this.lastGridKey = null;
         this.refreshMenubarTool();
@@ -756,13 +760,12 @@ class MappingManager {
 
         this.paused = false;
         this.lastGridKey = null;
+        // Movement while paused was deliberately not recorded, so the route
+        // resumes from here rather than bridging across the gap.
+        this._resetMovementPath();
         this.refreshMenubarTool();
         this.window?.armFollow();
-        const position = this._gridPosition(token.document);
-        await this._requestReveal(token.document, position, {
-            force: true,
-            resetPath: true
-        });
+        await this._requestReveal(token.document, [this._gridPosition(token.document)], { force: true });
         await this.renderWindow({ centerOnParty: true });
         return true;
     }
@@ -801,11 +804,15 @@ class MappingManager {
     /**
      * Where to draw the party marker.
      *
-     * While recording it is the last square actually mapped, not the token's
-     * live square. Recording exists to produce a correct map, so the marker
-     * reports how far that has genuinely got; it lags the token by a round
-     * trip and that is the honest picture. Following has no record to be
-     * faithful to, so it tracks the token directly and stays smooth.
+     * While recording it is the square the map has been confirmed to reach --
+     * and the marker is *hidden* until that confirmation arrives, rather than
+     * shown somewhere provisional. A marker that guesses can guess wrong, and
+     * a wrong square is worse than no square: it is the one thing on the map
+     * that has to be right. Hidden-then-correct never lies, and never appears
+     * to jump, because nothing was on screen to jump from.
+     *
+     * Following has no record to be faithful to, so it tracks the token
+     * directly and stays smooth.
      */
     getTrackedPositionForCurrentMap() {
         const token = this._getTrackedToken();
@@ -815,6 +822,29 @@ class MappingManager {
             return this._normalizePosition(this.state.lastPosition) ?? this._gridPosition(token.document);
         }
         return this.following ? this._gridPosition(token.document) : null;
+    }
+
+    /**
+     * True from the first sign of movement until the map confirms where it
+     * ended. The marker is hidden for this whole interval, so it is never
+     * drawn on a square the map has not agreed to.
+     */
+    get tokenInTransit() {
+        return this.active && !this.paused && (Boolean(this._settleTimer) || this.mappingPending);
+    }
+
+    /**
+     * True from the moment a route is sent until the map comes back with it.
+     *
+     * Measured against the record rather than a callback, so it clears however
+     * the answer arrives -- locally on a GM, or over the scene flag on a
+     * player -- and cannot get stuck if a reply is lost.
+     */
+    get mappingPending() {
+        if (!this.active || !this._pendingDestination) return false;
+        const mapped = this._normalizePosition(this.state.lastPosition);
+        return mapped?.column !== this._pendingDestination.column
+            || mapped?.row !== this._pendingDestination.row;
     }
 
 
@@ -923,45 +953,29 @@ class MappingManager {
         return normalized;
     }
 
-    _tokenCoordinates(tokenDocument) {
-        const x = Number(tokenDocument?.x);
-        const y = Number(tokenDocument?.y);
-        return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
-    }
-
     _normalizeCoordinates(coordinates) {
         const x = Number(coordinates?.x);
         const y = Number(coordinates?.y);
         return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
     }
 
-    _seedRecentTokenPositions() {
-        if (!game.user?.isGM || !this._isSquareGrid()) return;
-        for (const token of canvas.tokens?.placeables ?? []) {
-            this._rememberTokenPosition(
-                token.id,
-                this._gridPosition(token.document),
-                this._tokenCoordinates(token.document)
-            );
-        }
-    }
-
-    _rememberTokenPosition(tokenId, position, coordinates) {
-        if (!tokenId || !position || !canvas?.scene?.id) return;
-        const key = `${canvas.scene.id}:${tokenId}`;
-        const history = this._recentTokenPositions.get(key) ?? [];
-        const gridKey = `${position.column},${position.row}`;
-        const normalizedCoordinates = this._normalizeCoordinates(coordinates);
-        const previous = history.at(-1);
-        if (
-            previous?.gridKey !== gridKey
-            || previous?.coordinates?.x !== normalizedCoordinates?.x
-            || previous?.coordinates?.y !== normalizedCoordinates?.y
-        ) {
-            history.push({ gridKey, coordinates: normalizedCoordinates });
-        }
-        if (history.length > 100) history.splice(0, history.length - 100);
-        this._recentTokenPositions.set(key, history);
+    /**
+     * Where a token of this size sits when it occupies a given square.
+     *
+     * Sampling always happens from the middle of an occupied square rather
+     * than from wherever the token happens to be standing. The map is a grid
+     * of squares, so this is the honest reading, and it keeps a token that
+     * stopped half in a doorway from producing a sightline no square on the
+     * map corresponds to.
+     */
+    _squareCoordinates(square, tokenDocument) {
+        const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
+        const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
+        const center = canvas.grid.getCenterPoint({ i: square.row, j: square.column });
+        return {
+            x: center.x - (((tokenDocument.width ?? 1) * sizeX) / 2),
+            y: center.y - (((tokenDocument.height ?? 1) * sizeY) / 2)
+        };
     }
 
     _tokenAtCoordinates(tokenDocument, coordinates) {
@@ -976,18 +990,87 @@ class MappingManager {
         };
     }
 
-    _interpolateCoordinates(start, end, amount) {
-        return {
-            x: start.x + ((end.x - start.x) * amount),
-            y: start.y + ((end.y - start.y) * amount)
-        };
+    /** Forget the route collected so far and start a fresh one. */
+    _resetMovementPath() {
+        this._movementPath = [];
+        this._movementId = null;
+        this._movementCommitted = 0;
+        this._pendingDestination = null;
+        if (this._pendingTimer) clearTimeout(this._pendingTimer);
+        this._pendingTimer = null;
     }
 
-    _isTeleportMovement(movement) {
-        const waypoints = movement?.passed?.waypoints;
-        if (!Array.isArray(waypoints) || waypoints.length === 0) return false;
-        const action = waypoints.at(-1)?.action;
+    /** A movement action that crosses nothing between its endpoints. */
+    _isTeleportAction(action) {
         return CONFIG.Token.movement.actions[action]?.teleport === true;
+    }
+
+    /**
+     * Collect the squares a token actually travelled through.
+     *
+     * Foundry reports the waypoints of the route it took. Each leg between two
+     * consecutive waypoints is a straight line, so filling in the squares of a
+     * leg is exact -- it is only applying that fill to a whole cornered move at
+     * once that invents a diagonal through the walls, which is what the far end
+     * used to have to do with nothing but a destination to go on.
+     *
+     * `passed.waypoints` is cumulative: every update during one movement
+     * restates the route so far. So the current movement's squares are
+     * *replaced* each time rather than appended, and only a change of movement
+     * id commits them. Appending would read as the token doubling back over
+     * ground it had already covered.
+     */
+    _collectMovement(tokenDocument, movement) {
+        if (!this._isSquareGrid()) return;
+        const movementId = movement?.id ?? null;
+        if (movementId !== this._movementId) {
+            // A new movement starts where the last one ended, so everything
+            // collected up to now is final.
+            this._movementId = movementId;
+            this._movementCommitted = this._movementPath.length;
+        }
+        this._movementPath.length = Math.min(this._movementCommitted, this._movementPath.length);
+
+        const squares = [];
+        const push = square => {
+            const previous = squares.at(-1) ?? this._movementPath.at(-1);
+            if (previous && previous.column === square.column && previous.row === square.row) return;
+            squares.push(square);
+        };
+        const bridge = (from, to) => {
+            if (from) for (const step of gridTravelPath(from, to)) push(step);
+            else push(to);
+        };
+
+        const destination = this._gridPosition(tokenDocument);
+        const waypoints = Array.isArray(movement?.passed?.waypoints) ? movement.passed.waypoints : [];
+        let previous = this._movementPath.at(-1) ?? null;
+        for (const waypoint of waypoints) {
+            const point = this._normalizeCoordinates(waypoint);
+            if (!point) continue;
+            const square = this._gridPositionAt(point, tokenDocument);
+            // A waypoint's action describes how the token got there from the
+            // one before it. A teleport crossed nothing, so nothing is filled
+            // in behind it.
+            if (this._isTeleportAction(waypoint.action)) push(square);
+            else bridge(previous, square);
+            previous = square;
+        }
+        // Where this update says the token is outranks whatever the waypoints
+        // last claimed: an update can land before the route catches up to it.
+        bridge(previous, destination);
+        this._movementPath.push(...squares);
+    }
+
+    /** Grid square containing a point, for a token of this size. */
+    _gridPositionAt(point, tokenDocument) {
+        return this._gridPosition({
+            x: point.x,
+            y: point.y,
+            width: tokenDocument.width,
+            height: tokenDocument.height,
+            id: tokenDocument.id
+        });
     }
 
     /**
@@ -998,32 +1081,72 @@ class MappingManager {
      * those intermediate squares do not arrive in a tidy forward order.
      * Reporting each one recorded the token going forwards, then back, then
      * forwards again: wrong squares in the map, and a marker that visibly
-     * jumped. Nothing was gained by it either, because gridTravelPath already
-     * reconstructs every square between two reported positions.
+     * jumped.
      *
-     * So each update simply restarts a short timer, and only when the token
-     * has been still for that long is one reveal sent, from wherever it
-     * actually came to rest. One move, one report, always forwards.
+     * So each update adds to the collected route and restarts a short timer,
+     * and only when the token has been still for that long is the whole route
+     * sent as one path. One move, one report, always forwards -- and now with
+     * every square the token really crossed, rather than a destination the far
+     * end has to guess a route to.
      */
-    _scheduleSettledReveal(tokenId, { teleported = false } = {}) {
+    _scheduleSettledReveal(tokenId) {
+        const wasSettled = !this._settleTimer;
         if (this._settleTimer) clearTimeout(this._settleTimer);
-        // A teleport must not be interpolated, and that fact belongs to the
-        // move that raised it rather than to whichever update lands last.
-        this._settleTeleported = this._settleTeleported || teleported;
         this._settleTimer = setTimeout(() => {
             this._settleTimer = null;
-            const resetPath = this._settleTeleported;
-            this._settleTeleported = false;
             if (!this.active || this.paused || tokenId !== this.trackedTokenId) return;
-            const token = this._getTrackedToken();
-            if (!token || !this._isSquareGrid()) return;
-            void this._requestReveal(token.document, this._gridPosition(token.document), {
-                force: true,
-                resetPath
-            }).catch(error => {
-                console.error(`${MODULE.NAME}: Failed to map token movement`, error);
-            });
+            // The token has stopped, so the marker can appear where it stopped.
+            this.window?.refreshMarkerState();
+            void this._flushMovementPath()
+                .then(() => this.renderWindow())
+                .catch(error => {
+                    console.error(`${MODULE.NAME}: Failed to map token movement`, error);
+                });
         }, MOVE_SETTLE_MS);
+        // Fade the marker out once, as the move begins, rather than on every
+        // update Foundry emits while it plays out.
+        if (wasSettled) this.window?.refreshMarkerState();
+    }
+
+    /**
+     * Send the route collected so far, and start collecting a fresh one.
+     *
+     * The route is sent exactly as collected. This used to append a fresh read
+     * of the token document on the grounds that a move might still be in
+     * flight -- and that read could be a square behind, which then landed at
+     * the *end* of the route and became the reported destination. A correct
+     * route walking down a corridor was being finished off with a step back to
+     * where it started.
+     *
+     * That was the same mistake as the one this whole design removed, left in
+     * one place: a separately-read position second-guessing a route Foundry
+     * had already reported. The route is built from the change sets of the
+     * moves themselves, so it is already current. Only an empty route falls
+     * back to reading the token, which is the stop-recording case.
+     */
+    async _flushMovementPath({ force = true } = {}) {
+        const token = this._getTrackedToken();
+        if (!token || !this._isSquareGrid()) return;
+        const path = this._movementPath;
+        this._resetMovementPath();
+        if (!path.length) path.push(this._gridPosition(token.document));
+        // Watched by mappingPending, so the window can say the map is still
+        // being drawn even though the token has already arrived.
+        this._pendingDestination = path.at(-1);
+        // The marker is hidden while this is outstanding, so it must not be
+        // able to stay outstanding. If an answer never comes -- a dropped
+        // packet, a GM who dropped out -- give up waiting and show the marker
+        // wherever the map did get to, rather than showing nothing all session.
+        if (this._pendingTimer) clearTimeout(this._pendingTimer);
+        this._pendingTimer = setTimeout(() => {
+            this._pendingTimer = null;
+            if (!this._pendingDestination) return;
+            this._debug('Mapping | Pending timed out', formatCell(this._pendingDestination));
+            this._pendingDestination = null;
+            void this.renderWindow();
+        }, PENDING_REVEAL_TIMEOUT_MS);
+        this.window?.refreshMarkerState();
+        await this._requestReveal(token.document, path, { force });
     }
 
     /**
@@ -1032,26 +1155,20 @@ class MappingManager {
      * There used to be a timed catch-up after every move as well, re-reading
      * the token a moment later to make sure the map had reached it. That did
      * the opposite: Foundry animates a move, so a sample taken shortly after
-     * it starts lands on a square the token is still travelling *through*.
-     * The hook had already reported the destination, so the catch-up reported
-     * an earlier square after it, and the move completing reported the
-     * destination again -- back, forward, which is exactly the jump that was
-     * being chased. Skipped squares never needed it anyway: gridTravelPath
-     * reconstructs them from the endpoints of the next reveal.
+     * it starts lands on a square the token is still travelling *through*, and
+     * reporting it after the destination is exactly the jump that was being
+     * chased.
      *
      * Stopping is different. Movement has finished by then, so the token can
      * be read safely, and it guarantees the final square is recorded even if
-     * the last move was still in flight.
+     * the last move was still in flight when Stop was pressed.
      */
     async _flushCatchUp() {
         if (this._settleTimer) {
             clearTimeout(this._settleTimer);
             this._settleTimer = null;
-            this._settleTeleported = false;
         }
-        const token = this._getTrackedToken();
-        if (!token || !this._isSquareGrid()) return;
-        await this._requestReveal(token.document, this._gridPosition(token.document), { force: true });
+        await this._flushMovementPath();
     }
 
     _revealKeys(position) {
@@ -1069,22 +1186,36 @@ class MappingManager {
         return keys;
     }
 
+    /**
+     * Send the squares the token crossed, in order, with the coordinates to
+     * sample each one from. The receiver walks exactly this and nothing else.
+     */
     async _requestReveal(
         tokenDocument,
-        position = this._gridPosition(tokenDocument),
-        { force = false, resetPath = false } = {}
+        path = [this._gridPosition(tokenDocument)],
+        { force = false } = {}
     ) {
-        const gridKey = `${position.column},${position.row}`;
-        if (!force && gridKey === this.lastGridKey) return;
+        const steps = [];
+        for (const entry of Array.isArray(path) ? path : [path]) {
+            const square = this._normalizePosition(entry);
+            if (!square) continue;
+            const previous = steps.at(-1);
+            if (previous && previous.column === square.column && previous.row === square.row) continue;
+            steps.push({ ...square, ...this._squareCoordinates(square, tokenDocument) });
+        }
+        if (!steps.length) return;
+        const destination = steps.at(-1);
+        const gridKey = `${destination.column},${destination.row}`;
+        // A single-square report of the square already mapped is nothing new.
+        // A longer path always is, whatever square it ends on.
+        if (!force && steps.length === 1 && gridKey === this.lastGridKey) return;
         this.lastGridKey = gridKey;
         const request = {
             userId: game.user.id,
             sceneId: canvas.scene.id,
             tokenId: tokenDocument.id,
             actorId: tokenDocument.actor?.id ?? tokenDocument.actorId,
-            position: { column: position.column, row: position.row },
-            coordinates: this._tokenCoordinates(tokenDocument),
-            resetPath
+            path: steps
         };
         this._outgoingRevealQueue = this._outgoingRevealQueue
             .catch(error => console.error(`${MODULE.NAME}: Failed to send an earlier map step`, error))
@@ -1101,6 +1232,30 @@ class MappingManager {
         return this._revealProcessingQueue;
     }
 
+    /**
+     * Validate a reported route.
+     *
+     * Steps arrive over a socket, so each is checked rather than trusted to be
+     * well formed, and a step missing usable coordinates is re-derived from its
+     * square. An empty or unusable path falls back to wherever this client sees
+     * the token, which is the same single square the old protocol sent.
+     */
+    _normalizeRevealPath(path, tokenDocument) {
+        const steps = [];
+        for (const entry of Array.isArray(path) ? path : []) {
+            const square = this._normalizePosition(entry);
+            if (!square) continue;
+            const previous = steps.at(-1);
+            if (previous && previous.column === square.column && previous.row === square.row) continue;
+            const coordinates = this._normalizeCoordinates(entry)
+                ?? this._squareCoordinates(square, tokenDocument);
+            steps.push({ ...square, ...coordinates });
+        }
+        if (steps.length) return steps;
+        const square = this._gridPosition(tokenDocument);
+        return [{ ...square, ...this._squareCoordinates(square, tokenDocument) }];
+    }
+
     async _processRevealRequest(data, { allowLocalGM = false } = {}) {
         if (!game.user.isGM || (!allowLocalGM && !game.users.activeGM?.isSelf)) return;
         if (!data || data.sceneId !== canvas?.scene?.id) return;
@@ -1111,42 +1266,35 @@ class MappingManager {
         if (!user.isGM && !game.settings.get(MODULE.ID, 'mapping.allowPlayers')) return;
         if (!this._canManageActor(actor, user)) return;
 
-        const reportedPosition = this._normalizePosition(data.position);
-        const reportedCoordinates = this._normalizeCoordinates(data.coordinates);
-        // The reporting client is believed about where its own token went.
+        // The reporting client is believed about where its own token went, and
+        // about the route it took to get there.
         //
-        // This was previously corroborated against this client's copy of the
-        // token plus a short history of its moves, and that cannot be made to
-        // work. The history holds only the *endpoints* of moves, so an
-        // intermediate square the token genuinely crossed can never be
-        // confirmed; and waiting for confirmation stalls a serialized queue, so
-        // every request behind the stalled one goes stale too. Real movement
-        // was being dropped for want of evidence that was never going to come.
+        // Both were previously second-guessed here, and neither can be. The
+        // report was corroborated against this client's copy of the token plus
+        // a short history of its moves -- but that history holds only the
+        // *endpoints* of moves, so an intermediate square the token genuinely
+        // crossed could never be confirmed, and waiting for confirmation
+        // stalled a serialized queue until everything behind it went stale too.
+        // Real movement was dropped for want of evidence that was never coming.
         //
-        // It was not protecting much either. Foundry sends every wall to every
+        // The route was then reconstructed as a straight line from wherever the
+        // map thought the token had been. That is the deeper error: a move
+        // around a corner is not a straight line, so the reconstruction walked
+        // through walls, and every fix for it needed yet more state about where
+        // the token "really" was. Foundry already reports the route. It is now
+        // simply carried across and walked, so there is nothing left to guess.
+        //
+        // Nor was any of it protecting much. Foundry sends every wall to every
         // client already -- that is how client-side vision works -- so the
         // layout is not secret from a determined player whatever this does. The
         // guard that matters is the ownership check above: the token must
-        // belong to the reporter and be controlled by them. What is left is
-        // map-record integrity, which does not justify losing real movement.
-        const currentPosition = this._gridPosition(tokenDocument);
-        const currentCoordinates = this._tokenCoordinates(tokenDocument);
-        const position = reportedPosition ?? currentPosition;
-        const coordinates = reportedCoordinates ?? currentCoordinates;
-        if (!coordinates) return;
+        // belong to the reporter and be controlled by them.
+        const path = this._normalizeRevealPath(data.path, tokenDocument);
+        if (!path.length) return;
+        const position = { column: path.at(-1).column, row: path.at(-1).row };
         const id = this._recordId(actor.id, canvas.scene.id);
         if (this._isTombstoned(id)) return;
         const existing = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
-        const sessionKey = `${data.userId}:${data.sceneId}:${data.tokenId}`;
-        const authoritative = this._authoritativePositions.get(sessionKey);
-        const previous = data.resetPath
-            ? position
-            : (authoritative?.mapId === id ? authoritative.position : existing.lastPosition) ?? position;
-        const previousCoordinates = data.resetPath
-            ? coordinates
-            : (authoritative?.mapId === id ? authoritative.coordinates : null) ?? coordinates;
-        const path = gridTravelPath(previous, position);
-        this._authoritativePositions.set(sessionKey, { mapId: id, position, coordinates });
         const explored = new Set(existing.explored);
         let observedSourcesAlongPath = {};
         let candidateSquares = 0;
@@ -1154,9 +1302,7 @@ class MappingManager {
 
         for (let index = 0; index < path.length; index++) {
             const step = path[index];
-            const amount = path.length > 1 ? index / (path.length - 1) : 1;
-            const sampleCoordinates = this._interpolateCoordinates(previousCoordinates, coordinates, amount);
-            const sampleToken = this._tokenAtCoordinates(tokenDocument, sampleCoordinates);
+            const sampleToken = this._tokenAtCoordinates(tokenDocument, step);
             const candidates = this._revealKeys(step);
             const revealKeys = visibleRevealKeys(sampleToken, candidates);
             candidateSquares += candidates.length;
@@ -1186,29 +1332,38 @@ class MappingManager {
         const cell = formatCell;
         this._debug('Mapping | Reveal', [
             `by=${game.users.get(data.userId)?.name ?? data.userId}`,
-            `reported=${cell(reportedPosition)}`,
-            `mapped=${cell(position)}`,
-            `prev=${cell(previous)}`,
-            // "record" means the session entry was missing and the origin fell
-            // back to the stored lastPosition, from any earlier session.
-            `prevFrom=${data.resetPath ? 'reset' : (authoritative?.mapId === id ? 'session' : 'record')}`,
+            `from=${cell(path[0])}`,
+            `to=${cell(position)}`,
+            // Where this client sees the token. It should agree with `to` once
+            // the move has landed; a disagreement means one of the two reads
+            // is stale, and says which.
+            `here=${cell(this._gridPosition(tokenDocument))}`,
             `path=${path.length}`,
+            // Every square in the path was reported by the client as crossed,
+            // so a route that reads as a straight diagonal through a wall now
+            // means the client mis-collected it, not that we guessed wrong.
+            `route=${path.map(step => cell(step)).join('>')}`,
             // blocked=0 across a path that crosses walls means the visibility
             // filter is passing everything and the 5x5 is bleeding through.
             `seen=${visibleSquares}/${candidateSquares}`,
             `blocked=${candidateSquares - visibleSquares}`
         ].join('  '));
 
-        const crossedSecretDoors = observeCrossedSecretDoors(
-            tokenDocument,
-            previousCoordinates,
-            coordinates,
-            explored
-        );
-        observedSourcesAlongPath = mergeFeatureSources(
-            observedSourcesAlongPath,
-            crossedSecretDoors.sources
-        );
+        // Secret doors are checked leg by leg once the whole route is known,
+        // so a door is promoted on the strength of the full explored set rather
+        // than whatever had been revealed by the time that leg was walked.
+        for (let index = 1; index < path.length; index++) {
+            const crossedSecretDoors = observeCrossedSecretDoors(
+                tokenDocument,
+                path[index - 1],
+                path[index],
+                explored
+            );
+            observedSourcesAlongPath = mergeFeatureSources(
+                observedSourcesAlongPath,
+                crossedSecretDoors.sources
+            );
+        }
 
         // A map annotation can be placed while a long movement path is still
         // catching up. Rebase the completed reveal onto the latest record so
@@ -1609,11 +1764,6 @@ class MappingManager {
         if (this.currentMapId === record.id) {
             this.state = record;
         }
-        if (data.action === 'reset') {
-            for (const [key, value] of this._authoritativePositions) {
-                if (value.mapId === record.id) this._authoritativePositions.delete(key);
-            }
-        }
         void this.renderWindow();
         await this._persistSceneRecords(record.sceneId);
         if (data.action === 'reset') notify(game.i18n.localize(`${MODULE.ID}.mapping.resetDone`), { type: 'info' });
@@ -1631,9 +1781,6 @@ class MappingManager {
         if (!record?.id) return;
         this._deletedMapIds.set(record.id, Date.now() + DELETE_TOMBSTONE_MS);
         this.records.delete(record.id);
-        for (const [key, value] of this._authoritativePositions) {
-            if (value.mapId === record.id) this._authoritativePositions.delete(key);
-        }
         if (this.currentMapId !== record.id) return;
         this.currentMapId = null;
         this.state = this._emptyRecord();
