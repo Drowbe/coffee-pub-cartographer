@@ -115,7 +115,7 @@ Rules:
 - Reveal the starting 5×5 area as soon as Record is pressed.
 - A move is reported as the **route the token actually took**, not as a destination. Foundry supplies the waypoints; the client fills in the squares of each straight leg between them and sends the whole list. Each square receives the same 5×5 reveal and visibility-filtered structural sampling as a one-cell move, sampled from the middle of that square.
 - Reporting waits until the token has been still briefly, so one move produces one report. Stopping recording flushes whatever route is still in flight.
-- While recording, the party marker is where the token is. It fades out while the token is moving — the square it will stop on is genuinely unknown — and fades back in where it came to rest. A spinner says the drawing is still catching up.
+- While recording, the party marker is hidden from the first sign of movement until the map confirms where the move ended, then drawn at the confirmed square. A spinner covers the interval. It releases after a few seconds if no confirmation arrives, so a dropped update cannot hide it indefinitely.
 - The party marker is hidden whenever recording is stopped.
 - Each active user contributes discoveries from their own controlled token to the shared party map.
 - An active GM client is authoritative for validating contributors, calculating discoveries, and persisting the map.
@@ -407,25 +407,31 @@ and be controlled by them. Second-guessing the route was never security
 anyway — Foundry sends every wall to every client, because that is how
 client-side vision works.
 
-### Honesty belongs in the chrome, not in the marker
+### A marker that might be wrong is worse than no marker
 
-The marker used to render at the last square the map had reached, so that it
-could not claim more than the map knew. That is a defensible principle and it
-produced an indefensible result: the marker lagged the token by a full network
-round trip and then jumped when the drawing caught up. Users do not read a
-lagging marker as epistemic caution. They read it as the tool being broken, and
-where the token is happens to be the one thing that must be right.
+Where the party is standing is the one thing on the map that has to be right.
+It is the thing a player looks at first and the thing they will trust without
+checking.
 
-The marker is now simply true — it is where the token is. The honesty is
-carried by state that can say something the position cannot: the marker fades
-out while the token is in transit, because the square it will stop on is
-genuinely unknown, and a spinner marks the interval between the token arriving
-and the linework for its route arriving. An area that has not filled in yet
-reads as still being drawn rather than as a square the map missed.
+Two approaches were tried and both failed for the same reason. Rendering the
+marker at the last square the *map* had reached made it lag a full network
+round trip and then jump when the drawing caught up. Rendering it at the
+token's live position made it correct in principle but dependent on a local
+read that could be a square stale — and a marker that is confidently in the
+wrong place is the worst of the three options, because nothing about it says
+so.
 
-The general form: when a display has to convey both a value and its staleness,
-distorting the value to imply the staleness fails at both. Show the value and
-say the staleness separately.
+The marker is now **hidden** from the first sign of movement until the map
+confirms where the move ended, and then drawn at the confirmed square. It is
+never in a provisional place, so it can never be in a wrong one, and there is
+nothing on screen to appear to jump when the answer arrives. A spinner marks
+the interval so the gap reads as work in progress rather than as a stall.
+
+The general form: when a display cannot yet be correct, showing nothing beats
+showing a guess. Absence is self-describing; a wrong value is not. Note the
+corollary that makes this safe — the hidden state must be *unable to persist*.
+A confirmation that never arrives releases the marker after a few seconds, so a
+dropped update degrades to a stale marker rather than to no marker at all.
 
 ### Boundaries are stored canonically
 
