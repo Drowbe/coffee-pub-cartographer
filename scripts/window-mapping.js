@@ -387,16 +387,26 @@ export class MappingWindow extends ToolWindowBase {
             // Following and recording both track a token on this scene, so a
             // map belonging to another scene can only be viewed.
             modes: MAPPING_MODE_BUTTONS.filter(mode => mode.id === 'view'
-                || this.manager.state.sceneId === canvas?.scene?.id).map(mode => ({
-                id: mode.id,
-                icon: mode.icon,
-                label: game.i18n.localize(`${MODULE.ID}.mapping.mode${mode.key}Hint`),
-                text: game.i18n.localize(`${MODULE.ID}.mapping.mode${mode.key}`),
-                isCurrent: this.manager.mode === mode.id,
-                // Recording is the only mode with entry requirements, so it is
-                // the only one that can be unavailable.
-                disabled: mode.id === 'record' && !canRecord && this.manager.mode !== 'record'
-            })),
+                || this.manager.state.sceneId === canvas?.scene?.id).map(mode => {
+                // Recording doubles as its own off switch: pressing it while
+                // recording stops, so it says so rather than sitting there
+                // named after a mode you are already in.
+                const isStop = mode.id === 'record' && this.manager.active;
+                return {
+                    id: isStop ? 'view' : mode.id,
+                    icon: isStop ? 'fa-solid fa-stop' : mode.icon,
+                    label: isStop
+                        ? game.i18n.localize(`${MODULE.ID}.mapping.stopRecording`)
+                        : game.i18n.localize(`${MODULE.ID}.mapping.mode${mode.key}Hint`),
+                    text: isStop
+                        ? game.i18n.localize(`${MODULE.ID}.mapping.stopRecording`)
+                        : game.i18n.localize(`${MODULE.ID}.mapping.mode${mode.key}`),
+                    isCurrent: this.manager.mode === mode.id,
+                    // Recording is the only mode with entry requirements, so it
+                    // is the only one that can be unavailable.
+                    disabled: mode.id === 'record' && !canRecord && this.manager.mode !== 'record'
+                };
+            }),
             listLabel: game.i18n.localize(`${MODULE.ID}.mapping.showMaps`),
             zoomInLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomIn`),
             zoomOutLabel: game.i18n.localize(`${MODULE.ID}.mapping.zoomOut`),

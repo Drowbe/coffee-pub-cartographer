@@ -34,13 +34,18 @@ const WINDOW_ID = `${MODULE.ID}-mapper`;
 const STATE_VERSION = 2;
 /** How long an optimistic local deletion suppresses a map before it is reconciled. */
 const DELETE_TOMBSTONE_MS = 15000;
-/** Passes allowed to drive the mapped position onto the token's settled cell. */
-const SETTLE_ATTEMPTS = 4;
 /** The mutually exclusive states the mapper can be in. */
 const MAPPING_MODES = ['view', 'follow', 'record'];
 /** Mutations any party member may make, rather than only the Actor's owner. */
 const ANNOTATION_ACTIONS = ['place-symbol', 'remove-symbol'];
 const MENUBAR_TOOL_ID = `${MODULE.ID}-mapping-menubar`;
+/** How still a token must be before its move is reported, in milliseconds. */
+const MOVE_SETTLE_MS = 220;
+
+/** Compact "column,row" for diagnostic output. */
+function formatCell(position) {
+    return position ? `${position.column},${position.row}` : '-';
+}
 
 class MappingManager {
     constructor() {
@@ -73,7 +78,8 @@ class MappingManager {
         this._deletedMapIds = new Map();
         this._selectionFrame = null;
         this._closingWindow = false;
-        this._catchUpTimer = null;
+        this._settleTimer = null;
+        this._settleTeleported = false;
     }
 
     /** True only while recording. */
@@ -84,6 +90,15 @@ class MappingManager {
     /** True only while following without recording. */
     get following() {
         return this.mode === 'follow';
+    }
+
+    /**
+     * Diagnostic output, gated by Blacksmith's global debug mode rather than a
+     * setting of our own. Nothing prints unless that is on.
+     */
+    _debug(message, result = '') {
+        const utils = game.modules.get('coffee-pub-blacksmith')?.api?.utils;
+        utils?.postConsoleAndNotification?.(MODULE.NAME, message, result, true, false);
     }
 
     _recordId(actorId, sceneId) {
@@ -130,6 +145,8 @@ class MappingManager {
     }
 
     cleanup() {
+        if (this._settleTimer) clearTimeout(this._settleTimer);
+        this._settleTimer = null;
         for (const hook of this._hooks) Hooks.off(hook.name, hook.id);
         this._hooks = [];
         this.mode = 'view';
@@ -142,8 +159,6 @@ class MappingManager {
         this._deletedMapIds.clear();
         if (this._selectionFrame) cancelAnimationFrame(this._selectionFrame);
         this._selectionFrame = null;
-        if (this._catchUpTimer) clearTimeout(this._catchUpTimer);
-        this._catchUpTimer = null;
         this.window = null;
     }
 
@@ -201,10 +216,15 @@ class MappingManager {
             icon: appearance.icon,
             iconColor: appearance.color,
             name: 'cartographer-mapping',
+            // Icon only. Omitting the title is not enough: it falls back to the
+            // tool name, which is what put "cartographer-mapping" on the bar.
+            title: '',
             tooltip: game.i18n.localize(`${MODULE.ID}.mapping.menubarTooltip`),
             zone: 'left',
-            group: 'party',
-            order: 2,
+            // "general" is forced to the last group slot, so the button sits at
+            // the end of the zone rather than ahead of the existing tools.
+            group: 'general',
+            order: 999,
             moduleId: MODULE.ID,
             gmOnly: false,
             visible: true,
@@ -290,26 +310,25 @@ class MappingManager {
             // metadata is used only to suppress interpolation for teleports.
             const movement = operation?._movement?.[tokenDocument.id] ?? operation?.movement;
             const teleported = this._isTeleportMovement(movement);
-            if (teleported && this._catchUpTimer) {
-                clearTimeout(this._catchUpTimer);
-                this._catchUpTimer = null;
-            }
-
             // A completed step re-arms centred following, so a manual pan is
             // respected only until the party moves again.
             if (moved) this.window?.armFollow();
+
+            if (moved) {
+                this._scheduleSettledReveal(tokenDocument.id, { teleported });
+                return;
+            }
             void this._requestReveal(movementDocument, position, {
                 // Foundry turns tokens to face their movement, so a move
                 // almost always reports a rotation change too. Only a
                 // vision-only change is worth forcing a re-sample; forcing on
                 // every move would defeat the same-cell guard in
                 // _requestReveal and re-walk the path on every nudge.
-                force: (visionChanged && !moved) || teleported,
-                resetPath: teleported
+                force: visionChanged,
+                resetPath: false
             }).catch(error => {
-                console.error(`${MODULE.NAME}: Failed to update the map for token movement or vision`, error);
+                console.error(`${MODULE.NAME}: Failed to update the map for token vision`, error);
             });
-            if (moved && !teleported) this._scheduleCatchUp(tokenDocument.id);
         });
         this._hooks.push({ name: 'updateToken', id: updateToken });
 
@@ -423,7 +442,20 @@ class MappingManager {
 
         if (this.currentMapId) {
             const current = this.records.get(this.currentMapId);
-            if (current) this.state = current;
+            if (current) {
+                // The marker renders from lastPosition, so this is the value
+                // whose movement is visible on screen. Logging every change
+                // shows a jump directly, including where it jumped to.
+                const before = this._normalizePosition(this.state.lastPosition);
+                const after = this._normalizePosition(current.lastPosition);
+                if (formatCell(before) !== formatCell(after)) {
+                    this._debug(
+                        'Mapping | Marker',
+                        `${formatCell(before)} -> ${formatCell(after)}  updatedBy=${current.updatedBy ?? '-'}`
+                    );
+                }
+                this.state = current;
+            }
             else if (this.state.sceneId === scene.id && this.state.updatedAt) {
                 this.currentMapId = null;
                 this.state = this._emptyRecord();
@@ -596,12 +628,20 @@ class MappingManager {
         this.trackedTokenId = token.id;
         this.lastGridKey = null;
         this._selectMapForToken(token);
+        const startPosition = this._gridPosition(token.document);
         await this._requestMutation({
             action: 'create',
             actorId: token.actor.id,
-            sceneId: canvas.scene.id
+            sceneId: canvas.scene.id,
+            // Carry the starting square. Without it the create broadcasts the
+            // record's stored lastPosition -- wherever recording last stopped,
+            // possibly in another session -- and the marker appears there until
+            // the first reveal corrects it.
+            position: startPosition,
+            // Distinguishes starting a recording from merely adding a map, so
+            // the GM can be told about the former.
+            recording: true
         });
-        const startPosition = this._gridPosition(token.document);
         this.state = { ...this.state, lastPosition: startPosition };
         await this.openWindow();
         this.window?.showMap?.();
@@ -704,10 +744,6 @@ class MappingManager {
         this.paused = true;
         this.lastGridKey = null;
         this.refreshMenubarTool();
-        if (this._catchUpTimer) {
-            clearTimeout(this._catchUpTimer);
-            this._catchUpTimer = null;
-        }
         await this.renderWindow();
         return true;
     }
@@ -762,17 +798,22 @@ class MappingManager {
         return controlled.length === 1 ? controlled[0] : null;
     }
 
+    /**
+     * Where to draw the party marker.
+     *
+     * While recording it is the last square actually mapped, not the token's
+     * live square. Recording exists to produce a correct map, so the marker
+     * reports how far that has genuinely got; it lags the token by a round
+     * trip and that is the honest picture. Following has no record to be
+     * faithful to, so it tracks the token directly and stays smooth.
+     */
     getTrackedPositionForCurrentMap() {
         const token = this._getTrackedToken();
         if (!token || !this._isSquareGrid()) return null;
         if (this.active) {
-            // While recording the marker sits on the last mapped step, so it
-            // never runs ahead of the linework still being drawn.
             if (this._mapIdForToken(token) !== this.currentMapId) return null;
             return this._normalizePosition(this.state.lastPosition) ?? this._gridPosition(token.document);
         }
-        // Following shows the live position on whichever map is open, including
-        // another character's, because following never writes to it.
         return this.following ? this._gridPosition(token.document) : null;
     }
 
@@ -923,24 +964,6 @@ class MappingManager {
         this._recentTokenPositions.set(key, history);
     }
 
-    _trustedReportedState(sceneId, tokenId, position, coordinates, currentPosition, currentCoordinates) {
-        if (!position) return null;
-        const gridKey = `${position.column},${position.row}`;
-        if (gridKey === `${currentPosition.column},${currentPosition.row}`) {
-            return { position, coordinates: currentCoordinates };
-        }
-
-        const reportedCoordinates = this._normalizeCoordinates(coordinates);
-        const history = this._recentTokenPositions.get(`${sceneId}:${tokenId}`) ?? [];
-        const match = history.findLast(entry => {
-            if (entry.gridKey !== gridKey) return false;
-            if (!reportedCoordinates || !entry.coordinates) return true;
-            return Math.abs(entry.coordinates.x - reportedCoordinates.x) < 1
-                && Math.abs(entry.coordinates.y - reportedCoordinates.y) < 1;
-        });
-        return match ? { position, coordinates: match.coordinates ?? reportedCoordinates } : null;
-    }
-
     _tokenAtCoordinates(tokenDocument, coordinates) {
         const width = Number(tokenDocument.width) || 1;
         const height = Number(tokenDocument.height) || 1;
@@ -967,60 +990,68 @@ class MappingManager {
         return CONFIG.Token.movement.actions[action]?.teleport === true;
     }
 
-    _scheduleCatchUp(tokenId) {
-        if (this._catchUpTimer) clearTimeout(this._catchUpTimer);
-        this._catchUpTimer = setTimeout(() => {
-            this._catchUpTimer = null;
-            void this._settleToToken(tokenId).catch(error => {
-                console.error(`${MODULE.NAME}: Failed to catch the map up to the token`, error);
+    /**
+     * Report a move once, after the token has stopped moving.
+     *
+     * Foundry emits updateToken repeatedly while a move plays out -- once per
+     * waypoint of a routed path, and again as animation progresses -- and
+     * those intermediate squares do not arrive in a tidy forward order.
+     * Reporting each one recorded the token going forwards, then back, then
+     * forwards again: wrong squares in the map, and a marker that visibly
+     * jumped. Nothing was gained by it either, because gridTravelPath already
+     * reconstructs every square between two reported positions.
+     *
+     * So each update simply restarts a short timer, and only when the token
+     * has been still for that long is one reveal sent, from wherever it
+     * actually came to rest. One move, one report, always forwards.
+     */
+    _scheduleSettledReveal(tokenId, { teleported = false } = {}) {
+        if (this._settleTimer) clearTimeout(this._settleTimer);
+        // A teleport must not be interpolated, and that fact belongs to the
+        // move that raised it rather than to whichever update lands last.
+        this._settleTeleported = this._settleTeleported || teleported;
+        this._settleTimer = setTimeout(() => {
+            this._settleTimer = null;
+            const resetPath = this._settleTeleported;
+            this._settleTeleported = false;
+            if (!this.active || this.paused || tokenId !== this.trackedTokenId) return;
+            const token = this._getTrackedToken();
+            if (!token || !this._isSquareGrid()) return;
+            void this._requestReveal(token.document, this._gridPosition(token.document), {
+                force: true,
+                resetPath
+            }).catch(error => {
+                console.error(`${MODULE.NAME}: Failed to map token movement`, error);
             });
-        }, 180);
+        }, MOVE_SETTLE_MS);
     }
 
     /**
-     * Drive the mapped position onto the token's real cell.
+     * Report the token's settled square once, when recording ends.
      *
-     * A single catch-up pass is not enough for a drag. The reveal pipeline is
-     * asynchronous and a long drag can still be drawing when the pass runs, so
-     * one shot can report progress that is already stale and leave the party
-     * marker short of where the token actually stopped. This waits for the
-     * queue to drain and then re-checks, repeating until the mapped cell and
-     * the token cell agree.
+     * There used to be a timed catch-up after every move as well, re-reading
+     * the token a moment later to make sure the map had reached it. That did
+     * the opposite: Foundry animates a move, so a sample taken shortly after
+     * it starts lands on a square the token is still travelling *through*.
+     * The hook had already reported the destination, so the catch-up reported
+     * an earlier square after it, and the move completing reported the
+     * destination again -- back, forward, which is exactly the jump that was
+     * being chased. Skipped squares never needed it anyway: gridTravelPath
+     * reconstructs them from the endpoints of the next reveal.
+     *
+     * Stopping is different. Movement has finished by then, so the token can
+     * be read safely, and it guarantees the final square is recorded even if
+     * the last move was still in flight.
      */
-    async _settleToToken(tokenId, attempt = 0) {
-        if (!this._isSettleable(tokenId)) return;
-        // Let everything already queued finish before judging progress.
-        await this._outgoingRevealQueue.catch(() => {});
-        if (!this._isSettleable(tokenId)) return;
-        const token = this._getTrackedToken();
-        if (!token) return;
-        const live = this._gridPosition(token.document);
-        const mapped = this._normalizePosition(this.state.lastPosition);
-        if (mapped && mapped.column === live.column && mapped.row === live.row) return;
-        if (attempt >= SETTLE_ATTEMPTS) {
-            console.warn(
-                `${MODULE.NAME}: Mapping stopped short of the token after ${SETTLE_ATTEMPTS} settle passes`,
-                { mapped, live, tokenId }
-            );
-            return;
-        }
-        await this._requestReveal(token.document, live, { force: true });
-        return this._settleToToken(tokenId, attempt + 1);
-    }
-
-    _isSettleable(tokenId) {
-        return this.active && !this.paused && tokenId === this.trackedTokenId;
-    }
-
     async _flushCatchUp() {
-        if (this._catchUpTimer) {
-            clearTimeout(this._catchUpTimer);
-            this._catchUpTimer = null;
+        if (this._settleTimer) {
+            clearTimeout(this._settleTimer);
+            this._settleTimer = null;
+            this._settleTeleported = false;
         }
         const token = this._getTrackedToken();
-        if (!token) return;
+        if (!token || !this._isSquareGrid()) return;
         await this._requestReveal(token.document, this._gridPosition(token.document), { force: true });
-        await this._settleToToken(this.trackedTokenId);
     }
 
     _revealKeys(position) {
@@ -1080,31 +1111,28 @@ class MappingManager {
         if (!user.isGM && !game.settings.get(MODULE.ID, 'mapping.allowPlayers')) return;
         if (!this._canManageActor(actor, user)) return;
 
-        const currentPosition = this._gridPosition(tokenDocument);
-        const currentCoordinates = this._tokenCoordinates(tokenDocument);
-        // Retain the endpoint captured by its update hook even if a later move
-        // happens while an earlier path is still being drawn. A local GM is
-        // authoritative. A remote endpoint is accepted only when the GM saw
-        // that token at the same pixel coordinates in its bounded movement
-        // history; grid identity alone is insufficient when a wall crosses a
-        // token's square.
         const reportedPosition = this._normalizePosition(data.position);
         const reportedCoordinates = this._normalizeCoordinates(data.coordinates);
-        const trustedState = allowLocalGM
-            ? {
-                position: reportedPosition ?? currentPosition,
-                coordinates: reportedCoordinates ?? currentCoordinates
-            }
-            : this._trustedReportedState(
-                data.sceneId,
-                data.tokenId,
-                reportedPosition,
-                reportedCoordinates,
-                currentPosition,
-                currentCoordinates
-            );
-        const position = trustedState?.position ?? currentPosition;
-        const coordinates = trustedState?.coordinates ?? currentCoordinates;
+        // The reporting client is believed about where its own token went.
+        //
+        // This was previously corroborated against this client's copy of the
+        // token plus a short history of its moves, and that cannot be made to
+        // work. The history holds only the *endpoints* of moves, so an
+        // intermediate square the token genuinely crossed can never be
+        // confirmed; and waiting for confirmation stalls a serialized queue, so
+        // every request behind the stalled one goes stale too. Real movement
+        // was being dropped for want of evidence that was never going to come.
+        //
+        // It was not protecting much either. Foundry sends every wall to every
+        // client already -- that is how client-side vision works -- so the
+        // layout is not secret from a determined player whatever this does. The
+        // guard that matters is the ownership check above: the token must
+        // belong to the reporter and be controlled by them. What is left is
+        // map-record integrity, which does not justify losing real movement.
+        const currentPosition = this._gridPosition(tokenDocument);
+        const currentCoordinates = this._tokenCoordinates(tokenDocument);
+        const position = reportedPosition ?? currentPosition;
+        const coordinates = reportedCoordinates ?? currentCoordinates;
         if (!coordinates) return;
         const id = this._recordId(actor.id, canvas.scene.id);
         if (this._isTombstoned(id)) return;
@@ -1121,13 +1149,18 @@ class MappingManager {
         this._authoritativePositions.set(sessionKey, { mapId: id, position, coordinates });
         const explored = new Set(existing.explored);
         let observedSourcesAlongPath = {};
+        let candidateSquares = 0;
+        let visibleSquares = 0;
 
         for (let index = 0; index < path.length; index++) {
             const step = path[index];
             const amount = path.length > 1 ? index / (path.length - 1) : 1;
             const sampleCoordinates = this._interpolateCoordinates(previousCoordinates, coordinates, amount);
             const sampleToken = this._tokenAtCoordinates(tokenDocument, sampleCoordinates);
-            const revealKeys = visibleRevealKeys(sampleToken, this._revealKeys(step));
+            const candidates = this._revealKeys(step);
+            const revealKeys = visibleRevealKeys(sampleToken, candidates);
+            candidateSquares += candidates.length;
+            visibleSquares += revealKeys.size;
             // A wall can cross the same Foundry grid square as the token. The
             // cell-center ray may therefore hit that wall even though the token
             // is standing in the square, so the occupied square is always known.
@@ -1146,6 +1179,25 @@ class MappingManager {
                 await new Promise(resolve => setTimeout(resolve, 0));
             }
         }
+
+        // Written as one flat string rather than an object: a console object
+        // has to be expanded before any of it can be read or copied, which is
+        // useless when the interesting line is one of a dozen.
+        const cell = formatCell;
+        this._debug('Mapping | Reveal', [
+            `by=${game.users.get(data.userId)?.name ?? data.userId}`,
+            `reported=${cell(reportedPosition)}`,
+            `mapped=${cell(position)}`,
+            `prev=${cell(previous)}`,
+            // "record" means the session entry was missing and the origin fell
+            // back to the stored lastPosition, from any earlier session.
+            `prevFrom=${data.resetPath ? 'reset' : (authoritative?.mapId === id ? 'session' : 'record')}`,
+            `path=${path.length}`,
+            // blocked=0 across a path that crosses walls means the visibility
+            // filter is passing everything and the 5x5 is bleeding through.
+            `seen=${visibleSquares}/${candidateSquares}`,
+            `blocked=${candidateSquares - visibleSquares}`
+        ].join('  '));
 
         const crossedSecretDoors = observeCrossedSecretDoors(
             tokenDocument,
@@ -1448,9 +1500,28 @@ class MappingManager {
             this._deletedMapIds.delete(id);
             record = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
             const now = Date.now();
-            record = { ...record, createdAt: record.createdAt || now, updatedAt: now, updatedBy: user.id };
+            record = {
+                ...record,
+                // Where this recording begins, so the marker does not first
+                // appear wherever the previous one ended.
+                lastPosition: this._normalizePosition(data.position) ?? record.lastPosition,
+                createdAt: record.createdAt || now,
+                updatedAt: now,
+                updatedBy: user.id
+            };
             this.records.set(id, record);
             if (this.currentMapId === id) this.state = record;
+            // Let the GM know someone has started mapping. Only for other
+            // users -- a GM who pressed Record does not need telling.
+            if (data.recording && user.id !== game.user.id) {
+                notify(game.i18n.format(`${MODULE.ID}.mapping.recordingStarted`, { user: user.name }), {
+                    subtitle: game.i18n.format(`${MODULE.ID}.mapping.recordingStartedHint`, {
+                        actor: actor.name,
+                        scene: canvas.scene.name
+                    }),
+                    type: 'info'
+                });
+            }
             void this.renderWindow();
             await this._persistSceneRecords(data.sceneId);
             return;
