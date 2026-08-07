@@ -29,10 +29,12 @@ const SPANNING_GLYPH_FEATURES = [...DOOR_GLYPH_FEATURES, 'window'];
 /** Wall stub left at each end of an opening, in local glyph units. */
 const GLYPH_STUB = 38;
 /**
- * How much deeper than the nearest one a wall face may sit, in squares, and
- * still be seen from next door. Anything past that is behind it.
+ * How much further than the nearest one a wall face may sit, in squares, and
+ * still be seen from where the party stood. Anything past that is behind it.
  */
-const WALL_FACE_DEPTH = 0.35;
+const WALL_FACE_DEPTH = 0.7;
+/** How near two wall pieces must lie, in squares, to be one wall. */
+const PIECE_JOIN = 0.01;
 /**
  * Each glyph is authored facing north and rotated into place. Note where local
  * +x ends up: north and east run with increasing column/row, south and west
@@ -816,30 +818,82 @@ export class MappingWindow extends ToolWindowBase {
      * in the middle of a square without touching any of its sides, so asking
      * each one on its own hid entire curves.
      *
-     * When the square itself has been explored the party is standing in it and
-     * sees everything. Otherwise they are looking at it from next door, and see
-     * only its near face: whatever lies a square deeper is behind that. That is
-     * what stops the far wall of a pair being drawn along with the near one.
+     * Seeing a wall does not mean standing against it. A wall running through
+     * the rock beside a corridor meets the walked floor at a corner as often as
+     * along a side -- especially a curved one, which crosses squares
+     * diagonally -- so every square around is considered, not just the four
+     * square on. Checking only those left a curve drawn in pieces wherever it
+     * happened to round a bend.
+     *
+     * What the party cannot see is what lies behind something else. So when
+     * they are looking in from outside, only the near face of the square shows:
+     * whatever sits deeper is behind it. Standing in the square, they see all
+     * of it.
      */
     _visibleWall(cell, explored) {
         const { column, row } = cell;
         if (explored.has(`${column},${row}`)) return { host: { column, row }, pieces: cell.pieces };
-        const sides = [
-            { host: { column: column - 1, row }, depth: piece => piece.middle.x - column },
-            { host: { column, row: row - 1 }, depth: piece => piece.middle.y - row },
-            { host: { column: column + 1, row }, depth: piece => (column + 1) - piece.middle.x },
-            { host: { column, row: row + 1 }, depth: piece => (row + 1) - piece.middle.y }
+        // Square neighbours before corner ones: a wall is more likely to be
+        // seen across a side than across a point.
+        const around = [
+            [-1, 0], [1, 0], [0, -1], [0, 1],
+            [-1, -1], [1, -1], [-1, 1], [1, 1]
         ];
-        for (const side of sides) {
-            if (!explored.has(`${side.host.column},${side.host.row}`)) continue;
-            const depths = cell.pieces.map(side.depth);
+        for (const [columnOffset, rowOffset] of around) {
+            const host = { column: column + columnOffset, row: row + rowOffset };
+            if (!explored.has(`${host.column},${host.row}`)) continue;
+            // Whole walls are near or far, never pieces of one. A wall crossing
+            // a square runs from one side of it to the other, so its pieces sit
+            // at every depth there is -- judging them one by one cut the middle
+            // out of every crossing and left curves in tatters. Pieces that
+            // join up are one wall and stand or fall together.
+            const walls = this._joinPieces(cell.pieces);
+            const from = { x: host.column + 0.5, y: host.row + 0.5 };
+            const reach = wall => Math.min(...wall.map(piece => Math.hypot(
+                piece.middle.x - from.x, piece.middle.y - from.y
+            )));
+            const depths = walls.map(reach);
             const nearest = Math.min(...depths);
             return {
-                host: side.host,
-                pieces: cell.pieces.filter((piece, index) => depths[index] <= nearest + WALL_FACE_DEPTH)
+                host,
+                pieces: walls
+                    .filter((wall, index) => depths[index] <= nearest + WALL_FACE_DEPTH)
+                    .flat()
             };
         }
         return null;
+    }
+
+    /**
+     * Gather a square's wall pieces into the walls they belong to.
+     *
+     * Smoothing leaves a curve as a chain of short pieces laid end to end, so
+     * pieces that touch came from the same wall. A second wall crossing the
+     * same square is a separate chain, and it is the chains that are near or
+     * far from the party, not the pieces within them.
+     */
+    _joinPieces(pieces) {
+        const walls = [];
+        for (const piece of pieces) {
+            const touching = walls.filter(wall => wall.some(other => (
+                Math.hypot(other.to.x - piece.from.x, other.to.y - piece.from.y) < PIECE_JOIN
+                || Math.hypot(other.from.x - piece.to.x, other.from.y - piece.to.y) < PIECE_JOIN
+                || Math.hypot(other.from.x - piece.from.x, other.from.y - piece.from.y) < PIECE_JOIN
+                || Math.hypot(other.to.x - piece.to.x, other.to.y - piece.to.y) < PIECE_JOIN
+            )));
+            if (!touching.length) {
+                walls.push([piece]);
+                continue;
+            }
+            // Joining two chains at once means they were one wall all along.
+            const [first, ...rest] = touching;
+            first.push(piece);
+            for (const other of rest) {
+                first.push(...other);
+                walls.splice(walls.indexOf(other), 1);
+            }
+        }
+        return walls;
     }
 
     /**
