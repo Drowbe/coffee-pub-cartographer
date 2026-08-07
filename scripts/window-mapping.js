@@ -390,6 +390,15 @@ export class MappingWindow extends ToolWindowBase {
             this.manager.atlas,
             this.manager.state.secrets
         );
+        // What the drawing made of the record. A square showing as bare rock is
+        // either not in `floor` at all -- nothing revealed it -- or it is, and
+        // was clipped away to nothing, and `thinnest` says which.
+        this.manager._debug?.('Mapping | Drawn', [
+            `floor=${explored.size}`,
+            `walls=${mappedGeometry.segmentsByCell.size}`,
+            `clipped=${mappedGeometry.floorClipByCell.size}`,
+            `thinnest=${this._thinnestFloor(mappedGeometry.floorClipByCell)}%`
+        ].join('  '));
         const canRecord = this.manager.canRecordCurrentMap();
         const common = {
             canRecord,
@@ -718,7 +727,7 @@ export class MappingWindow extends ToolWindowBase {
         const floorClipByCell = new Map();
         for (const [key, shapes] of wallShapesByCell) {
             const [column, row] = key.split(',').map(Number);
-            const clip = this._floorClip(shapes, { column, row }, explored, atlas?.barriers);
+            const clip = this._floorClip(shapes, { column, row }, explored, atlas);
             if (clip) floorClipByCell.set(key, clip);
         }
         return {
@@ -741,6 +750,27 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     /**
+     * The least floor any cut square was left with, as a percentage of a whole
+     * square. A square cut down to almost nothing reads as solid rock, which
+     * looks exactly like a square that was never revealed -- so this is what
+     * tells the two apart when a floor has a hole in it.
+     */
+    _thinnestFloor(clips) {
+        let thinnest = 100;
+        for (const polygon of clips.values()) {
+            const points = polygon.split(', ').map(pair => pair.split(' ').map(parseFloat));
+            let twiceArea = 0;
+            for (let index = 0; index < points.length; index++) {
+                const [x0, y0] = points[index];
+                const [x1, y1] = points[(index + 1) % points.length];
+                twiceArea += (x0 * y1) - (x1 * y0);
+            }
+            thinnest = Math.min(thinnest, Math.round(Math.abs(twiceArea) / 200));
+        }
+        return clips.size ? thinnest : 100;
+    }
+
+    /**
      * The part of a square that is floor, as a CSS polygon, or null when the
      * whole square is.
      *
@@ -750,28 +780,40 @@ export class MappingWindow extends ToolWindowBase {
      * square, the floor is cut back to it: the square starts whole and each
      * wall shaves off whatever lies on its far side.
      *
-     * Which side is far is decided by where the party has been. The middle of
-     * the square is not a safe answer, tempting as it is: a square the party
-     * merely stood in is explored whether or not its middle is, so a token
-     * hugging the inside of a bend occupies squares whose middles are in the
-     * rock -- and cutting to the middle then kept the rock and threw away the
-     * floor.
+     * Which side is floor is the side the party is on: is there floor between
+     * them and the wall they can see? Then that is the floor.
      *
-     * Nor is any explored neighbour, for the same reason: a neighbour's middle
-     * can be in the rock too, and then it points the wrong way just as
-     * confidently. Only a neighbour the party could have *walked to* is safe,
-     * so a neighbour with a wall between it and this square does not get a say.
-     * That is what the barriers are for. The middle is kept as a tie-break for
-     * a square with nothing walkable beside it.
+     * Answered with the squares around this one, but only the ones that can
+     * answer honestly. A square that a wall cuts through has a middle that may
+     * well be in the rock, so it cannot say which way is floor -- and asking it
+     * gets the wrong answer with total confidence. Squares no wall runs through
+     * are whole floor or whole rock, so an explored one is floor, and floor is
+     * on its side. They are asked first.
+     *
+     * Failing those, any explored neighbour not across a wall. Failing even
+     * that, any explored neighbour at all: it is still better evidence than
+     * this square's middle, which for a square buried in rock says the rock is
+     * the floor. The middle is the last resort, for a square with nothing
+     * explored beside it.
      */
-    _floorClip(shapes, cell, explored, barriers) {
+    _floorClip(shapes, cell, explored, atlas) {
         const middle = { x: 50, y: 50 };
-        const beside = [
+        const around = [
             { at: { x: -50, y: 50 }, key: `${cell.column - 1},${cell.row}`, wall: `e:${cell.column - 1},${cell.row}` },
             { at: { x: 150, y: 50 }, key: `${cell.column + 1},${cell.row}`, wall: `e:${cell.column},${cell.row}` },
             { at: { x: 50, y: -50 }, key: `${cell.column},${cell.row - 1}`, wall: `s:${cell.column},${cell.row - 1}` },
             { at: { x: 50, y: 150 }, key: `${cell.column},${cell.row + 1}`, wall: `s:${cell.column},${cell.row}` }
-        ].filter(neighbour => explored.has(neighbour.key) && !barriers?.has(neighbour.wall));
+        ].filter(neighbour => explored.has(neighbour.key));
+        // Whole squares of floor, which cannot be wrong about where floor is.
+        const solid = around.filter(neighbour => !atlas?.split?.has(neighbour.key));
+        const reachable = around.filter(neighbour => !atlas?.barriers?.has(neighbour.wall));
+        // Asked in order of how much they can be trusted, and the first answer
+        // that is not a tie is taken. A tie is no answer: with whole floor on
+        // both sides of a wall the squares cannot say which side is which, but
+        // dropping to the next question -- which of them is not across it --
+        // can.
+        const asking = [solid, reachable, around];
+
         let polygon = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
         let cut = false;
         for (const shape of shapes) {
@@ -780,11 +822,17 @@ export class MappingWindow extends ToolWindowBase {
             if (!dx && !dy) continue;
             const side = point => ((point.x - shape.start.x) * dy) - ((point.y - shape.start.y) * dx);
             let facing = 0;
-            for (const neighbour of beside) facing += Math.sign(side(neighbour.at));
-            facing = Math.sign(facing);
-            // With walkable ground on both sides, or none, fall back to the
-            // middle. A wall straight through it says nothing either way, and
-            // cuts nothing.
+            for (const tier of asking) {
+                let vote = 0;
+                for (const neighbour of tier) vote += Math.sign(side(neighbour.at));
+                if (vote) {
+                    facing = Math.sign(vote);
+                    break;
+                }
+            }
+            // Nothing explored beside it at all. Its own middle is the last
+            // thing left to go on, and a wall straight through that says
+            // nothing either way, so it cuts nothing.
             if (!facing) {
                 const centre = side(middle);
                 if (Math.abs(centre) < 0.5) continue;

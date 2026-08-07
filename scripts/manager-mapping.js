@@ -1336,6 +1336,7 @@ class MappingManager {
         const secrets = new Set(existing.secrets ?? []);
         let candidateSquares = 0;
         let visibleSquares = 0;
+        let enclosedSquares = 0;
 
         for (let index = 0; index < path.length; index++) {
             const step = path[index];
@@ -1354,7 +1355,9 @@ class MappingManager {
             // a curved corridor is nearly every square. The walls say where the
             // floor is; there is no need to check each flagstone for a view of
             // it.
+            const sighted = revealKeys.size;
             for (const key of enclosedRegion(this.atlas, step, candidates)) revealKeys.add(key);
+            enclosedSquares += revealKeys.size - sighted;
             for (const key of revealKeys) explored.add(key);
 
             // Walking a secret door is how it is found. Tested per leg against
@@ -1388,7 +1391,11 @@ class MappingManager {
             // blocked=0 across a route that crosses walls means the visibility
             // filter is passing everything and the window is bleeding through.
             `seen=${visibleSquares}/${candidateSquares}`,
-            `blocked=${candidateSquares - visibleSquares}`
+            `blocked=${candidateSquares - visibleSquares}`,
+            // Squares the party could not see the middle of but which are
+            // plainly part of the room they are standing in. A hole in a floor
+            // the walls clearly enclose means this found nothing there.
+            `enclosed=+${enclosedSquares}`
         ].join('  '));
 
         // An annotation can be placed while a long route is still catching up,

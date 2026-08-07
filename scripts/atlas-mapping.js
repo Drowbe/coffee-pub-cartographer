@@ -30,6 +30,8 @@
 // Nothing here is persisted. It is derived from live scene data and rebuilt
 // whenever that changes, so a wall the GM moves is simply correct next render.
 
+import { clipSegmentToCell } from './utils-mapping.js';
+
 /** How far off square a wall may sit and still be drawn on the grid. */
 const AXIS_TOLERANCE_DEGREES = 15;
 /**
@@ -108,7 +110,8 @@ const EMPTY_ATLAS = Object.freeze({
     features: Object.freeze({}),
     lines: Object.freeze([]),
     secrets: Object.freeze([]),
-    barriers: Object.freeze(new Set())
+    barriers: Object.freeze(new Set()),
+    split: Object.freeze(new Set())
 });
 
 // ------------------------------------------------------------------
@@ -916,7 +919,33 @@ function buildSceneAtlas(scene = canvas?.scene) {
         });
     }
 
-    return { sceneId: scene.id, features, lines, secrets, barriers: barriersOf(lines) };
+    return {
+        sceneId: scene.id,
+        features,
+        lines,
+        secrets,
+        barriers: barriersOf(lines),
+        split: splitSquares(lines)
+    };
+}
+
+/**
+ * The squares a wall runs through rather than around.
+ *
+ * A wall on the lattice bounds whole squares, so a square is either inside it
+ * or out. A curve or an angled wall cuts squares in half, and half a square of
+ * floor is still floor the party can stand on and see.
+ */
+function splitSquares(lines) {
+    const split = new Set();
+    for (const [[x0, y0], [x1, y1]] of lines) {
+        for (let row = Math.floor(Math.min(y0, y1)); row <= Math.floor(Math.max(y0, y1)); row++) {
+            for (let column = Math.floor(Math.min(x0, x1)); column <= Math.floor(Math.max(x0, x1)); column++) {
+                if (clipSegmentToCell(x0, y0, x1, y1, column, row)) split.add(`${column},${row}`);
+            }
+        }
+    }
+    return split;
 }
 
 /**

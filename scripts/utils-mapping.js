@@ -223,6 +223,22 @@ function enclosedRegion(atlas, start, reach, limit = 4000) {
             queue.push(next);
         }
     }
+
+    // A wall that cuts a square in half leaves floor on this side of it, and
+    // that floor is part of the room whatever the square's middle is inside.
+    // The flood can never reach those squares -- stepping to a middle that sits
+    // in the rock means crossing the wall to get there -- so they are taken on
+    // at the end, one ring only, and the drawing cuts each back to its share.
+    // Without them the far side of a curved corridor read as solid rock, and
+    // the party had to walk it square by square to prove otherwise.
+    for (const key of [...region]) {
+        const [column, row] = key.split(',').map(Number);
+        for (const [columnOffset, rowOffset] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+            const edge = `${column + columnOffset},${row + rowOffset}`;
+            if (region.has(edge) || !within.has(edge)) continue;
+            if (atlas?.split?.has(edge)) region.add(edge);
+        }
+    }
     return region;
 }
 
