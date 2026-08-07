@@ -6,26 +6,12 @@ import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
 import { socketManager } from './manager-sockets.js';
 import {
-    flattenFeatureSources,
-    gridTravelPath,
-    mergeFeatureGeometry,
-    mergeFeatureSources,
-    mergeFeatures,
-    mergeSourceFeatures,
-    normalizeFeatureGeometry,
-    normalizeFeatureSources,
-    normalizeFeatures,
     contiguousFloorRegion,
+    gridTravelPath,
     propagateFloors,
-    observeCrossedSecretDoors,
-    observeVisibleFeatures,
-    pruneFeatureGeometry,
-    retractCrossedBoundaries,
-    retractGeometryOnBoundaries,
-    retractStaleSourceEdges,
-    subtractFeatureSources,
     visibleRevealKeys
 } from './utils-mapping.js';
+import { buildSceneAtlas, EMPTY_ATLAS, secretsCrossedBy } from './atlas-mapping.js';
 import { notify } from './utils-toast.js';
 import {
     MAPPING_ANNOTATED_SYMBOLS,
@@ -37,7 +23,12 @@ import {
 const FLAG_KEY = 'mapping';
 const TOOL_ID = `${MODULE.ID}-mapping`;
 const WINDOW_ID = `${MODULE.ID}-mapper`;
-const STATE_VERSION = 2;
+/**
+ * A record holds only what is genuinely the party's: where they have been, what
+ * they found, and what they wrote on it. The scene's architecture is settled
+ * from the walls themselves and never stored.
+ */
+const STATE_VERSION = 3;
 /** How long an optimistic local deletion suppresses a map before it is reconciled. */
 const DELETE_TOMBSTONE_MS = 15000;
 /** The mutually exclusive states the mapper can be in. */
@@ -71,7 +62,6 @@ class MappingManager {
         this.lastGridKey = null;
         this.state = this._emptyRecord();
         this.records = new Map();
-        this.legacyByScene = new Map();
         this.window = null;
         this._hooks = [];
         this._saveQueue = Promise.resolve();
@@ -97,6 +87,46 @@ class MappingManager {
         this._selectionFrame = null;
         this._closingWindow = false;
         this._settleTimer = null;
+        // The canonical architecture of the current scene. Derived, never
+        // saved, and rebuilt whenever the scene's walls change.
+        this.atlas = EMPTY_ATLAS;
+        this._atlasFrame = null;
+    }
+
+    /**
+     * Settle the scene's architecture.
+     *
+     * Cheap enough to do outright -- one pass over the walls Foundry already
+     * holds -- and everything downstream reads it, so it must be current before
+     * any reveal is processed or any map is drawn.
+     */
+    rebuildAtlas() {
+        try {
+            this.atlas = buildSceneAtlas(canvas?.scene) ?? EMPTY_ATLAS;
+        } catch (error) {
+            console.error(`${MODULE.NAME}: Failed to read the scene's walls`, error);
+            this.atlas = EMPTY_ATLAS;
+        }
+        this._debug('Mapping | Atlas', [
+            `scene=${canvas?.scene?.name ?? '-'}`,
+            `edges=${Object.keys(this.atlas.features).length}`,
+            `lines=${this.atlas.lines.length}`,
+            `secrets=${this.atlas.secrets.length}`
+        ].join('  '));
+        return this.atlas;
+    }
+
+    /**
+     * Rebuild once after a burst of wall edits rather than once per wall. A GM
+     * dragging a wall emits a great many updates.
+     */
+    _scheduleAtlasRebuild() {
+        if (this._atlasFrame) return;
+        this._atlasFrame = requestAnimationFrame(() => {
+            this._atlasFrame = null;
+            this.rebuildAtlas();
+            void this.renderWindow();
+        });
     }
 
     /** True only while recording. */
@@ -138,11 +168,11 @@ class MappingManager {
             rows: 0,
             gridDistance: 5,
             explored: [],
-            features: {},
-            featureSources: {},
-            geometry: {},
             symbols: [],
             floors: {},
+            // Secret doors this party has walked through. The atlas draws every
+            // secret as ordinary wall until its id appears here.
+            secrets: [],
             lastPosition: null,
             createdAt: 0,
             updatedAt: 0,
@@ -156,6 +186,7 @@ class MappingManager {
         this._registerToolbarTool();
         this._registerHooks();
         this._registerSocketHandlers();
+        this.rebuildAtlas();
         this.loadMapRecords();
         this.refreshMenubarTool();
         console.log(`${MODULE.NAME}: Mapping tool initialized`);
@@ -175,6 +206,9 @@ class MappingManager {
         this._deletedMapIds.clear();
         if (this._selectionFrame) cancelAnimationFrame(this._selectionFrame);
         this._selectionFrame = null;
+        if (this._atlasFrame) cancelAnimationFrame(this._atlasFrame);
+        this._atlasFrame = null;
+        this.atlas = EMPTY_ATLAS;
         this.window = null;
     }
 
@@ -369,6 +403,7 @@ class MappingManager {
             if (this.active) void this.stopMapping();
             this.trackedTokenId = null;
             this._resetMovementPath();
+            this.rebuildAtlas();
             this.loadMapRecords();
             const selected = this._getSingleControlledToken();
             if (selected) this._selectMapForToken(selected);
@@ -376,12 +411,11 @@ class MappingManager {
         });
         this._hooks.push({ name: 'canvasReady', id: canvasReady });
 
-        for (const hookName of ['createWall', 'updateWall']) {
-            const hookId = Hooks.on(hookName, () => {
-                const token = this._getTrackedToken();
-                if (!this.active || this.paused || !token) return;
-                void this._requestReveal(token.document, [this._gridPosition(token.document)], { force: true });
-            });
+        // The architecture is read from the walls, so editing one simply
+        // changes the map. There is nothing to retract and nothing to
+        // reconcile: the next atlas is the truth.
+        for (const hookName of ['createWall', 'updateWall', 'deleteWall']) {
+            const hookId = Hooks.on(hookName, () => this._scheduleAtlasRebuild());
             this._hooks.push({ name: hookName, id: hookId });
         }
     }
@@ -397,7 +431,6 @@ class MappingManager {
     loadMapRecords() {
         const selectedId = this.currentMapId;
         this.records.clear();
-        this.legacyByScene.clear();
         for (const scene of game.scenes ?? []) this._replaceSceneRecords(scene, scene.getFlag(MODULE.ID, FLAG_KEY));
 
         if (selectedId && this.records.has(selectedId)) this.selectMap(selectedId, { render: false });
@@ -420,16 +453,12 @@ class MappingManager {
         for (const [id, record] of this.records) {
             if (record.sceneId === scene.id) this.records.delete(id);
         }
-        this.legacyByScene.delete(scene.id);
-
         const incoming = new Map();
         if (Number(raw?.version) >= STATE_VERSION && raw.maps && typeof raw.maps === 'object') {
             for (const value of Object.values(raw.maps)) {
                 const record = this._normalizeRecord(value, scene);
                 if (record.id) incoming.set(record.id, record);
             }
-        } else if (Array.isArray(raw?.explored)) {
-            this.legacyByScene.set(scene.id, raw);
         }
 
         // Reconcile pending deletions against this authoritative container.
@@ -491,14 +520,11 @@ class MappingManager {
             rows: Math.max(0, Number(raw.rows) || 0),
             gridDistance: 5,
             explored,
-            features: normalizeFeatures(raw.features),
-            featureSources: normalizeFeatureSources(raw.featureSources),
-            // The true wall lines, drawn instead of the boundary lattice wherever
-            // they exist. Additive: a record written before geometry simply has
-            // none and still renders from the lattice alone.
-            geometry: normalizeFeatureGeometry(raw.geometry),
             symbols: this._normalizeSymbols(raw.symbols),
             floors: this._normalizeFloors(raw.floors),
+            secrets: Array.isArray(raw.secrets)
+                ? [...new Set(raw.secrets.filter(id => typeof id === 'string' && id))]
+                : [],
             lastPosition: this._normalizePosition(raw.lastPosition),
             createdAt: Number(raw.createdAt) || Number(raw.updatedAt) || 0,
             updatedAt: Number(raw.updatedAt) || 0,
@@ -508,13 +534,6 @@ class MappingManager {
 
     _newRecord(actor, scene) {
         const record = this._emptyRecord({ actor, scene });
-        const legacy = this.legacyByScene.get(scene.id);
-        if (legacy) {
-            record.explored = [...new Set((legacy.explored ?? []).filter(key => /^-?\d+,-?\d+$/.test(key)))];
-            record.createdAt = Number(legacy.updatedAt) || Date.now();
-            record.updatedAt = Number(legacy.updatedAt) || 0;
-            record.updatedBy = typeof legacy.updatedBy === 'string' ? legacy.updatedBy : null;
-        }
         const dimensions = this._sceneGridDimensions(scene);
         record.columns = dimensions.columns;
         record.rows = dimensions.rows;
@@ -1301,29 +1320,11 @@ class MappingManager {
         if (!user.isGM && !game.settings.get(MODULE.ID, 'mapping.allowPlayers')) return;
         if (!this._canManageActor(actor, user)) return;
 
-        // The reporting client is believed about where its own token went, and
-        // about the route it took to get there.
-        //
-        // Both were previously second-guessed here, and neither can be. The
-        // report was corroborated against this client's copy of the token plus
-        // a short history of its moves -- but that history holds only the
-        // *endpoints* of moves, so an intermediate square the token genuinely
-        // crossed could never be confirmed, and waiting for confirmation
-        // stalled a serialized queue until everything behind it went stale too.
-        // Real movement was dropped for want of evidence that was never coming.
-        //
-        // The route was then reconstructed as a straight line from wherever the
-        // map thought the token had been. That is the deeper error: a move
-        // around a corner is not a straight line, so the reconstruction walked
-        // through walls, and every fix for it needed yet more state about where
-        // the token "really" was. Foundry already reports the route. It is now
-        // simply carried across and walked, so there is nothing left to guess.
-        //
-        // Nor was any of it protecting much. Foundry sends every wall to every
-        // client already -- that is how client-side vision works -- so the
-        // layout is not secret from a determined player whatever this does. The
-        // guard that matters is the ownership check above: the token must
-        // belong to the reporter and be controlled by them.
+        // The reporting client is believed about where its own token went and
+        // the route it took. Foundry reports that route, so there is nothing to
+        // reconstruct; the ownership check above is the guard that matters, and
+        // the layout was never secret anyway -- Foundry ships every wall to
+        // every client, which is how client-side vision works.
         const path = this._normalizeRevealPath(data.path, tokenDocument);
         if (!path.length) return;
         const position = { column: path.at(-1).column, row: path.at(-1).row };
@@ -1331,14 +1332,9 @@ class MappingManager {
         if (this._isTombstoned(id)) return;
         const existing = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
         const explored = new Set(existing.explored);
-        let observedSourcesAlongPath = {};
-        let observedGeometryAlongPath = {};
+        const secrets = new Set(existing.secrets ?? []);
         let candidateSquares = 0;
         let visibleSquares = 0;
-        // Every square the party had a clear line to at some point along this
-        // route. Retraction needs it: forgetting a boundary is only honest
-        // where they could actually see there was nothing there.
-        const observableKeys = new Set();
 
         for (let index = 0; index < path.length; index++) {
             const step = path[index];
@@ -1347,126 +1343,58 @@ class MappingManager {
             const revealKeys = visibleRevealKeys(sampleToken, candidates);
             candidateSquares += candidates.length;
             visibleSquares += revealKeys.size;
-            // A wall can cross the same Foundry grid square as the token. The
-            // cell-center ray may therefore hit that wall even though the token
-            // is standing in the square, so the occupied square is always known.
+            // A wall can cross the same square as the token, so the cell-centre
+            // ray may hit it even though the token is standing there. The
+            // occupied square is therefore always known.
             revealKeys.add(`${step.column},${step.row}`);
-            for (const key of revealKeys) {
-                explored.add(key);
-                observableKeys.add(key);
-            }
-            const observed = observeVisibleFeatures(sampleToken, revealKeys);
-            observedSourcesAlongPath = mergeFeatureSources(
-                observedSourcesAlongPath,
-                observed.sources
-            );
-            observedGeometryAlongPath = mergeFeatureGeometry(
-                observedGeometryAlongPath,
-                observed.geometry
-            );
+            for (const key of revealKeys) explored.add(key);
 
-            // Very long drags are intentionally allowed to lag like a person
-            // catching up on a paper map, but yield periodically so Foundry's
-            // UI and socket processing remain responsive.
+            // Walking a secret door is how it is found. Tested per leg against
+            // the atlas, which already knows where every secret is.
+            if (index > 0) {
+                for (const secretId of secretsCrossedBy(this.atlas, path[index - 1], path[index])) {
+                    secrets.add(secretId);
+                }
+            }
+
+            // Very long drags are allowed to lag like a person catching up on a
+            // paper map, but yield periodically so Foundry stays responsive.
             if (index > 0 && index % 8 === 0) {
                 await new Promise(resolve => setTimeout(resolve, 0));
             }
         }
 
-        // Written as one flat string rather than an object: a console object
-        // has to be expanded before any of it can be read or copied, which is
-        // useless when the interesting line is one of a dozen.
+        // Written as one flat string rather than an object: a console object has
+        // to be expanded before any of it can be read, which is useless when the
+        // interesting line is one of a dozen.
         const cell = formatCell;
         this._debug('Mapping | Reveal', [
             `by=${game.users.get(data.userId)?.name ?? data.userId}`,
             `from=${cell(path[0])}`,
             `to=${cell(position)}`,
             // Where this client sees the token. It should agree with `to` once
-            // the move has landed; a disagreement means one of the two reads
-            // is stale, and says which.
+            // the move has landed; a disagreement says one read is stale.
             `here=${cell(this._gridPosition(tokenDocument))}`,
-            `path=${path.length}`,
-            // Every square in the path was reported by the client as crossed,
-            // so a route that reads as a straight diagonal through a wall now
-            // means the client mis-collected it, not that we guessed wrong.
             `route=${path.map(step => cell(step)).join('>')}`,
-            // blocked=0 across a path that crosses walls means the visibility
-            // filter is passing everything and the whole detection window is
-            // bleeding through.
             `window=${(this._detectionRadius() * 2) + 1}`,
+            // blocked=0 across a route that crosses walls means the visibility
+            // filter is passing everything and the window is bleeding through.
             `seen=${visibleSquares}/${candidateSquares}`,
             `blocked=${candidateSquares - visibleSquares}`
         ].join('  '));
 
-        // Secret doors are checked leg by leg once the whole route is known,
-        // so a door is promoted on the strength of the full explored set rather
-        // than whatever had been revealed by the time that leg was walked.
-        for (let index = 1; index < path.length; index++) {
-            const crossedSecretDoors = observeCrossedSecretDoors(
-                tokenDocument,
-                path[index - 1],
-                path[index],
-                explored
-            );
-            observedSourcesAlongPath = mergeFeatureSources(
-                observedSourcesAlongPath,
-                crossedSecretDoors.sources
-            );
-        }
-
-        // A map annotation can be placed while a long movement path is still
-        // catching up. Rebase the completed reveal onto the latest record so
-        // that delayed linework cannot overwrite a newly placed symbol or a
-        // concurrent rename.
+        // An annotation can be placed while a long route is still catching up,
+        // so rebase onto the latest record rather than the one read at the top.
         const latest = this.records.get(id) ?? existing;
         const combinedExplored = new Set([...(latest.explored ?? []), ...explored]);
-        // Re-reading a wall is only worth something if the reading is allowed
-        // to overrule what was recorded before. Boundaries a re-observed wall
-        // no longer claims, in squares the party has just had a clear view of,
-        // are dropped before the new observations are merged in.
-        const pruned = retractStaleSourceEdges(
-            latest.featureSources,
-            observedSourcesAlongPath,
-            observableKeys
-        );
-        let featureSources = mergeFeatureSources(pruned.sources, observedSourcesAlongPath);
-        const incomingFeatures = flattenFeatureSources(observedSourcesAlongPath);
-        let features = subtractFeatureSources(latest.features, latest.featureSources);
-        // Records from builds before source tracking contain unattributed
-        // geometry. Re-observing the area lets the current source-aware set
-        // replace an opposing provisional edge and progressively repairs the
-        // old map without requiring a reset.
-        features = mergeSourceFeatures(features, incomingFeatures);
-        features = mergeFeatures(features, flattenFeatureSources(featureSources));
-        // Last, and outranking every observation: the party walked through
-        // these boundaries, so nothing solid stands on them.
-        const walked = retractCrossedBoundaries(features, featureSources, path);
-        features = walked.features;
-        featureSources = walked.sources;
-        // The drawn lines follow the lattice ruling for ruling: fold in what was
-        // just seen, cut whatever a boundary retraction disproved -- whether by
-        // restatement or by being walked through -- and drop anything whose wall
-        // the lattice no longer carries at all.
-        let geometry = mergeFeatureGeometry(latest.geometry, observedGeometryAlongPath);
-        geometry = retractGeometryOnBoundaries(geometry, pruned.removedBySource);
-        geometry = retractGeometryOnBoundaries(geometry, walked.removedBySource);
-        geometry = pruneFeatureGeometry(geometry, featureSources);
-        // What this pass unlearned. Steadily non-zero means the snapping is
-        // placing boundaries it then has to take back, which is a detection
-        // problem rather than a merge one.
-        if (pruned.removed || walked.removed) {
-            this._debug(
-                'Mapping | Retracted',
-                `restated=${pruned.removed}  walked-through=${walked.removed}`
-            );
-        }
-        // Squares that have just joined an area adopt the surface already
-        // chosen for it, so revealing the rest of a room does not leave it
-        // half-surfaced. New areas stay default until they are named.
+        for (const secretId of latest.secrets ?? []) secrets.add(secretId);
+        // Squares that have just joined an area adopt the surface already chosen
+        // for it, so revealing the rest of a room does not leave it half
+        // surfaced. New areas stay default until they are named.
         const previouslyExplored = new Set(latest.explored ?? []);
         const floors = propagateFloors(
             combinedExplored,
-            features,
+            this.atlas.features,
             latest.floors,
             [...combinedExplored].filter(key => !previouslyExplored.has(key))
         );
@@ -1476,10 +1404,8 @@ class MappingManager {
             columns: dimensions.columns,
             rows: dimensions.rows,
             explored: [...combinedExplored],
-            features,
-            featureSources,
-            geometry,
             floors,
+            secrets: [...secrets],
             lastPosition: position,
             createdAt: latest.createdAt || Date.now(),
             updatedAt: Date.now(),
@@ -1817,7 +1743,7 @@ class MappingManager {
             // have not discovered.
             const region = contiguousFloorRegion(
                 new Set(record.explored),
-                record.features,
+                this.atlas.features,
                 { column, row }
             );
             const floors = { ...this._normalizeFloors(record.floors) };
@@ -1831,11 +1757,9 @@ class MappingManager {
             record = {
                 ...record,
                 explored: [],
-                features: {},
-                featureSources: {},
-                geometry: {},
                 symbols: [],
                 floors: {},
+                secrets: [],
                 lastPosition: null,
                 updatedAt: Date.now(),
                 updatedBy: user.id

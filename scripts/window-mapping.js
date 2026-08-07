@@ -3,6 +3,7 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
+import { clipSegmentToCell } from './utils-mapping.js';
 import {
     getMappingSymbol,
     MAPPING_FLOOR_TYPES,
@@ -379,9 +380,8 @@ export class MappingWindow extends ToolWindowBase {
         const trackedPosition = this.manager.getTrackedPositionForCurrentMap();
         const mappedGeometry = this._getMappedTileGeometry(
             explored,
-            this.manager.state.features,
-            this.manager.state.geometry,
-            this.manager.state.featureSources
+            this.manager.atlas,
+            this.manager.state.secrets
         );
         const canRecord = this.manager.canRecordCurrentMap();
         const common = {
@@ -568,21 +568,29 @@ export class MappingWindow extends ToolWindowBase {
         return sides.find(side => explored.has(`${side.column},${side.row}`)) ?? null;
     }
 
-    _getMappedTileGeometry(explored, features, geometry, featureSources) {
+    /**
+     * Turn the scene's atlas into what this party may see of it.
+     *
+     * The atlas already settled every wall, doorway and corner with the whole
+     * scene in hand, so nothing here decides architecture -- it decides
+     * visibility. A boundary is drawn when either square it separates has been
+     * explored, which is why a room you have stood in comes out with its
+     * complete outline rather than the fragments your sightlines happened to
+     * touch.
+     */
+    _getMappedTileGeometry(explored, atlas, discoveredSecrets) {
         const segmentsByCell = new Map();
-        // Boundaries whose wall is drawn from its own recorded line instead.
-        // The lattice still decides what the party knows -- these edges are
-        // real, and floors and blocking still read them -- but drawing them as
-        // one of four sides of a square would put a staircase on top of the
-        // wall it is standing in for.
-        const supersededEdges = new Set();
-        for (const [sourceId, sourceFeatures] of Object.entries(featureSources ?? {})) {
-            if (!geometry?.[sourceId]?.length) continue;
-            for (const [key, codes] of Object.entries(sourceFeatures ?? {})) {
-                for (const code of codes) {
-                    const edgeKey = this._latticeEdgeKey(key, code);
-                    if (edgeKey) supersededEdges.add(edgeKey);
-                }
+        const features = atlas?.features ?? {};
+        // A secret door reads as ordinary wall until this party has walked it.
+        const revealedSecretEdges = new Map();
+        const found = discoveredSecrets instanceof Set
+            ? discoveredSecrets
+            : new Set(discoveredSecrets ?? []);
+        for (const secret of atlas?.secrets ?? []) {
+            if (!found.has(secret.id)) continue;
+            for (const edge of secret.edges) {
+                const edgeKey = this._latticeEdgeKey(edge.key, `wall:${edge.direction}`);
+                if (edgeKey) revealedSecretEdges.set(edgeKey, true);
             }
         }
         const doorSymbolsByCell = new Map();
@@ -615,19 +623,24 @@ export class MappingWindow extends ToolWindowBase {
                     east: `v:${column + 1}:${row}`
                 }[direction];
                 if (!edgeKey || !priorities[feature]) continue;
+                // Finding a secret door promotes the wall the atlas drew in its
+                // place. Permanent knowledge: it is the party's record that
+                // says so, not the scene.
+                const shown = revealedSecretEdges.has(edgeKey) && feature === 'wall'
+                    ? 'secret-door'
+                    : feature;
                 const existing = latticeEdges.get(edgeKey);
-                if (!existing || priorities[feature] > priorities[existing.feature]) {
-                    latticeEdges.set(edgeKey, { feature });
+                if (!existing || priorities[shown] > priorities[existing.feature]) {
+                    latticeEdges.set(edgeKey, { feature: shown });
                 }
             }
         }
 
+        // A boundary is drawn as soon as either square it separates has been
+        // explored. That is the whole reveal rule, and it is why standing in a
+        // room gives you the room rather than the parts you looked hardest at.
         const edges = new Map();
         for (const [edgeKey, edge] of latticeEdges) {
-            // Only plain wall gives way to a recorded line. A doorway that won
-            // this boundary is drawn as its symbol whatever the wall beneath it
-            // is doing.
-            if (edge.feature === 'wall' && supersededEdges.has(edgeKey)) continue;
             const side = this._drawableSide(edgeKey, explored);
             if (!side) continue;
             edges.set(edgeKey, {
@@ -637,7 +650,11 @@ export class MappingWindow extends ToolWindowBase {
             });
         }
 
-        for (const [key, segment] of this._geometrySegments(geometry, explored)) {
+        // Runs with real shape in them kept their own line rather than being
+        // snapped, so they are drawn from that line. No boundary is suppressed
+        // for them: the atlas gave each run one representation or the other,
+        // never both, so there is nothing here that could disagree with itself.
+        for (const [key, segment] of this._trueWallSegments(atlas?.lines, explored)) {
             segmentsByCell.set(key, [...(segmentsByCell.get(key) ?? []), segment]);
         }
 
@@ -685,99 +702,92 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     /**
-     * The portion of a segment lying inside one square, as a pair of positions
-     * along it, or null when it misses the square entirely. Liang-Barsky: each
-     * of the square's four sides trims the run of the line that survives, and
-     * the moment nothing survives the square is rejected.
+     * The square whose SVG draws a piece of wall lying in square (column, row).
+     *
+     * Its own square when explored, otherwise the nearest explored square
+     * orthogonally beside it. A wall drawn with thickness puts its Foundry line
+     * inside the wall band, and nobody walks into a wall, so the square holding
+     * the line is unexplored even though the party is standing against it.
+     * Never further than one square, so linework can lean out of the mapped
+     * area onto the wall it belongs to and no further.
+     *
+     * Position is absolute either way -- the layer draws outside its own box --
+     * so this decides only whether a piece is drawn, never where.
      */
-    _clipToCell(x0, y0, x1, y1, column, row) {
-        const dx = x1 - x0;
-        const dy = y1 - y0;
-        let enter = 0;
-        let exit = 1;
-        const limits = [
-            [-dx, x0 - column],
-            [dx, column + 1 - x0],
-            [-dy, y0 - row],
-            [dy, row + 1 - y0]
-        ];
-        for (const [edge, distance] of limits) {
-            if (edge === 0) {
-                if (distance < 0) return null;
-                continue;
-            }
-            const crossing = distance / edge;
-            if (edge < 0) {
-                if (crossing > exit) return null;
-                if (crossing > enter) enter = crossing;
-            } else {
-                if (crossing < enter) return null;
-                if (crossing < exit) exit = crossing;
-            }
+    _hostCell(column, row, explored) {
+        if (explored.has(`${column},${row}`)) return { column, row };
+        for (const [columnOffset, rowOffset] of [[-1, 0], [0, -1], [1, 0], [0, 1]]) {
+            const host = { column: column + columnOffset, row: row + rowOffset };
+            if (explored.has(`${host.column},${host.row}`)) return host;
         }
-        // A line that only grazes a corner contributes nothing worth drawing.
-        return exit - enter > 0.0001 ? [enter, exit] : null;
+        return null;
     }
 
     /**
-     * Cut each recorded wall line into the squares it passes through, as
-     * polylines in that square's own coordinates.
+     * Cut the atlas's true wall lines into the squares they pass through, as
+     * polylines in each square's own coordinates.
      *
      * The map is a grid of cells that each own a small SVG, so a wall crossing
      * five squares is drawn as five pieces. They meet exactly, because every
      * piece is measured from the same line -- the seam is invisible, and in
-     * return the geometry layer needs no overlay, no separate zoom handling and
-     * no changes to the template.
+     * return this needs no overlay, no separate zoom handling and no change to
+     * the template.
      *
      * The bow through the middle is the same hand-drawn wobble the boundary
-     * strokes use, turned to run across whatever angle the wall actually sits
-     * at rather than always north or west.
+     * strokes use, turned to run across whatever angle the wall sits at.
      */
-    * _geometrySegments(geometry, explored) {
-        for (const segments of Object.values(geometry ?? {})) {
-            for (const segment of segments) {
-                const [[x0, y0], [x1, y1]] = segment;
-                if (![x0, y0, x1, y1].every(Number.isFinite)) continue;
-                const firstColumn = Math.floor(Math.min(x0, x1));
-                const lastColumn = Math.floor(Math.max(x0, x1));
-                const firstRow = Math.floor(Math.min(y0, y1));
-                const lastRow = Math.floor(Math.max(y0, y1));
-                // Walls are short, or long and axis-aligned, so the box around
-                // one is a thin strip. A pathological diagonal is skipped
-                // rather than allowed to cost more than the map it draws.
-                if ((lastColumn - firstColumn + 1) * (lastRow - firstRow + 1) > 4096) continue;
+    * _trueWallSegments(lines, explored) {
+        for (const line of lines ?? []) {
+            const [[x0, y0], [x1, y1]] = line;
+            if (![x0, y0, x1, y1].every(Number.isFinite)) continue;
+            const dx = x1 - x0;
+            const dy = y1 - y0;
+            const length = Math.hypot(dx, dy);
+            if (!length) continue;
+            // Perpendicular to the wall, in the cell's 0-100 coordinates.
+            const bowX = (-dy / length) * 1.6;
+            const bowY = (dx / length) * 1.6;
 
-                const dx = x1 - x0;
-                const dy = y1 - y0;
-                const length = Math.hypot(dx, dy);
-                if (!length) continue;
-                // Perpendicular to the wall, in the cell's 0-100 coordinates.
-                const bowX = (-dy / length) * 1.6;
-                const bowY = (dx / length) * 1.6;
+            // A line lying along a square's edge belongs to the squares on both
+            // sides of it, and only one of those is Math.floor of its position.
+            // Reach one square back so the other is considered too. Squares the
+            // line genuinely misses are rejected by the clip.
+            const firstColumn = Math.floor(Math.min(x0, x1)) - 1;
+            const lastColumn = Math.floor(Math.max(x0, x1));
+            const firstRow = Math.floor(Math.min(y0, y1)) - 1;
+            const lastRow = Math.floor(Math.max(y0, y1));
 
-                for (let row = firstRow; row <= lastRow; row++) {
-                    for (let column = firstColumn; column <= lastColumn; column++) {
-                        const key = `${column},${row}`;
-                        if (!explored.has(key)) continue;
-                        const span = this._clipToCell(x0, y0, x1, y1, column, row);
-                        if (!span) continue;
-                        const [enter, exit] = span;
-                        // Rounded because these go straight into markup, and a
-                        // clip lands on values like 30.00000000000007.
-                        const local = amount => ({
-                            x: Math.round(((x0 + (dx * amount)) - column) * 10000) / 100,
-                            y: Math.round(((y0 + (dy * amount)) - row) * 10000) / 100
-                        });
-                        const start = local(enter);
-                        const end = local(exit);
-                        const middle = local((enter + exit) / 2);
-                        yield [key, {
-                            className: 'is-wall',
-                            priority: 1,
-                            points: `${start.x},${start.y} ${middle.x + bowX},${middle.y + bowY} ${end.x},${end.y}`,
-                            echoPoints: `${start.x},${start.y} ${middle.x - (bowX * 0.7)},${middle.y - (bowY * 0.7)} ${end.x},${end.y}`
-                        }];
-                    }
+            for (let row = firstRow; row <= lastRow; row++) {
+                for (let column = firstColumn; column <= lastColumn; column++) {
+                    const span = clipSegmentToCell(x0, y0, x1, y1, column, row);
+                    if (!span) continue;
+                    const [enter, exit] = span;
+                    const at = amount => ({ x: x0 + (dx * amount), y: y0 + (dy * amount) });
+                    const from = at(enter);
+                    const to = at(exit);
+                    // A line down this square's east or south side is the same
+                    // line as one down the next square's west or north side,
+                    // and the loop reaches both. Draw it once.
+                    if (from.x === column + 1 && to.x === column + 1) continue;
+                    if (from.y === row + 1 && to.y === row + 1) continue;
+
+                    const host = this._hostCell(column, row, explored);
+                    if (!host) continue;
+                    // Rounded because these go straight into markup, and a clip
+                    // lands on values like 30.00000000000007.
+                    const local = point => ({
+                        x: Math.round((point.x - host.column) * 10000) / 100,
+                        y: Math.round((point.y - host.row) * 10000) / 100
+                    });
+                    const start = local(from);
+                    const end = local(to);
+                    const middle = local(at((enter + exit) / 2));
+                    yield [`${host.column},${host.row}`, {
+                        className: 'is-wall',
+                        priority: 1,
+                        points: `${start.x},${start.y} ${middle.x + bowX},${middle.y + bowY} ${end.x},${end.y}`,
+                        echoPoints: `${start.x},${start.y} ${middle.x - (bowX * 0.7)},${middle.y - (bowY * 0.7)} ${end.x},${end.y}`
+                    }];
                 }
             }
         }
