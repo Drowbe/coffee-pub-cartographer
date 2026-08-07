@@ -227,6 +227,28 @@ function wallFringe(atlas, seen, reach) {
 }
 
 /**
+ * Whether a square's floor lies toward a neighbour.
+ *
+ * A square a wall cuts through has floor on one side of that wall and rock on
+ * the other, and the record says which: the point the party saw it from. So it
+ * belongs to the room on that side and not to the room on the far side, even
+ * though it touches both. Without asking, surfacing one room ran through every
+ * such square into the next.
+ *
+ * With nothing recorded the answer is no. Not knowing which side of a wall the
+ * floor is on is no reason to assume both, and assuming both is what lets a
+ * surface run out of one room and into the next.
+ */
+function floorFaces(sides, key, columnOffset, rowOffset) {
+    const at = sides?.[key];
+    if (!Array.isArray(at) || at.length !== 2) return false;
+    if (columnOffset < 0) return at[0] < 50;
+    if (columnOffset > 0) return at[0] > 50;
+    if (rowOffset < 0) return at[1] < 50;
+    return at[1] > 50;
+}
+
+/**
  * The explored squares reachable from a starting square without crossing a
  * recorded boundary — one room, in other words.
  *
@@ -235,7 +257,7 @@ function wallFringe(atlas, seen, reach) {
  * corridor it opens onto. Reads the atlas only where the party has explored, so
  * flooring can never spread through a wall they have not discovered yet.
  */
-function contiguousFloorRegion(exploredKeys, atlas, start, limit = 4000) {
+function contiguousFloorRegion(exploredKeys, atlas, start, sides, limit = 4000) {
     const explored = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
     const startKey = `${start.column},${start.row}`;
     if (!explored.has(startKey)) return [];
@@ -254,6 +276,26 @@ function contiguousFloorRegion(exploredKeys, atlas, start, limit = 4000) {
             seen.add(nextKey);
             region.push(nextKey);
             queue.push(next);
+        }
+    }
+
+    // The half-squares along the walls belong to the room as much as the whole
+    // ones do -- but the flood can never arrive at them, because reaching the
+    // middle of one means crossing the wall that cuts it. Left out, a surface
+    // stopped short of its own edges and left them bare. Taken on as one ring
+    // and no further, so a surface still cannot escape the room.
+    for (const key of [...region]) {
+        const [column, row] = key.split(',').map(Number);
+        for (const [columnOffset, rowOffset] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+            const edge = `${column + columnOffset},${row + rowOffset}`;
+            if (seen.has(edge) || !explored.has(edge)) continue;
+            if (!atlas?.split?.has(edge)) continue;
+            // Only if its floor is on this side of the wall that cuts it. A
+            // wall dividing a hall cuts squares with floor on both sides, and
+            // they belong to whichever room the party saw them from.
+            if (!floorFaces(sides, edge, -columnOffset, -rowOffset)) continue;
+            seen.add(edge);
+            region.push(edge);
         }
     }
     return region;
@@ -289,7 +331,7 @@ function boundaryBlocks(atlas, fromKey, from, to) {
  * party has recorded, which is what stops it running out of a doorway: the next
  * room is a new area and stays default until it is named.
  */
-function propagateFloors(exploredKeys, atlas, floors, addedKeys) {
+function propagateFloors(exploredKeys, atlas, floors, addedKeys, sides) {
     const explored = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
     const next = { ...(floors ?? {}) };
     const pending = [...new Set(addedKeys ?? [])].filter(key => explored.has(key) && !next[key]);
@@ -308,7 +350,12 @@ function propagateFloors(exploredKeys, atlas, floors, addedKeys) {
                 const neighbour = { column: column + columnOffset, row: row + rowOffset };
                 const neighbourKey = `${neighbour.column},${neighbour.row}`;
                 if (!next[neighbourKey] || !explored.has(neighbourKey)) continue;
-                if (boundaryBlocks(atlas, key, cell, neighbour)) continue;
+                // A half-square takes the surface of the room it edges even
+                // though nothing can walk to the middle of it -- but only the
+                // room its floor actually faces.
+                const cut = atlas?.split?.has(key);
+                if (!cut && boundaryBlocks(atlas, key, cell, neighbour)) continue;
+                if (cut && !floorFaces(sides, key, columnOffset, rowOffset)) continue;
                 next[key] = next[neighbourKey];
                 changed = true;
                 break;

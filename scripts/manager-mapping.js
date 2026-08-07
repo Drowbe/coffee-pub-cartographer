@@ -1477,7 +1477,8 @@ class MappingManager {
             combinedExplored,
             this.atlas,
             latest.floors,
-            [...combinedExplored].filter(key => !previouslyExplored.has(key))
+            [...combinedExplored].filter(key => !previouslyExplored.has(key)),
+            combinedSides
         );
         const dimensions = this._sceneGridDimensions(canvas.scene);
         const next = {
@@ -1907,7 +1908,8 @@ class MappingManager {
             const region = contiguousFloorRegion(
                 new Set(record.explored),
                 this.atlas,
-                { column, row }
+                { column, row },
+                this._normalizeSides(record.sides)
             );
             const floors = { ...this._normalizeFloors(record.floors) };
             for (const key of region) {
@@ -1925,6 +1927,7 @@ class MappingManager {
             const explored = new Set(record.explored);
             const hidden = new Set(record.hidden ?? []);
             const sides = { ...this._normalizeSides(record.sides) };
+            let floors = this._normalizeFloors(record.floors);
             if (data.action === 'mark-floor') {
                 hidden.delete(key);
                 explored.add(key);
@@ -1935,15 +1938,22 @@ class MappingManager {
                     ? data.at.map(Number)
                     : [50, 50];
                 if (at.every(Number.isFinite)) sides[key] = at;
+                // A square that joins a room joins its flooring too. Without
+                // this a square added by hand stayed bare while everything
+                // around it was surfaced, which reads as the correction not
+                // having worked.
+                floors = propagateFloors(explored, this.atlas, floors, [key], sides);
             } else {
                 hidden.add(key);
                 explored.delete(key);
+                delete floors[key];
             }
             record = {
                 ...record,
                 explored: [...explored],
                 hidden: [...hidden],
                 sides,
+                floors,
                 updatedAt: Date.now(),
                 updatedBy: user.id
             };
