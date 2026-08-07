@@ -77,6 +77,12 @@ const FIT_TOLERANCE = 0.5;
  * artefact whichever way it points.
  */
 const MIN_FEATURE = 0.9;
+/**
+ * How far, in degrees, any part of a stretch may point away from the line
+ * between its ends and still belong to it. A traced straight wall wanders by a
+ * little; a stepped wall turns a right angle at every joint.
+ */
+const HEADING_TOLERANCE_DEGREES = 35;
 /** Share of a square a doorway must cover to be drawn as occupying it. */
 const OPENING_COVERAGE = 0.6;
 /** Features drawn with the doorway glyph rather than as a boundary stroke. */
@@ -408,6 +414,33 @@ function isCurve(points, first, last) {
 }
 
 /**
+ * The worst angle, in degrees, between any segment of a stretch and the line
+ * between the stretch's own ends.
+ *
+ * Straying is not the only way a trace can fail to be a straight wall. A wall
+ * that steps -- right a square, down a square, over and over -- never strays
+ * far from the diagonal drawn through it, yet every one of its segments is
+ * perfectly square and the diagonal is a fiction. Measuring how far it strays
+ * cannot see that; measuring where it points can.
+ */
+function headingSpread(points, first, last) {
+    const chordColumn = points[last].column - points[first].column;
+    const chordRow = points[last].row - points[first].row;
+    const chord = Math.hypot(chordColumn, chordRow);
+    if (!chord) return 180;
+    let worst = 0;
+    for (let vertex = first + 1; vertex <= last; vertex++) {
+        const dc = points[vertex].column - points[vertex - 1].column;
+        const dr = points[vertex].row - points[vertex - 1].row;
+        const length = Math.hypot(dc, dr);
+        if (!length) continue;
+        const along = ((dc * chordColumn) + (dr * chordRow)) / (length * chord);
+        worst = Math.max(worst, Math.acos(Math.min(1, Math.max(-1, along))) * (180 / Math.PI));
+    }
+    return worst;
+}
+
+/**
  * Break a traced run into the pieces it is really made of.
  *
  * This is the heart of normalization, and it replaces judging each traced
@@ -432,12 +465,22 @@ function isCurve(points, first, last) {
  */
 function fitRun(points, first, last, pieces) {
     if (last - first < 1) return;
+    // A single traced segment is whatever it is; there is nothing to fit.
+    if (last - first === 1) {
+        pieces.push({ kind: 'line', first, last });
+        return;
+    }
     if (isCurve(points, first, last)) {
         pieces.push({ kind: 'curve', first, last });
         return;
     }
     const { deepest, at } = bowDepth(points, first, last);
-    if (at < 0 || deepest <= FIT_TOLERANCE) {
+    // Straight means both staying near the line between the ends and pointing
+    // along it. A stepped wall satisfies the first and fails the second, and
+    // taking it for one line is what drew great diagonals across squared rooms.
+    const straight = deepest <= FIT_TOLERANCE
+        && headingSpread(points, first, last) <= HEADING_TOLERANCE_DEGREES;
+    if (at < 0 || straight) {
         pieces.push({ kind: 'line', first, last });
         return;
     }
