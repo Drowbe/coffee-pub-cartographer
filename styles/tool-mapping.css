@@ -854,6 +854,48 @@
     color: var(--blacksmith-tool-text);
 }
 
+/* A heading over each run of maps. Sticky, so the group a row belongs to is
+   still legible once the list is long enough to need scrolling -- which is the
+   point at which grouping starts earning its keep. */
+.cartographer-mapping-list-group {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 4px 2px;
+    background: var(--blacksmith-tool-surface-sunken);
+    /* The list is a flex column with a gap, and that gap sits outside the
+       heading's own box -- so once stuck, a scrolling row showed through the
+       strip above it. Painting past the edge covers the gap without taking up
+       any room. */
+    box-shadow: 0 -6px 0 var(--blacksmith-tool-surface-sunken);
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--blacksmith-tool-text-muted);
+}
+
+/* The scene being stood in, or the character selected. */
+.cartographer-mapping-list-group.is-here {
+    color: var(--blacksmith-tool-accent);
+}
+
+.cartographer-mapping-group-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cartographer-mapping-group-count {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.7;
+}
+
 .cartographer-mapping-item-actions {
     display: flex;
     gap: 4px;

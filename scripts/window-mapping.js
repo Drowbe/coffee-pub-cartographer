@@ -99,6 +99,7 @@ export class MappingWindow extends ToolWindowBase {
         'set-mode': (_event, target, app) => void app.manager.setMode(target.dataset.mode),
         'toggle-list': (_event, _target, app) => void app.toggleList(),
         'add-map': (_event, _target, app) => void app.manager.createMapForSelection(),
+        'toggle-grouping': (_event, _target, app) => void app.toggleListGrouping(),
         'select-map': (_event, target, app) => void app.selectMap(target.dataset.mapId),
         'rename-map': (event, target, app) => {
             event.stopPropagation();
@@ -214,6 +215,12 @@ export class MappingWindow extends ToolWindowBase {
                 action: 'toggle-list',
                 icon: 'fa-solid fa-map',
                 label: model.viewMapLabel
+            }), this._chromeButton({
+                action: 'toggle-grouping',
+                // Both icon and tooltip name what pressing it would do, not
+                // what the list is doing now.
+                icon: model.groupedByScene ? 'fa-solid fa-user' : 'fa-solid fa-map-location-dot',
+                label: model.groupedByScene ? model.groupByActorLabel : model.groupBySceneLabel
             })];
             return `<span class="cartographer-mapping-chrome-actions is-primary">${buttons.join('')}</span>`;
         }
@@ -343,6 +350,7 @@ export class MappingWindow extends ToolWindowBase {
             actorName: record.actorName,
             sceneName: record.sceneName,
             updated: record.updatedAt ? new Date(record.updatedAt).toLocaleString() : '',
+            updatedAt: record.updatedAt ?? 0,
             feetMapped: record.explored.length * (record.gridDistance || 5),
             isCurrent: record.id === this.manager.currentMapId,
             canManage: this.manager.canManageRecord(record),
@@ -350,15 +358,16 @@ export class MappingWindow extends ToolWindowBase {
             thumbnail: isList ? this._mapThumbnail(record) : null
         }));
         if (this.viewMode === 'list') {
+            const grouping = this.listGrouping;
             return {
                 isListView: true,
                 maps,
+                groups: this._groupMaps(maps, grouping),
+                groupedByScene: grouping === 'scene',
+                groupBySceneLabel: game.i18n.localize(`${MODULE.ID}.mapping.groupByScene`),
+                groupByActorLabel: game.i18n.localize(`${MODULE.ID}.mapping.groupByActor`),
                 listEmpty: maps.length === 0,
                 listEmptyMessage: game.i18n.localize(`${MODULE.ID}.mapping.noMaps`),
-                // Offered whenever this scene has no map they could record
-                // into. Shown even without a token selected, because the
-                // create action explains what is missing better than a hidden
-                // card does.
                 // Always offered. It used to appear only when this scene had
                 // no map the reader could record into, which meant a GM -- who
                 // can record into anyone's -- never saw it once one map
@@ -376,6 +385,67 @@ export class MappingWindow extends ToolWindowBase {
             };
         }
         return { ...this._buildMapModel(), isListView: false, maps };
+    }
+
+    /**
+     * Which way the reader last chose to sort the list. Kept per user, since it
+     * is a reading preference rather than anything about the maps.
+     */
+    get listGrouping() {
+        try {
+            return game.settings.get(MODULE.ID, 'mapping.listGrouping') === 'actor' ? 'actor' : 'scene';
+        } catch {
+            return 'scene';
+        }
+    }
+
+    async toggleListGrouping() {
+        const next = this.listGrouping === 'scene' ? 'actor' : 'scene';
+        try {
+            await game.settings.set(MODULE.ID, 'mapping.listGrouping', next);
+        } catch {
+            return;
+        }
+        await this.manager.renderWindow();
+    }
+
+    /**
+     * Gather the maps under headings, by scene or by character.
+     *
+     * The list grows one entry per character per scene, so a campaign of any
+     * length turns it into a wall of near-identical rows -- every one of them
+     * reading "someone at somewhere", with no way to find the map wanted. The
+     * heading carries whichever of the two the group is keyed on, and each row
+     * then only has to say the other: under a scene a row names its character,
+     * under a character it names its scene.
+     *
+     * Whatever is in front of the reader comes first -- the scene they are
+     * standing in, or the character they have selected -- because that is the
+     * map they are nearly always after. The rest follow by how recently they
+     * were written to.
+     */
+    _groupMaps(maps, grouping) {
+        const byScene = grouping === 'scene';
+        const here = byScene
+            ? canvas?.scene?.name
+            : this.manager._getSingleControlledToken()?.actor?.name;
+
+        const groups = new Map();
+        for (const map of maps) {
+            const key = byScene ? map.sceneName : map.actorName;
+            if (!groups.has(key)) {
+                groups.set(key, { key, name: key, isHere: key === here, maps: [], updated: 0 });
+            }
+            const group = groups.get(key);
+            group.maps.push({ ...map, subtitle: byScene ? map.actorName : map.sceneName });
+            group.updated = Math.max(group.updated, map.updatedAt ?? 0);
+        }
+
+        return [...groups.values()].sort((left, right) => {
+            if (left.isHere !== right.isHere) return left.isHere ? -1 : 1;
+            if (left.updated !== right.updated) return right.updated - left.updated;
+            return left.name.localeCompare(right.name);
+        }).map(group => ({ ...group, count: group.maps.length }));
     }
 
     _buildMapModel() {

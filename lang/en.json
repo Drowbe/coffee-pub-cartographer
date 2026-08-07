@@ -89,6 +89,8 @@
 	"mapping.showMaps": "Show recorded maps",
 	"mapping.viewMap": "View map",
 	"mapping.recordedMaps": "Recorded Maps",
+	"mapping.groupByScene": "Group by scene",
+	"mapping.groupByActor": "Group by character",
 	"mapping.noMaps": "The party has not recorded any maps yet.",
 	"mapping.mapCount": "{count} recorded maps",
 	"mapping.rename": "Rename",

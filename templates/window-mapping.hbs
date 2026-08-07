@@ -6,7 +6,8 @@
 
     <div class="cartographer-mapping-list">
         {{#if showCreateCard}}
-        {{! Offered when this scene has no map this user could record into. }}
+        {{! The list's own heading action: always offered, and it names the
+            scene it would map. }}
         <article class="cartographer-mapping-list-item is-create" data-action="add-map">
             <div class="cartographer-mapping-list-icon"><i class="fa-solid fa-plus"></i></div>
             <div class="cartographer-mapping-list-copy">
@@ -21,6 +22,13 @@
             <span>{{listEmptyMessage}}</span>
         </div>
         {{else}}
+        {{! Gathered under a heading carrying whichever of scene or character
+            the group is keyed on, so each row only has to say the other. }}
+        {{#each groups}}
+        <div class="cartographer-mapping-list-group{{#if isHere}} is-here{{/if}}">
+            <span class="cartographer-mapping-group-name">{{name}}</span>
+            <span class="cartographer-mapping-group-count">{{count}}</span>
+        </div>
         {{#each maps}}
         <article class="cartographer-mapping-list-item{{#if isCurrent}} is-current{{/if}}" data-action="select-map" data-map-id="{{id}}">
             <div class="cartographer-mapping-list-icon">
@@ -28,20 +36,21 @@
             </div>
             <div class="cartographer-mapping-list-copy">
                 <strong>{{name}}</strong>
-                <span>{{actorName}} · {{sceneName}}</span>
-                <small>{{feetMapped}} {{../feetMappedLabel}}{{#if updated}} · {{updated}}{{/if}}</small>
+                <span>{{subtitle}}</span>
+                <small>{{feetMapped}} {{../../feetMappedLabel}}{{#if updated}} · {{updated}}{{/if}}</small>
             </div>
             {{#if canManage}}
             <div class="cartographer-mapping-item-actions">
-                <button type="button" data-action="rename-map" data-map-id="{{id}}" data-tooltip="{{../renameLabel}}" aria-label="{{../renameLabel}}">
+                <button type="button" data-action="rename-map" data-map-id="{{id}}" data-tooltip="{{../../renameLabel}}" aria-label="{{../../renameLabel}}">
                     <i class="fa-solid fa-pen"></i>
                 </button>
-                <button type="button" class="is-critical" data-action="delete-map" data-map-id="{{id}}" data-tooltip="{{../deleteLabel}}" aria-label="{{../deleteLabel}}">
+                <button type="button" class="is-critical" data-action="delete-map" data-map-id="{{id}}" data-tooltip="{{../../deleteLabel}}" aria-label="{{../../deleteLabel}}">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
             </div>
             {{/if}}
         </article>
+        {{/each}}
         {{/each}}
         {{/if}}
     </div>
