@@ -73,7 +73,7 @@
             <div class="cartographer-mapping-hatch is-ring-{{ring}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}}; --cartographer-hatch-x: {{patternX}}; --cartographer-hatch-y: {{patternY}};" aria-hidden="true"></div>
             {{/each}}
             {{#each cells}}
-            <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}}; --cartographer-floor-x: {{patternX}}; --cartographer-floor-y: {{patternY}};">
+            <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}}; --cartographer-floor-x: {{patternX}}; --cartographer-floor-y: {{patternY}};{{#if floorClip}} --cartographer-floor-clip: polygon({{floorClip}});{{/if}}">
                 {{#if hasLinework}}
                 <svg class="cartographer-mapping-segments" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                     {{#each segments}}

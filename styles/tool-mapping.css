@@ -205,6 +205,36 @@
     box-shadow: inset -1px -1px 0 var(--cartographer-map-floor-grid);
 }
 
+/* A square a wall cuts across is floor only on the near side of it. Filling it
+   edge to edge is what made a curved corridor read as a staircase of blocks:
+   the walls swept round while the floor beneath them stepped.
+
+   The paper moves onto its own layer to be cut, because cutting the square
+   itself would take the linework and symbols with it -- and the wall drawn
+   along the cut is exactly what must not be trimmed. */
+.cartographer-mapping-cell.is-clipped {
+    background: none;
+    box-shadow: none;
+}
+
+.cartographer-mapping-cell.is-clipped::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background: var(--cartographer-map-paper);
+    box-shadow: inset -1px -1px 0 var(--cartographer-map-floor-grid);
+    clip-path: var(--cartographer-floor-clip);
+    pointer-events: none;
+}
+
+/* A floor surface is cut back with the paper it sits on, and has to stay above
+   it: the paper layer is drawn later in the markup, so both are given an order. */
+.cartographer-mapping-cell.is-clipped::before {
+    z-index: 1;
+    clip-path: var(--cartographer-floor-clip);
+}
+
 /* Floor surfaces are painted by a masked overlay rather than a background, so
    the square keeps its paper underneath and the pattern still takes its colour
    from the theme. Each square phases the mask by its own grid position, the

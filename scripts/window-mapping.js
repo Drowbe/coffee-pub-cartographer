@@ -29,6 +29,11 @@ const SPANNING_GLYPH_FEATURES = [...DOOR_GLYPH_FEATURES, 'window'];
 /** Wall stub left at each end of an opening, in local glyph units. */
 const GLYPH_STUB = 38;
 /**
+ * How much deeper than the nearest one a wall face may sit, in squares, and
+ * still be seen from next door. Anything past that is behind it.
+ */
+const WALL_FACE_DEPTH = 0.35;
+/**
  * Each glyph is authored facing north and rotated into place. Note where local
  * +x ends up: north and east run with increasing column/row, south and west
  * run against them. That is why a run anchors at its far end for those two.
@@ -463,7 +468,8 @@ export class MappingWindow extends ToolWindowBase {
                 // pattern to a single lattice across the whole room.
                 patternX: column,
                 patternY: row,
-                className: `is-explored${isNew ? ' is-new' : ''}${isParty ? ' is-party' : ''}${floor ? ` is-floor-${floor}` : ''}`,
+                floorClip: mappedGeometry.floorClipByCell.get(key) ?? null,
+                className: `is-explored${isNew ? ' is-new' : ''}${isParty ? ' is-party' : ''}${floor ? ` is-floor-${floor}` : ''}${mappedGeometry.floorClipByCell.has(key) ? ' is-clipped' : ''}`,
                 segments: mappedGeometry.segmentsByCell.get(key) ?? [],
                 doorSymbols: mappedGeometry.doorSymbolsByCell.get(key) ?? [],
                 secretDoorSymbols: mappedGeometry.secretDoorSymbolsByCell.get(key) ?? [],
@@ -654,8 +660,13 @@ export class MappingWindow extends ToolWindowBase {
         // snapped, so they are drawn from that line. No boundary is suppressed
         // for them: the atlas gave each run one representation or the other,
         // never both, so there is nothing here that could disagree with itself.
-        for (const [key, segment] of this._trueWallSegments(atlas?.lines, explored)) {
+        // Where a wall cuts across a square, the floor of that square stops at
+        // it. Kept only for pieces lying in their own square, since a piece
+        // lent to a neighbour is not crossing that neighbour's floor.
+        const wallShapesByCell = new Map();
+        for (const [key, segment, shape] of this._trueWallSegments(atlas?.lines, explored)) {
             segmentsByCell.set(key, [...(segmentsByCell.get(key) ?? []), segment]);
+            if (shape) wallShapesByCell.set(key, [...(wallShapesByCell.get(key) ?? []), shape]);
         }
 
         // Wide openings mark every square they cross, so join those marks back
@@ -685,7 +696,15 @@ export class MappingWindow extends ToolWindowBase {
                 segmentsByCell.set(edge.key, [...(segmentsByCell.get(edge.key) ?? []), segment]);
             }
         }
-        return { segmentsByCell, doorSymbolsByCell, secretDoorSymbolsByCell, windowSymbolsByCell };
+        const floorClipByCell = new Map();
+        for (const [key, shapes] of wallShapesByCell) {
+            const clip = this._floorClip(shapes);
+            if (clip) floorClipByCell.set(key, clip);
+        }
+        return {
+            segmentsByCell, doorSymbolsByCell, secretDoorSymbolsByCell, windowSymbolsByCell,
+            floorClipByCell
+        };
     }
 
     /** The lattice edge a stored "feature:direction" code names. */
@@ -702,32 +721,85 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     /**
-     * The square whose SVG draws a piece of wall, or null if the party has not
-     * been anywhere they could have seen it from.
+     * The part of a square that is floor, as a CSS polygon, or null when the
+     * whole square is.
      *
-     * The square the piece lies in, when they have explored it. Otherwise the
-     * only way they could have seen it is from a square next door, and only if
-     * the wall actually reaches the boundary the two share -- a wall standing in
-     * the middle of ground nobody has been to is not visible merely because
-     * something was explored nearby. That laxness is what drew the second wall
-     * of a pair when the party could only see the first.
-     *
-     * Position is absolute either way, since the layer draws outside its own
-     * box, so this decides only whether a piece is drawn and never where.
+     * A map drawn on squares fills each explored square edge to edge, which
+     * turns a curved corridor into a staircase of blocks -- the walls sweep
+     * round while the floor underneath them steps. So where a wall crosses a
+     * square, the floor is cut back to it: the square starts whole and each
+     * wall shaves off whatever lies on its far side. Which side is far is
+     * settled by the middle of the square, because that is the point the party
+     * had to see to have explored it at all.
      */
-    _hostCell(column, row, explored, from, to) {
-        if (explored.has(`${column},${row}`)) return { column, row };
-        const edge = 0.001;
+    _floorClip(shapes) {
+        let polygon = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+        let cut = false;
+        for (const shape of shapes) {
+            const dx = shape.end.x - shape.start.x;
+            const dy = shape.end.y - shape.start.y;
+            if (!dx && !dy) continue;
+            const side = point => ((point.x - shape.start.x) * dy) - ((point.y - shape.start.y) * dx);
+            const keep = side({ x: 50, y: 50 });
+            // A wall straight through the middle says nothing about which half
+            // is floor, so it cuts nothing.
+            if (Math.abs(keep) < 0.5) continue;
+            const facing = Math.sign(keep);
+            const clipped = [];
+            for (let index = 0; index < polygon.length; index++) {
+                const from = polygon[index];
+                const to = polygon[(index + 1) % polygon.length];
+                const here = side(from) * facing;
+                const there = side(to) * facing;
+                if (here >= 0) clipped.push(from);
+                if ((here >= 0) !== (there >= 0)) {
+                    const along = here / (here - there);
+                    clipped.push({
+                        x: from.x + ((to.x - from.x) * along),
+                        y: from.y + ((to.y - from.y) * along)
+                    });
+                }
+            }
+            if (clipped.length < 3) return null;
+            polygon = clipped;
+            cut = true;
+        }
+        if (!cut || polygon.length < 3) return null;
+        const round = value => Math.round(value * 100) / 100;
+        return polygon.map(point => `${round(point.x)}% ${round(point.y)}%`).join(', ');
+    }
+
+    /**
+     * Which of a square's wall pieces the party can see, and which square draws
+     * them -- or null when they have not been anywhere it could be seen from.
+     *
+     * Asked of the square rather than of each piece. Smoothing cuts a curve
+     * into pieces a fraction of a square long, and a piece that small can sit
+     * in the middle of a square without touching any of its sides, so asking
+     * each one on its own hid entire curves.
+     *
+     * When the square itself has been explored the party is standing in it and
+     * sees everything. Otherwise they are looking at it from next door, and see
+     * only its near face: whatever lies a square deeper is behind that. That is
+     * what stops the far wall of a pair being drawn along with the near one.
+     */
+    _visibleWall(cell, explored) {
+        const { column, row } = cell;
+        if (explored.has(`${column},${row}`)) return { host: { column, row }, pieces: cell.pieces };
         const sides = [
-            [-1, 0, Math.min(from.x, to.x) <= column + edge],
-            [0, -1, Math.min(from.y, to.y) <= row + edge],
-            [1, 0, Math.max(from.x, to.x) >= column + 1 - edge],
-            [0, 1, Math.max(from.y, to.y) >= row + 1 - edge]
+            { host: { column: column - 1, row }, depth: piece => piece.middle.x - column },
+            { host: { column, row: row - 1 }, depth: piece => piece.middle.y - row },
+            { host: { column: column + 1, row }, depth: piece => (column + 1) - piece.middle.x },
+            { host: { column, row: row + 1 }, depth: piece => (row + 1) - piece.middle.y }
         ];
-        for (const [columnOffset, rowOffset, reaches] of sides) {
-            if (!reaches) continue;
-            const host = { column: column + columnOffset, row: row + rowOffset };
-            if (explored.has(`${host.column},${host.row}`)) return host;
+        for (const side of sides) {
+            if (!explored.has(`${side.host.column},${side.host.row}`)) continue;
+            const depths = cell.pieces.map(side.depth);
+            const nearest = Math.min(...depths);
+            return {
+                host: side.host,
+                pieces: cell.pieces.filter((piece, index) => depths[index] <= nearest + WALL_FACE_DEPTH)
+            };
         }
         return null;
     }
@@ -746,6 +818,9 @@ export class MappingWindow extends ToolWindowBase {
      * strokes use, turned to run across whatever angle the wall sits at.
      */
     * _trueWallSegments(lines, explored) {
+        // Everything the walls do in each square, gathered before anything is
+        // drawn, so visibility can be decided once per square.
+        const squares = new Map();
         for (const line of lines ?? []) {
             const [[x0, y0], [x1, y1]] = line;
             if (![x0, y0, x1, y1].every(Number.isFinite)) continue;
@@ -779,25 +854,33 @@ export class MappingWindow extends ToolWindowBase {
                     // and the loop reaches both. Draw it once.
                     if (from.x === column + 1 && to.x === column + 1) continue;
                     if (from.y === row + 1 && to.y === row + 1) continue;
-
-                    const host = this._hostCell(column, row, explored, from, to);
-                    if (!host) continue;
-                    // Rounded because these go straight into markup, and a clip
-                    // lands on values like 30.00000000000007.
-                    const local = point => ({
-                        x: Math.round((point.x - host.column) * 10000) / 100,
-                        y: Math.round((point.y - host.row) * 10000) / 100
-                    });
-                    const start = local(from);
-                    const end = local(to);
-                    const middle = local(at((enter + exit) / 2));
-                    yield [`${host.column},${host.row}`, {
-                        className: 'is-wall',
-                        priority: 1,
-                        points: `${start.x},${start.y} ${middle.x + bowX},${middle.y + bowY} ${end.x},${end.y}`,
-                        echoPoints: `${start.x},${start.y} ${middle.x - (bowX * 0.7)},${middle.y - (bowY * 0.7)} ${end.x},${end.y}`
-                    }];
+                    const key = `${column},${row}`;
+                    if (!squares.has(key)) squares.set(key, { column, row, pieces: [] });
+                    squares.get(key).pieces.push({ from, to, middle: at((enter + exit) / 2), bowX, bowY });
                 }
+            }
+        }
+
+        for (const cell of squares.values()) {
+            const visible = this._visibleWall(cell, explored);
+            if (!visible) continue;
+            const { host } = visible;
+            // Rounded because these go straight into markup, and a clip lands
+            // on values like 30.00000000000007.
+            const local = point => ({
+                x: Math.round((point.x - host.column) * 10000) / 100,
+                y: Math.round((point.y - host.row) * 10000) / 100
+            });
+            for (const piece of visible.pieces) {
+                const start = local(piece.from);
+                const end = local(piece.to);
+                const middle = local(piece.middle);
+                yield [`${host.column},${host.row}`, {
+                    className: 'is-wall',
+                    priority: 1,
+                    points: `${start.x},${start.y} ${middle.x + piece.bowX},${middle.y + piece.bowY} ${end.x},${end.y}`,
+                    echoPoints: `${start.x},${start.y} ${middle.x - (piece.bowX * 0.7)},${middle.y - (piece.bowY * 0.7)} ${end.x},${end.y}`
+                }, host.column === cell.column && host.row === cell.row ? { start, end } : null];
             }
         }
     }
