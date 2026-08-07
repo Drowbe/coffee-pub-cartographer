@@ -72,12 +72,6 @@ const CURVE_MIN_BOW = 0.7;
  */
 const FIT_TOLERANCE = 0.5;
 /**
- * Shortest piece, in squares, that counts as architecture. A map drawn on
- * squares cannot render anything smaller, so anything below this is a trace
- * artefact whichever way it points.
- */
-const MIN_FEATURE = 0.9;
-/**
  * How far, in degrees, any part of a stretch may point away from the line
  * between its ends and still belong to it. A traced straight wall wanders by a
  * little; a stepped wall turns a right angle at every joint.
@@ -566,17 +560,8 @@ function normalizeRun(points) {
     fitRun(points, 0, points.length - 1, fitted);
     if (!fitted.length) return { edges: [], lines: [] };
 
-    // Nothing shorter than a square is architecture. A map drawn on squares
-    // cannot say "three quarters of a square", and a trace is full of stubs
-    // that size -- the overshoot past a corner, the click that landed wide.
-    // Dropping them lets the walls either side join up directly, which is what
-    // the artist drew.
-    const kept = fitted.filter(piece => piece.kind === 'curve' || Math.hypot(
-        points[piece.last].column - points[piece.first].column,
-        points[piece.last].row - points[piece.first].row
-    ) >= MIN_FEATURE);
     const pieces = [];
-    for (const piece of (kept.length ? kept : fitted)) {
+    for (const piece of fitted) {
         // A straight wall a few degrees off square still crosses from one row
         // to the next if it runs far enough, and averaging it onto a single
         // line would put one end a whole square from where it belongs. Where
@@ -606,6 +591,35 @@ function normalizeRun(points) {
         };
     });
 
+    // How big a thing is, is a question about the grid it lands on rather than
+    // about the trace. Judged beforehand, a nook the artist drew as one square
+    // but a hand traced at four fifths of one was erased -- and the party still
+    // walked into it, so the map showed floor with no walls round it. Judged
+    // afterwards, that nook lands a square across and survives, while a stub
+    // too small to draw collapses to nothing on its own.
+    const placed = pieces.map((piece, index) => ({ piece, ...ends[index] }));
+    const live = placed.filter(entry => entry.piece.kind === 'curve'
+        || entry.start.column !== entry.end.column
+        || entry.start.row !== entry.end.row);
+
+    // What remains of a click that landed wide is a wall going out and coming
+    // straight back, having drawn nothing. An alcove never does that: it has a
+    // run between its two returns, so they cannot cancel.
+    for (let reducing = true; reducing;) {
+        reducing = false;
+        for (let index = 0; index + 1 < live.length; index++) {
+            const here = live[index];
+            const next = live[index + 1];
+            if (here.piece.kind === 'curve' || next.piece.kind === 'curve') continue;
+            if (here.start.column === next.end.column && here.start.row === next.end.row
+                && here.end.column === next.start.column && here.end.row === next.start.row) {
+                live.splice(index, 2);
+                reducing = true;
+                break;
+            }
+        }
+    }
+
     const edges = [];
     const lines = [];
     const draw = (from, to, curved) => {
@@ -620,8 +634,8 @@ function normalizeRun(points) {
         ]);
     };
 
-    for (const [index, piece] of pieces.entries()) {
-        const { start, end } = ends[index];
+    for (const [index, entry] of live.entries()) {
+        const { piece, start, end } = entry;
         if (piece.kind !== 'curve') {
             draw(start, end, false);
         } else {
@@ -661,7 +675,7 @@ function normalizeRun(points) {
         // Two pieces that no longer meet are a wall stepping from one line to
         // another. Drawn as a right angle, because that is what the artist
         // drew; a straight join between them would slant across the step.
-        const following = ends[index + 1];
+        const following = live[index + 1];
         if (!following) continue;
         const gap = following.start;
         if (gap.column === end.column && gap.row === end.row) continue;
