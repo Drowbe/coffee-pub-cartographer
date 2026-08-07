@@ -497,7 +497,9 @@ export class MappingWindow extends ToolWindowBase {
             rowCount,
             originColumn,
             originRow,
-            hatchCells: this._buildHatchCells(explored, originColumn, originRow),
+            hatchCells: this._buildHatchCells(
+                explored, originColumn, originRow, mappedGeometry.floorClipByCell
+            ),
             showParty: Boolean(trackedPosition),
             feetMapped: explored.size * (this.manager.state.gridDistance || 5)
         };
@@ -514,9 +516,24 @@ export class MappingWindow extends ToolWindowBase {
      * actually out there. Hatching a genuinely sealed vault would mean reading
      * undiscovered geometry, which the party could not know either.
      */
-    _buildHatchCells(explored, originColumn, originRow) {
+    _buildHatchCells(explored, originColumn, originRow, clipped) {
         const cells = [];
         const seen = new Set(explored);
+        // A square whose floor stops at a wall running through it needs rock
+        // behind the part that was cut away, or the cut shows bare paper --
+        // which reads as floor carrying on past the wall rather than as the
+        // wall being the end of it. Laid down first so the floor covers the
+        // side of it the party actually stands on.
+        for (const key of clipped?.keys() ?? []) {
+            const [column, row] = key.split(',').map(Number);
+            cells.push({
+                ring: 1,
+                gridColumn: column - originColumn + 1,
+                gridRow: row - originRow + 1,
+                patternX: column,
+                patternY: row
+            });
+        }
         let frontier = explored;
         for (let ring = 1; ring <= HATCH_RINGS; ring++) {
             const next = new Set();
