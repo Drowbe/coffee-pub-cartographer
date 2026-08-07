@@ -388,7 +388,8 @@ export class MappingWindow extends ToolWindowBase {
         const mappedGeometry = this._getMappedTileGeometry(
             explored,
             this.manager.atlas,
-            this.manager.state.secrets
+            this.manager.state.secrets,
+            this.manager.state.sides
         );
         // What the drawing made of the record. A square showing as bare rock is
         // either not in `floor` at all -- nothing revealed it -- or it is, and
@@ -612,7 +613,7 @@ export class MappingWindow extends ToolWindowBase {
      * complete outline rather than the fragments your sightlines happened to
      * touch.
      */
-    _getMappedTileGeometry(explored, atlas, discoveredSecrets) {
+    _getMappedTileGeometry(explored, atlas, discoveredSecrets, sides) {
         const segmentsByCell = new Map();
         const features = atlas?.features ?? {};
         // A secret door reads as ordinary wall until this party has walked it.
@@ -727,7 +728,7 @@ export class MappingWindow extends ToolWindowBase {
         const floorClipByCell = new Map();
         for (const [key, shapes] of wallShapesByCell) {
             const [column, row] = key.split(',').map(Number);
-            const clip = this._floorClip(shapes, { column, row }, explored, atlas);
+            const clip = this._floorClip(shapes, { column, row }, sides);
             if (clip) floorClipByCell.set(key, clip);
         }
         return {
@@ -776,43 +777,25 @@ export class MappingWindow extends ToolWindowBase {
      *
      * A map drawn on squares fills each explored square edge to edge, which
      * turns a curved corridor into a staircase of blocks -- the walls sweep
-     * round while the floor underneath them steps. So where a wall crosses a
+     * round while the floor beneath them steps. So where a wall crosses a
      * square, the floor is cut back to it: the square starts whole and each
-     * wall shaves off whatever lies on its far side.
+     * wall shaves off whatever lies beyond.
      *
-     * Which side is floor is the side the party is on: is there floor between
-     * them and the wall they can see? Then that is the floor.
-     *
-     * Answered with the squares around this one, but only the ones that can
-     * answer honestly. A square that a wall cuts through has a middle that may
-     * well be in the rock, so it cannot say which way is floor -- and asking it
-     * gets the wrong answer with total confidence. Squares no wall runs through
-     * are whole floor or whole rock, so an explored one is floor, and floor is
-     * on its side. They are asked first.
-     *
-     * Failing those, any explored neighbour not across a wall. Failing even
-     * that, any explored neighbour at all: it is still better evidence than
-     * this square's middle, which for a square buried in rock says the rock is
-     * the floor. The middle is the last resort, for a square with nothing
-     * explored beside it.
+     * Which side is floor is not worked out here. It was settled when the
+     * square was first seen, and is simply read back. Working it out at drawing
+     * time meant reading the squares around it, and those change as the party
+     * walks -- so the answer changed too, and a square would swap its floor for
+     * rock, or spill floor out past a wall, long after anyone had been near it.
+     * Recorded once, it cannot drift.
      */
-    _floorClip(shapes, cell, explored, atlas) {
-        const middle = { x: 50, y: 50 };
-        const around = [
-            { at: { x: -50, y: 50 }, key: `${cell.column - 1},${cell.row}`, wall: `e:${cell.column - 1},${cell.row}` },
-            { at: { x: 150, y: 50 }, key: `${cell.column + 1},${cell.row}`, wall: `e:${cell.column},${cell.row}` },
-            { at: { x: 50, y: -50 }, key: `${cell.column},${cell.row - 1}`, wall: `s:${cell.column},${cell.row - 1}` },
-            { at: { x: 50, y: 150 }, key: `${cell.column},${cell.row + 1}`, wall: `s:${cell.column},${cell.row}` }
-        ].filter(neighbour => explored.has(neighbour.key));
-        // Whole squares of floor, which cannot be wrong about where floor is.
-        const solid = around.filter(neighbour => !atlas?.split?.has(neighbour.key));
-        const reachable = around.filter(neighbour => !atlas?.barriers?.has(neighbour.wall));
-        // Asked in order of how much they can be trusted, and the first answer
-        // that is not a tie is taken. A tie is no answer: with whole floor on
-        // both sides of a wall the squares cannot say which side is which, but
-        // dropping to the next question -- which of them is not across it --
-        // can.
-        const asking = [solid, reachable, around];
+    _floorClip(shapes, cell, sides) {
+        const from = {
+            middle: { x: 50, y: 50 },
+            west: { x: -50, y: 50 },
+            east: { x: 150, y: 50 },
+            north: { x: 50, y: -50 },
+            south: { x: 50, y: 150 }
+        }[sides?.[`${cell.column},${cell.row}`] ?? 'middle'];
 
         let polygon = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
         let cut = false;
@@ -821,23 +804,11 @@ export class MappingWindow extends ToolWindowBase {
             const dy = shape.end.y - shape.start.y;
             if (!dx && !dy) continue;
             const side = point => ((point.x - shape.start.x) * dy) - ((point.y - shape.start.y) * dx);
-            let facing = 0;
-            for (const tier of asking) {
-                let vote = 0;
-                for (const neighbour of tier) vote += Math.sign(side(neighbour.at));
-                if (vote) {
-                    facing = Math.sign(vote);
-                    break;
-                }
-            }
-            // Nothing explored beside it at all. Its own middle is the last
-            // thing left to go on, and a wall straight through that says
-            // nothing either way, so it cuts nothing.
-            if (!facing) {
-                const centre = side(middle);
-                if (Math.abs(centre) < 0.5) continue;
-                facing = Math.sign(centre);
-            }
+            // A wall running exactly through the point the floor was seen from
+            // says nothing about which way it lies, so it cuts nothing.
+            const seen = side(from);
+            if (Math.abs(seen) < 0.5) continue;
+            const facing = Math.sign(seen);
             const clipped = [];
             for (let index = 0; index < polygon.length; index++) {
                 const from = polygon[index];

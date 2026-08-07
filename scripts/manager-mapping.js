@@ -28,8 +28,16 @@ const WINDOW_ID = `${MODULE.ID}-mapper`;
  * A record holds only what is genuinely the party's: where they have been, what
  * they found, and what they wrote on it. The scene's architecture is settled
  * from the walls themselves and never stored.
+ *
+ * 4 added the side each square's floor was seen from. A record without it is
+ * not merely missing a detail: every square it holds falls back to "the floor
+ * is under my middle", and for a square a wall cuts through, whose middle is
+ * very often inside that wall, this keeps exactly the wrong half. The map then
+ * shows floor spilling past its walls and rock where the floor is, and walking
+ * about cannot mend it, because the reveal never revisits a square it already
+ * has. So earlier records are dropped rather than carried forward.
  */
-const STATE_VERSION = 3;
+const STATE_VERSION = 4;
 /** How long an optimistic local deletion suppresses a map before it is reconciled. */
 const DELETE_TOMBSTONE_MS = 15000;
 /** The mutually exclusive states the mapper can be in. */
@@ -174,6 +182,7 @@ class MappingManager {
             // Secret doors this party has walked through. The atlas draws every
             // secret as ordinary wall until its id appears here.
             secrets: [],
+            sides: {},
             lastPosition: null,
             createdAt: 0,
             updatedAt: 0,
@@ -526,6 +535,7 @@ class MappingManager {
             secrets: Array.isArray(raw.secrets)
                 ? [...new Set(raw.secrets.filter(id => typeof id === 'string' && id))]
                 : [],
+            sides: this._normalizeSides(raw.sides),
             lastPosition: this._normalizePosition(raw.lastPosition),
             createdAt: Number(raw.createdAt) || Number(raw.updatedAt) || 0,
             updatedAt: Number(raw.updatedAt) || 0,
@@ -971,6 +981,18 @@ class MappingManager {
      * older client simply ignores the key, and a record written before floors
      * existed normalizes to none.
      */
+    /** Which way the floor lies in each square, as recorded when it was seen. */
+    _normalizeSides(sides) {
+        if (!sides || typeof sides !== 'object') return {};
+        const allowed = ['middle', 'north', 'south', 'east', 'west'];
+        const normalized = {};
+        for (const [key, side] of Object.entries(sides)) {
+            if (!/^-?\d+,-?\d+$/.test(key) || !allowed.includes(side)) continue;
+            normalized[key] = side;
+        }
+        return normalized;
+    }
+
     _normalizeFloors(floors) {
         if (!floors || typeof floors !== 'object') return {};
         const normalized = {};
@@ -1334,6 +1356,12 @@ class MappingManager {
         const existing = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
         const explored = new Set(existing.explored);
         const secrets = new Set(existing.secrets ?? []);
+        // Which way the floor lies in each square, settled when the square was
+        // first seen and never revisited. Worked out afresh at drawing time it
+        // depended on which neighbours happened to be explored, so it changed
+        // as the party walked -- and a square would quietly swap its floor for
+        // rock, or spill floor out past a wall.
+        const sides = { ...(existing.sides ?? {}) };
         let candidateSquares = 0;
         let visibleSquares = 0;
         let enclosedSquares = 0;
@@ -1355,7 +1383,13 @@ class MappingManager {
             // so the party can be looking straight at the floor in it and the
             // square still answers no.
             const sighted = revealKeys.size;
-            for (const key of wallFringe(this.atlas, revealKeys, candidates)) revealKeys.add(key);
+            // A square whose middle the party saw has its floor under that
+            // middle, and nothing later can change that.
+            for (const key of revealKeys) sides[key] ??= 'middle';
+            for (const [key, from] of wallFringe(this.atlas, revealKeys, candidates)) {
+                revealKeys.add(key);
+                sides[key] ??= from;
+            }
             enclosedSquares += revealKeys.size - sighted;
             for (const key of revealKeys) explored.add(key);
 
@@ -1402,6 +1436,8 @@ class MappingManager {
         const latest = this.records.get(id) ?? existing;
         const combinedExplored = new Set([...(latest.explored ?? []), ...explored]);
         for (const secretId of latest.secrets ?? []) secrets.add(secretId);
+        // Whatever was settled first stands, so this can only ever grow.
+        const combinedSides = { ...sides, ...(latest.sides ?? {}) };
         // Squares that have just joined an area adopt the surface already chosen
         // for it, so revealing the rest of a room does not leave it half
         // surfaced. New areas stay default until they are named.
@@ -1420,6 +1456,7 @@ class MappingManager {
             explored: [...combinedExplored],
             floors,
             secrets: [...secrets],
+            sides: combinedSides,
             lastPosition: position,
             createdAt: latest.createdAt || Date.now(),
             updatedAt: Date.now(),
@@ -1767,6 +1804,7 @@ class MappingManager {
                 symbols: [],
                 floors: {},
                 secrets: [],
+                sides: {},
                 lastPosition: null,
                 updatedAt: Date.now(),
                 updatedBy: user.id

@@ -207,14 +207,20 @@ function normalizeFeatures(raw) {
  */
 function wallFringe(atlas, seen, reach) {
     const within = reach instanceof Set ? reach : new Set(reach ?? []);
-    const fringe = new Set();
+    const fringe = new Map();
     for (const key of seen) {
         const [column, row] = key.split(',').map(Number);
         if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
-        for (const [columnOffset, rowOffset] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        for (const [columnOffset, rowOffset, back] of [
+            [0, -1, 'south'], [1, 0, 'west'], [0, 1, 'north'], [-1, 0, 'east']
+        ]) {
             const edge = `${column + columnOffset},${row + rowOffset}`;
-            if (seen.has(edge) || !within.has(edge)) continue;
-            if (atlas?.split?.has(edge)) fringe.add(edge);
+            if (seen.has(edge) || fringe.has(edge) || !within.has(edge)) continue;
+            // Which way the floor lies, recorded now rather than worked out
+            // later: the party is standing over there, so that is the side of
+            // the wall the floor is on. Nothing about this square can say so
+            // afterwards -- its own middle is very likely inside the wall.
+            if (atlas?.split?.has(edge)) fringe.set(edge, back);
         }
     }
     return fringe;
