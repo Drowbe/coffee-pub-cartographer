@@ -7,10 +7,10 @@ import { cartographerToolbar } from './manager-toolbar.js';
 import { socketManager } from './manager-sockets.js';
 import {
     contiguousFloorRegion,
-    enclosedRegion,
     gridTravelPath,
     propagateFloors,
-    visibleRevealKeys
+    visibleRevealKeys,
+    wallFringe
 } from './utils-mapping.js';
 import { buildSceneAtlas, EMPTY_ATLAS, secretsCrossedBy } from './atlas-mapping.js';
 import { notify } from './utils-toast.js';
@@ -1349,14 +1349,13 @@ class MappingManager {
             // ray may hit it even though the token is standing there. The
             // occupied square is therefore always known.
             revealKeys.add(`${step.column},${step.row}`);
-            // And so is the rest of the space they are standing in. Sightlines
-            // alone leave holes wherever a wall clips a corner off a square,
-            // because the middle of that square is inside the wall -- which in
-            // a curved corridor is nearly every square. The walls say where the
-            // floor is; there is no need to check each flagstone for a view of
-            // it.
+            // Plus the half-squares at the walls of what they can see. Seeing
+            // a square means seeing its middle, which is the wrong question for
+            // a square a wall runs through: its middle may be inside the wall,
+            // so the party can be looking straight at the floor in it and the
+            // square still answers no.
             const sighted = revealKeys.size;
-            for (const key of enclosedRegion(this.atlas, step, candidates)) revealKeys.add(key);
+            for (const key of wallFringe(this.atlas, revealKeys, candidates)) revealKeys.add(key);
             enclosedSquares += revealKeys.size - sighted;
             for (const key of revealKeys) explored.add(key);
 

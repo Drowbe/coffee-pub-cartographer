@@ -190,56 +190,34 @@ function normalizeFeatures(raw) {
 }
 
 /**
- * The floor around the party, out to as far as they can see, bounded by the
- * walls of the room they are standing in.
+ * The half-squares at the walls of what the party can see.
  *
- * Sampling each square's middle for a clear line to the party answers the wrong
- * question. Walk into a square room and nobody checks each flagstone: the walls
- * are plainly there, and the floor they enclose is plainly floor. But a square
- * that a wall clips a corner off has its middle inside that wall, so the
- * sampling threw it away -- and a curved corridor, where nearly every square is
- * clipped, came out as a chequerboard of holes in ground the party had walked
- * straight down.
+ * Seeing a square means seeing the middle of it, and that is the right question
+ * for a square of open floor. It is the wrong question for a square a wall runs
+ * through: the middle of one of those may well be inside the wall, so the party
+ * can be standing against it, looking straight at the floor in it, and the
+ * square still answers no. That is what left the far side of a curved corridor
+ * reading as solid rock until it had been walked square by square.
  *
- * So the floor is taken from the walls instead. Everything reachable from the
- * party's own square without crossing one is the space they are in, and they
- * can see it. Doorways count as walls here, exactly as they do for flooring, so
- * this stops at the threshold and never spills into the next room.
+ * So the squares the walls cut through are taken on wherever they touch
+ * something seen, and the drawing cuts each back to its share. Bounded by sight
+ * rather than by walls alone: an earlier version filled everything the walls
+ * enclosed, which poured round corners and handed over rooms nobody had looked
+ * at.
  */
-function enclosedRegion(atlas, start, reach, limit = 4000) {
+function wallFringe(atlas, seen, reach) {
     const within = reach instanceof Set ? reach : new Set(reach ?? []);
-    const startKey = `${start.column},${start.row}`;
-    const region = new Set([startKey]);
-    const queue = [start];
-    while (queue.length && region.size < limit) {
-        const current = queue.shift();
-        const currentKey = `${current.column},${current.row}`;
-        for (const [columnOffset, rowOffset] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
-            const next = { column: current.column + columnOffset, row: current.row + rowOffset };
-            const nextKey = `${next.column},${next.row}`;
-            if (region.has(nextKey) || !within.has(nextKey)) continue;
-            if (boundaryBlocks(atlas, currentKey, current, next)) continue;
-            region.add(nextKey);
-            queue.push(next);
-        }
-    }
-
-    // A wall that cuts a square in half leaves floor on this side of it, and
-    // that floor is part of the room whatever the square's middle is inside.
-    // The flood can never reach those squares -- stepping to a middle that sits
-    // in the rock means crossing the wall to get there -- so they are taken on
-    // at the end, one ring only, and the drawing cuts each back to its share.
-    // Without them the far side of a curved corridor read as solid rock, and
-    // the party had to walk it square by square to prove otherwise.
-    for (const key of [...region]) {
+    const fringe = new Set();
+    for (const key of seen) {
         const [column, row] = key.split(',').map(Number);
+        if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
         for (const [columnOffset, rowOffset] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
             const edge = `${column + columnOffset},${row + rowOffset}`;
-            if (region.has(edge) || !within.has(edge)) continue;
-            if (atlas?.split?.has(edge)) region.add(edge);
+            if (seen.has(edge) || !within.has(edge)) continue;
+            if (atlas?.split?.has(edge)) fringe.add(edge);
         }
     }
-    return region;
+    return fringe;
 }
 
 /**
@@ -337,12 +315,12 @@ function propagateFloors(exploredKeys, atlas, floors, addedKeys) {
 export {
     clipSegmentToCell,
     contiguousFloorRegion,
-    enclosedRegion,
     directionBetween,
     gridTravelPath,
     normalizeFeatures,
     oppositeDirection,
     propagateFloors,
     visibleFromToken,
-    visibleRevealKeys
+    visibleRevealKeys,
+    wallFringe
 };
