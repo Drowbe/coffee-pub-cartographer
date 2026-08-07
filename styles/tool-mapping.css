@@ -843,10 +843,15 @@
     flex: 0 0 auto;
 }
 
+/* Foundry styles headings for its own window chrome, which is dark, so the
+   heading arrived light on our light surface. Everything else in the list takes
+   its colour from the tool theme; the heading has to say so explicitly to win
+   against that. */
 .cartographer-mapping-list-header h2 {
     margin: 0;
     border: 0;
     font-size: 1.05rem;
+    color: var(--blacksmith-tool-text);
 }
 
 .cartographer-mapping-item-actions {

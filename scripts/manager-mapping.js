@@ -96,9 +96,9 @@ class MappingManager {
         this._selectionFrame = null;
         this._closingWindow = false;
         this._settleTimer = null;
-        // The canonical architecture of the current scene. Derived, never
-        // saved, and rebuilt whenever the scene's walls change.
-        this.atlas = EMPTY_ATLAS;
+        // The canonical architecture of each scene a map has been opened for.
+        // Derived, never saved, and thrown away whenever walls change.
+        this._atlases = new Map();
         this._atlasFrame = null;
     }
 
@@ -110,19 +110,43 @@ class MappingManager {
      * any reveal is processed or any map is drawn.
      */
     rebuildAtlas() {
+        this._atlases.clear();
+        return this.atlasFor(canvas?.scene?.id);
+    }
+
+    /**
+     * The architecture of one scene, which need not be the scene in play.
+     *
+     * A map can be opened from anywhere -- looking at the tavern while standing
+     * in the dungeon -- and it has to be drawn with its own walls. Reading the
+     * scene under the token instead drew the dungeon across the tavern.
+     *
+     * Kept per scene and thrown away whenever any walls change, since which
+     * scene was edited is not worth tracking for a pass this cheap.
+     */
+    atlasFor(sceneId) {
+        if (!sceneId) return EMPTY_ATLAS;
+        if (this._atlases.has(sceneId)) return this._atlases.get(sceneId);
+        const scene = game.scenes?.get(sceneId);
+        let atlas = EMPTY_ATLAS;
         try {
-            this.atlas = buildSceneAtlas(canvas?.scene) ?? EMPTY_ATLAS;
+            atlas = buildSceneAtlas(scene) ?? EMPTY_ATLAS;
         } catch (error) {
-            console.error(`${MODULE.NAME}: Failed to read the scene's walls`, error);
-            this.atlas = EMPTY_ATLAS;
+            console.error(`${MODULE.NAME}: Failed to read the walls of ${scene?.name ?? sceneId}`, error);
         }
+        this._atlases.set(sceneId, atlas);
         this._debug('Mapping | Atlas', [
-            `scene=${canvas?.scene?.name ?? '-'}`,
-            `edges=${Object.keys(this.atlas.features).length}`,
-            `lines=${this.atlas.lines.length}`,
-            `secrets=${this.atlas.secrets.length}`
+            `scene=${scene?.name ?? sceneId}`,
+            `edges=${Object.keys(atlas.features).length}`,
+            `lines=${atlas.lines.length}`,
+            `secrets=${atlas.secrets.length}`
         ].join('  '));
-        return this.atlas;
+        return atlas;
+    }
+
+    /** The architecture of the scene in play, which is what recording uses. */
+    get atlas() {
+        return this.atlasFor(canvas?.scene?.id);
     }
 
     /**
@@ -225,7 +249,7 @@ class MappingManager {
         this._selectionFrame = null;
         if (this._atlasFrame) cancelAnimationFrame(this._atlasFrame);
         this._atlasFrame = null;
-        this.atlas = EMPTY_ATLAS;
+        this._atlases.clear();
         this.window = null;
     }
 
@@ -1907,7 +1931,7 @@ class MappingManager {
             // have not discovered.
             const region = contiguousFloorRegion(
                 new Set(record.explored),
-                this.atlas,
+                this.atlasFor(record.sceneId),
                 { column, row },
                 this._normalizeSides(record.sides)
             );
@@ -1942,7 +1966,7 @@ class MappingManager {
                 // this a square added by hand stayed bare while everything
                 // around it was surfaced, which reads as the correction not
                 // having worked.
-                floors = propagateFloors(explored, this.atlas, floors, [key], sides);
+                floors = propagateFloors(explored, this.atlasFor(record.sceneId), floors, [key], sides);
             } else {
                 hidden.add(key);
                 explored.delete(key);

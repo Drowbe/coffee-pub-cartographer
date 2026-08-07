@@ -176,37 +176,52 @@ function classifyWall(document) {
 // Grid geometry
 // ------------------------------------------------------------------
 
-function gridSize() {
-    return Math.min(canvas.grid.sizeX ?? canvas.grid.size, canvas.grid.sizeY ?? canvas.grid.size);
-}
-
-function cellCenter(column, row) {
-    if (typeof canvas.grid.getCenterPoint === 'function') {
-        const center = canvas.grid.getCenterPoint({ i: row, j: column });
-        if (Number.isFinite(center?.x) && Number.isFinite(center?.y)) return center;
+/**
+ * How to read a scene's grid, whether or not it is the scene on screen.
+ *
+ * A map can be opened while standing somewhere else entirely, and its walls
+ * have to be read from *its* scene rather than from the one under the token --
+ * otherwise looking at a map of the tavern draws the dungeon's walls across it.
+ * The scene on screen is read through Foundry's own grid, which is exact and
+ * accounts for anything unusual about it. Any other scene is read from its
+ * recorded square size: a square grid begins at the scene's own origin, so that
+ * is a division.
+ */
+function gridOf(scene) {
+    const onScreen = scene?.id && scene.id === canvas?.scene?.id && canvas?.grid;
+    if (onScreen) {
+        const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
+        const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
+        return {
+            size: Math.min(sizeX, sizeY),
+            toGrid(point) {
+                const offset = canvas.grid.getOffset({ x: point.x, y: point.y });
+                const column = Number(offset.j ?? offset.x);
+                const row = Number(offset.i ?? offset.y);
+                if (!Number.isInteger(column) || !Number.isInteger(row)) return null;
+                const centre = typeof canvas.grid.getCenterPoint === 'function'
+                    ? canvas.grid.getCenterPoint({ i: row, j: column })
+                    : { x: (column + 0.5) * sizeX, y: (row + 0.5) * sizeY };
+                return {
+                    column: column + 0.5 + ((point.x - centre.x) / sizeX),
+                    row: row + 0.5 + ((point.y - centre.y) / sizeY)
+                };
+            }
+        };
     }
-    const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
-    const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
-    return { x: (column + 0.5) * sizeX, y: (row + 0.5) * sizeY };
+    const size = Number(scene?.grid?.size) || Number(canvas?.grid?.size) || 100;
+    return {
+        size,
+        toGrid: point => ({ column: point.x / size, row: point.y / size })
+    };
 }
 
 /**
- * A canvas point as a fractional grid position, so column 10.5 is the middle of
- * column 10. Taken from the containing cell rather than by dividing, so a grid
- * whose origin is offset from the canvas origin still lands correctly.
+ * A canvas point on the scene in play, as a fractional grid position, so column
+ * 10.5 is the middle of column 10.
  */
 function toGrid(point) {
-    const offset = canvas.grid.getOffset({ x: point.x, y: point.y });
-    const column = Number(offset.j ?? offset.x);
-    const row = Number(offset.i ?? offset.y);
-    if (!Number.isInteger(column) || !Number.isInteger(row)) return null;
-    const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
-    const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
-    const center = cellCenter(column, row);
-    return {
-        column: column + 0.5 + ((point.x - center.x) / sizeX),
-        row: row + 0.5 + ((point.y - center.y) / sizeY)
-    };
+    return gridOf(canvas?.scene).toGrid(point);
 }
 
 /** A hundredth of a square: finer than a foot on a five-foot grid. */
@@ -258,8 +273,8 @@ function degreesOffAxis(deltaColumn, deltaRow) {
  * Only documents that genuinely share an endpoint are joined, so two wall runs
  * with an archway between them are never chained across the opening.
  */
-function connectedRuns(documents) {
-    const tolerance = Math.max(1, gridSize() * 0.08);
+function connectedRuns(documents, grid) {
+    const tolerance = Math.max(1, grid.size * 0.08);
     const segments = documents.map(wallSegment).filter(Boolean);
 
     // Endpoints bucketed on a tolerance-sized lattice: searching for joins by
@@ -806,8 +821,8 @@ function farthestEndpointPair(segments) {
  * -- a curved jamb, a decorative frame. Collapse those fragments to the extent
  * of the whole cluster so one doorway yields one opening.
  */
-function openingClusters(documents) {
-    const size = gridSize();
+function openingClusters(documents, grid) {
+    const size = grid.size;
     const joinDistance = size * 0.75;
     const maxSpan = size * 2.6;
     const segments = documents.map(wallSegment).filter(Boolean);
@@ -855,7 +870,9 @@ function addFeature(features, key, code) {
  * Read every wall in the scene and settle the architecture in one pass.
  */
 function buildSceneAtlas(scene = canvas?.scene) {
-    if (!scene || !canvas?.ready || !canvas.grid) return EMPTY_ATLAS;
+    if (!scene || !canvas?.ready) return EMPTY_ATLAS;
+    const grid = gridOf(scene);
+    if (!grid.size) return EMPTY_ATLAS;
 
     const documents = [...(scene.walls ?? [])];
     const features = {};
@@ -883,8 +900,8 @@ function buildSceneAtlas(scene = canvas?.scene) {
     }
 
     // -- Structural walls -------------------------------------------------
-    for (const run of connectedRuns(structural)) {
-        const points = runPolyline(run).map(toGrid);
+    for (const run of connectedRuns(structural, grid)) {
+        const points = runPolyline(run).map(grid.toGrid);
         if (points.some(point => !point)) continue;
         const normalized = normalizeRun(points);
         for (const edge of normalized.edges) addFeature(features, edge.key, `wall:${edge.direction}`);
@@ -893,8 +910,8 @@ function buildSceneAtlas(scene = canvas?.scene) {
 
     // -- Doors and windows ------------------------------------------------
     for (const [feature, group] of openings) {
-        for (const cluster of openingClusters(group)) {
-            const [from, to] = cluster.extent.map(toGrid);
+        for (const cluster of openingClusters(group, grid)) {
+            const [from, to] = cluster.extent.map(grid.toGrid);
             if (!from || !to) continue;
             for (const edge of openingEdges(from, to)) {
                 addFeature(features, edge.key, `${feature}:${edge.direction}`);
@@ -906,8 +923,8 @@ function buildSceneAtlas(scene = canvas?.scene) {
     // Drawn as ordinary wall until the party crosses one. The atlas records
     // which boundaries belong to which secret so discovery can swap them for
     // the symbol without re-deriving anything.
-    for (const cluster of openingClusters(secretDocuments)) {
-        const [from, to] = cluster.extent.map(toGrid);
+    for (const cluster of openingClusters(secretDocuments, grid)) {
+        const [from, to] = cluster.extent.map(grid.toGrid);
         if (!from || !to) continue;
         const edges = openingEdges(from, to);
         if (!edges.length) continue;

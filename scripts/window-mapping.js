@@ -207,18 +207,14 @@ export class MappingWindow extends ToolWindowBase {
 
     _buildTopActions(model) {
         if (this.viewMode === 'list') {
+            // Only the view toggle. Making a map is what the card at the head
+            // of the list is for -- a second way to do it in the chrome meant
+            // the card looked optional, and it was the one that named the scene.
             const buttons = [this._chromeButton({
                 action: 'toggle-list',
                 icon: 'fa-solid fa-map',
                 label: model.viewMapLabel
             })];
-            if (model.canAdd) {
-                buttons.push(this._chromeButton({
-                    action: 'add-map',
-                    icon: 'fa-solid fa-plus',
-                    label: model.addMapLabel
-                }));
-            }
             return `<span class="cartographer-mapping-chrome-actions is-primary">${buttons.join('')}</span>`;
         }
 
@@ -357,17 +353,21 @@ export class MappingWindow extends ToolWindowBase {
             return {
                 isListView: true,
                 maps,
-                canAdd: this.manager.canRecordCurrentMap(),
                 listEmpty: maps.length === 0,
                 listEmptyMessage: game.i18n.localize(`${MODULE.ID}.mapping.noMaps`),
                 // Offered whenever this scene has no map they could record
                 // into. Shown even without a token selected, because the
                 // create action explains what is missing better than a hidden
                 // card does.
-                showCreateCard: !this.manager.hasManageableMapForCurrentScene(),
+                // Always offered. It used to appear only when this scene had
+                // no map the reader could record into, which meant a GM -- who
+                // can record into anyone's -- never saw it once one map
+                // existed, and had no way to start a second.
+                showCreateCard: true,
                 createTitle: game.i18n.localize(`${MODULE.ID}.mapping.createForScene`),
-                createHint: game.i18n.localize(`${MODULE.ID}.mapping.createForSceneHint`),
-                addMapLabel: game.i18n.localize(`${MODULE.ID}.mapping.addMap`),
+                createHint: game.i18n.format(`${MODULE.ID}.mapping.createForSceneHint`, {
+                    scene: canvas?.scene?.name ?? game.i18n.localize(`${MODULE.ID}.mapping.thisScene`)
+                }),
                 viewMapLabel: game.i18n.localize(`${MODULE.ID}.mapping.viewMap`),
                 renameLabel: game.i18n.localize(`${MODULE.ID}.mapping.rename`),
                 deleteLabel: game.i18n.localize(`${MODULE.ID}.mapping.deleteMap`),
@@ -390,7 +390,8 @@ export class MappingWindow extends ToolWindowBase {
         const trackedPosition = this.manager.getTrackedPositionForCurrentMap();
         const mappedGeometry = this._getMappedTileGeometry(
             explored,
-            this.manager.atlas,
+            // The map's own scene, which is not always the one in play.
+            this.manager.atlasFor(this.manager.state.sceneId),
             this.manager.state.secrets,
             this.manager.state.sides
         );
