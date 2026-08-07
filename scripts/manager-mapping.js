@@ -7,6 +7,7 @@ import { cartographerToolbar } from './manager-toolbar.js';
 import { socketManager } from './manager-sockets.js';
 import {
     contiguousFloorRegion,
+    enclosedRegion,
     gridTravelPath,
     propagateFloors,
     visibleRevealKeys
@@ -1347,6 +1348,13 @@ class MappingManager {
             // ray may hit it even though the token is standing there. The
             // occupied square is therefore always known.
             revealKeys.add(`${step.column},${step.row}`);
+            // And so is the rest of the space they are standing in. Sightlines
+            // alone leave holes wherever a wall clips a corner off a square,
+            // because the middle of that square is inside the wall -- which in
+            // a curved corridor is nearly every square. The walls say where the
+            // floor is; there is no need to check each flagstone for a view of
+            // it.
+            for (const key of enclosedRegion(this.atlas, step, candidates)) revealKeys.add(key);
             for (const key of revealKeys) explored.add(key);
 
             // Walking a secret door is how it is found. Tested per leg against
@@ -1394,7 +1402,7 @@ class MappingManager {
         const previouslyExplored = new Set(latest.explored ?? []);
         const floors = propagateFloors(
             combinedExplored,
-            this.atlas.features,
+            this.atlas,
             latest.floors,
             [...combinedExplored].filter(key => !previouslyExplored.has(key))
         );
@@ -1736,7 +1744,7 @@ class MappingManager {
             // have not discovered.
             const region = contiguousFloorRegion(
                 new Set(record.explored),
-                this.atlas.features,
+                this.atlas,
                 { column, row }
             );
             const floors = { ...this._normalizeFloors(record.floors) };

@@ -107,7 +107,8 @@ const EMPTY_ATLAS = Object.freeze({
     sceneId: null,
     features: Object.freeze({}),
     lines: Object.freeze([]),
-    secrets: Object.freeze([])
+    secrets: Object.freeze([]),
+    barriers: Object.freeze(new Set())
 });
 
 // ------------------------------------------------------------------
@@ -915,7 +916,41 @@ function buildSceneAtlas(scene = canvas?.scene) {
         });
     }
 
-    return { sceneId: scene.id, features, lines, secrets };
+    return { sceneId: scene.id, features, lines, secrets, barriers: barriersOf(lines) };
+}
+
+/**
+ * Which steps between neighbouring squares a wall stands in the way of.
+ *
+ * The boundary lattice says this for the walls that lie on it, simply by being
+ * on it. A curve or an angled wall does not lie on it -- that is the whole
+ * point of them -- so nothing recorded that they block anything, and everything
+ * reading the lattice walked straight through them. Flooring a room then poured
+ * out through the curved wall and filled whatever lay beyond.
+ *
+ * A step is blocked when the line from one square's middle to the next crosses
+ * the wall, which is the same question as whether you could walk it.
+ */
+function barriersOf(lines) {
+    const barriers = new Set();
+    for (const [[x0, y0], [x1, y1]] of lines) {
+        const from = { x: x0, y: y0 };
+        const to = { x: x1, y: y1 };
+        const firstColumn = Math.floor(Math.min(x0, x1)) - 1;
+        const lastColumn = Math.floor(Math.max(x0, x1));
+        const firstRow = Math.floor(Math.min(y0, y1)) - 1;
+        const lastRow = Math.floor(Math.max(y0, y1));
+        for (let row = firstRow; row <= lastRow; row++) {
+            for (let column = firstColumn; column <= lastColumn; column++) {
+                const middle = { x: column + 0.5, y: row + 0.5 };
+                const east = { x: column + 1.5, y: row + 0.5 };
+                const south = { x: column + 0.5, y: row + 1.5 };
+                if (segmentsIntersect(middle, east, from, to)) barriers.add(`e:${column},${row}`);
+                if (segmentsIntersect(middle, south, from, to)) barriers.add(`s:${column},${row}`);
+            }
+        }
+    }
+    return barriers;
 }
 
 // ------------------------------------------------------------------

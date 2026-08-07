@@ -190,6 +190,43 @@ function normalizeFeatures(raw) {
 }
 
 /**
+ * The floor around the party, out to as far as they can see, bounded by the
+ * walls of the room they are standing in.
+ *
+ * Sampling each square's middle for a clear line to the party answers the wrong
+ * question. Walk into a square room and nobody checks each flagstone: the walls
+ * are plainly there, and the floor they enclose is plainly floor. But a square
+ * that a wall clips a corner off has its middle inside that wall, so the
+ * sampling threw it away -- and a curved corridor, where nearly every square is
+ * clipped, came out as a chequerboard of holes in ground the party had walked
+ * straight down.
+ *
+ * So the floor is taken from the walls instead. Everything reachable from the
+ * party's own square without crossing one is the space they are in, and they
+ * can see it. Doorways count as walls here, exactly as they do for flooring, so
+ * this stops at the threshold and never spills into the next room.
+ */
+function enclosedRegion(atlas, start, reach, limit = 4000) {
+    const within = reach instanceof Set ? reach : new Set(reach ?? []);
+    const startKey = `${start.column},${start.row}`;
+    const region = new Set([startKey]);
+    const queue = [start];
+    while (queue.length && region.size < limit) {
+        const current = queue.shift();
+        const currentKey = `${current.column},${current.row}`;
+        for (const [columnOffset, rowOffset] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+            const next = { column: current.column + columnOffset, row: current.row + rowOffset };
+            const nextKey = `${next.column},${next.row}`;
+            if (region.has(nextKey) || !within.has(nextKey)) continue;
+            if (boundaryBlocks(atlas, currentKey, current, next)) continue;
+            region.add(nextKey);
+            queue.push(next);
+        }
+    }
+    return region;
+}
+
+/**
  * The explored squares reachable from a starting square without crossing a
  * recorded boundary — one room, in other words.
  *
@@ -198,7 +235,7 @@ function normalizeFeatures(raw) {
  * corridor it opens onto. Reads the atlas only where the party has explored, so
  * flooring can never spread through a wall they have not discovered yet.
  */
-function contiguousFloorRegion(exploredKeys, features, start, limit = 4000) {
+function contiguousFloorRegion(exploredKeys, atlas, start, limit = 4000) {
     const explored = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
     const startKey = `${start.column},${start.row}`;
     if (!explored.has(startKey)) return [];
@@ -213,7 +250,7 @@ function contiguousFloorRegion(exploredKeys, features, start, limit = 4000) {
             const next = { column: current.column + columnOffset, row: current.row + rowOffset };
             const nextKey = `${next.column},${next.row}`;
             if (seen.has(nextKey) || !explored.has(nextKey)) continue;
-            if (boundaryBlocks(features, currentKey, current, next)) continue;
+            if (boundaryBlocks(atlas, currentKey, current, next)) continue;
             seen.add(nextKey);
             region.push(nextKey);
             queue.push(next);
@@ -222,14 +259,25 @@ function contiguousFloorRegion(exploredKeys, features, start, limit = 4000) {
     return region;
 }
 
-function boundaryBlocks(features, fromKey, from, to) {
+function boundaryBlocks(atlas, fromKey, from, to) {
     const direction = directionBetween(from, to);
     if (!direction) return true;
+    const features = atlas?.features;
     const opposite = oppositeDirection(direction);
     const here = features?.[fromKey] ?? [];
     const there = features?.[`${to.column},${to.row}`] ?? [];
-    return here.some(code => code.endsWith(`:${direction}`))
-        || there.some(code => code.endsWith(`:${opposite}`));
+    if (here.some(code => code.endsWith(`:${direction}`))) return true;
+    if (there.some(code => code.endsWith(`:${opposite}`))) return true;
+    // Curves and angled walls do not sit on the lattice, so they say they are
+    // in the way separately. Without this a room's flooring ran out through
+    // every curved wall it had.
+    const step = {
+        east: `e:${from.column},${from.row}`,
+        west: `e:${to.column},${to.row}`,
+        south: `s:${from.column},${from.row}`,
+        north: `s:${to.column},${to.row}`
+    }[direction];
+    return Boolean(atlas?.barriers?.has(step));
 }
 
 /**
@@ -241,7 +289,7 @@ function boundaryBlocks(features, fromKey, from, to) {
  * party has recorded, which is what stops it running out of a doorway: the next
  * room is a new area and stays default until it is named.
  */
-function propagateFloors(exploredKeys, features, floors, addedKeys) {
+function propagateFloors(exploredKeys, atlas, floors, addedKeys) {
     const explored = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
     const next = { ...(floors ?? {}) };
     const pending = [...new Set(addedKeys ?? [])].filter(key => explored.has(key) && !next[key]);
@@ -260,7 +308,7 @@ function propagateFloors(exploredKeys, features, floors, addedKeys) {
                 const neighbour = { column: column + columnOffset, row: row + rowOffset };
                 const neighbourKey = `${neighbour.column},${neighbour.row}`;
                 if (!next[neighbourKey] || !explored.has(neighbourKey)) continue;
-                if (boundaryBlocks(features, key, cell, neighbour)) continue;
+                if (boundaryBlocks(atlas, key, cell, neighbour)) continue;
                 next[key] = next[neighbourKey];
                 changed = true;
                 break;
@@ -273,6 +321,7 @@ function propagateFloors(exploredKeys, features, floors, addedKeys) {
 export {
     clipSegmentToCell,
     contiguousFloorRegion,
+    enclosedRegion,
     directionBetween,
     gridTravelPath,
     normalizeFeatures,

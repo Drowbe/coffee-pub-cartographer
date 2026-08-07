@@ -718,7 +718,7 @@ export class MappingWindow extends ToolWindowBase {
         const floorClipByCell = new Map();
         for (const [key, shapes] of wallShapesByCell) {
             const [column, row] = key.split(',').map(Number);
-            const clip = this._floorClip(shapes, { column, row }, explored);
+            const clip = this._floorClip(shapes, { column, row }, explored, atlas?.barriers);
             if (clip) floorClipByCell.set(key, clip);
         }
         return {
@@ -755,18 +755,23 @@ export class MappingWindow extends ToolWindowBase {
      * merely stood in is explored whether or not its middle is, so a token
      * hugging the inside of a bend occupies squares whose middles are in the
      * rock -- and cutting to the middle then kept the rock and threw away the
-     * floor. Their neighbours cannot be wrong that way, because a neighbour is
-     * only explored if it can be walked. The middle is kept as a tie-break for
-     * a square with nothing explored beside it.
+     * floor.
+     *
+     * Nor is any explored neighbour, for the same reason: a neighbour's middle
+     * can be in the rock too, and then it points the wrong way just as
+     * confidently. Only a neighbour the party could have *walked to* is safe,
+     * so a neighbour with a wall between it and this square does not get a say.
+     * That is what the barriers are for. The middle is kept as a tie-break for
+     * a square with nothing walkable beside it.
      */
-    _floorClip(shapes, cell, explored) {
+    _floorClip(shapes, cell, explored, barriers) {
         const middle = { x: 50, y: 50 };
         const beside = [
-            { at: { x: -50, y: 50 }, key: `${cell.column - 1},${cell.row}` },
-            { at: { x: 150, y: 50 }, key: `${cell.column + 1},${cell.row}` },
-            { at: { x: 50, y: -50 }, key: `${cell.column},${cell.row - 1}` },
-            { at: { x: 50, y: 150 }, key: `${cell.column},${cell.row + 1}` }
-        ].filter(neighbour => explored.has(neighbour.key));
+            { at: { x: -50, y: 50 }, key: `${cell.column - 1},${cell.row}`, wall: `e:${cell.column - 1},${cell.row}` },
+            { at: { x: 150, y: 50 }, key: `${cell.column + 1},${cell.row}`, wall: `e:${cell.column},${cell.row}` },
+            { at: { x: 50, y: -50 }, key: `${cell.column},${cell.row - 1}`, wall: `s:${cell.column},${cell.row - 1}` },
+            { at: { x: 50, y: 150 }, key: `${cell.column},${cell.row + 1}`, wall: `s:${cell.column},${cell.row}` }
+        ].filter(neighbour => explored.has(neighbour.key) && !barriers?.has(neighbour.wall));
         let polygon = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
         let cut = false;
         for (const shape of shapes) {
