@@ -12,7 +12,7 @@ import {
     visibleRevealKeys,
     wallFringe
 } from './utils-mapping.js';
-import { buildSceneAtlas, EMPTY_ATLAS, secretsCrossedBy } from './atlas-mapping.js';
+import { buildSceneAtlas, EMPTY_ATLAS, secretsCrossedBy, toGrid } from './atlas-mapping.js';
 import { notify } from './utils-toast.js';
 import {
     MAPPING_ANNOTATED_SYMBOLS,
@@ -984,11 +984,12 @@ class MappingManager {
     /** Which way the floor lies in each square, as recorded when it was seen. */
     _normalizeSides(sides) {
         if (!sides || typeof sides !== 'object') return {};
-        const allowed = ['middle', 'north', 'south', 'east', 'west'];
         const normalized = {};
-        for (const [key, side] of Object.entries(sides)) {
-            if (!/^-?\d+,-?\d+$/.test(key) || !allowed.includes(side)) continue;
-            normalized[key] = side;
+        for (const [key, at] of Object.entries(sides)) {
+            if (!/^-?\d+,-?\d+$/.test(key) || !Array.isArray(at) || at.length !== 2) continue;
+            const point = at.map(Number);
+            if (!point.every(Number.isFinite)) continue;
+            normalized[key] = point;
         }
         return normalized;
     }
@@ -1370,27 +1371,38 @@ class MappingManager {
             const step = path[index];
             const sampleToken = this._tokenAtCoordinates(tokenDocument, step);
             const candidates = this._revealKeys(step);
-            const revealKeys = visibleRevealKeys(sampleToken, candidates);
+            const seen = visibleRevealKeys(sampleToken, candidates);
             candidateSquares += candidates.length;
-            visibleSquares += revealKeys.size;
-            // A wall can cross the same square as the token, so the cell-centre
-            // ray may hit it even though the token is standing there. The
-            // occupied square is therefore always known.
-            revealKeys.add(`${step.column},${step.row}`);
-            // Plus the half-squares at the walls of what they can see. Seeing
-            // a square means seeing its middle, which is the wrong question for
-            // a square a wall runs through: its middle may be inside the wall,
-            // so the party can be looking straight at the floor in it and the
-            // square still answers no.
-            const sighted = revealKeys.size;
+            visibleSquares += seen.size;
             // A square whose middle the party saw has its floor under that
             // middle, and nothing later can change that.
-            for (const key of revealKeys) sides[key] ??= 'middle';
-            for (const [key, from] of wallFringe(this.atlas, revealKeys, candidates)) {
+            for (const key of seen) sides[key] ??= [50, 50];
+            // Plus the half-squares at the walls of what they can see. Seeing a
+            // square means seeing its middle, which is the wrong question for a
+            // square a wall runs through: its middle may be inside the wall, so
+            // the party can be looking straight at the floor in it and the
+            // square still answers no.
+            const fringe = wallFringe(this.atlas, seen, candidates);
+            const revealKeys = new Set(seen);
+            for (const [key, at] of fringe) {
                 revealKeys.add(key);
-                sides[key] ??= from;
+                sides[key] ??= at;
             }
-            enclosedSquares += revealKeys.size - sighted;
+            enclosedSquares += fringe.size;
+
+            // The square the token stands in is known whether or not its middle
+            // can be seen: a wall crossing it can stop the cell-centre ray from
+            // the token's own square. But then that middle is inside the wall,
+            // and calling it floor keeps precisely the wrong half. Where the
+            // token really is, is floor -- and that is why dragging across a
+            // curve spilled floor out of it while stepping square by square did
+            // not: a drag walks every square the route passed through, and in a
+            // curve most of those have their middles in the masonry.
+            const here = `${step.column},${step.row}`;
+            if (!revealKeys.has(here)) {
+                revealKeys.add(here);
+                sides[here] ??= this._standingPoint(step, path[index - 1], tokenDocument);
+            }
             for (const key of revealKeys) explored.add(key);
 
             // Walking a secret door is how it is found. Tested per leg against
@@ -1467,6 +1479,45 @@ class MappingManager {
         this.state = next;
         void this.renderWindow();
         await this._persistSceneRecords(canvas.scene.id);
+    }
+
+    /**
+     * Where in a square the party actually stood, in that square's own
+     * coordinates, for a square whose middle they could not see.
+     *
+     * The square they came from is the surest answer while a route is being
+     * walked: they were over there a moment ago, so the floor reaches that way.
+     * Failing that -- the first square of a recording, with no step before it --
+     * the token's own position says it directly.
+     */
+    _standingPoint(step, previous, tokenDocument) {
+        if (previous) {
+            const columnOffset = previous.column - step.column;
+            const rowOffset = previous.row - step.row;
+            if (columnOffset || rowOffset) return [50 + (columnOffset * 100), 50 + (rowOffset * 100)];
+        }
+        try {
+            const centre = toGrid(this._tokenCentre(tokenDocument));
+            if (centre) {
+                return [
+                    Math.round((centre.column - step.column) * 100),
+                    Math.round((centre.row - step.row) * 100)
+                ];
+            }
+        } catch {
+            // Fall through to the middle of the square.
+        }
+        return [50, 50];
+    }
+
+    /** The token's centre, in canvas coordinates. */
+    _tokenCentre(tokenDocument) {
+        const sizeX = canvas.grid.sizeX ?? canvas.grid.size;
+        const sizeY = canvas.grid.sizeY ?? canvas.grid.size;
+        return {
+            x: tokenDocument.x + (((tokenDocument.width ?? 1) * sizeX) / 2),
+            y: tokenDocument.y + (((tokenDocument.height ?? 1) * sizeY) / 2)
+        };
     }
 
     _canManageActor(actor, user = game.user) {

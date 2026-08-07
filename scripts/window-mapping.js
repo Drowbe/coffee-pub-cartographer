@@ -789,13 +789,8 @@ export class MappingWindow extends ToolWindowBase {
      * Recorded once, it cannot drift.
      */
     _floorClip(shapes, cell, sides) {
-        const from = {
-            middle: { x: 50, y: 50 },
-            west: { x: -50, y: 50 },
-            east: { x: 150, y: 50 },
-            north: { x: 50, y: -50 },
-            south: { x: 50, y: 150 }
-        }[sides?.[`${cell.column},${cell.row}`] ?? 'middle'];
+        const stood = sides?.[`${cell.column},${cell.row}`];
+        const from = Array.isArray(stood) ? { x: stood[0], y: stood[1] } : { x: 50, y: 50 };
 
         let polygon = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
         let cut = false;
