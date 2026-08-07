@@ -540,6 +540,7 @@ export class MappingWindow extends ToolWindowBase {
             const [column, row] = key.split(',').map(Number);
             cells.push({
                 ring: 1,
+                key,
                 gridColumn: column - originColumn + 1,
                 gridRow: row - originRow + 1,
                 patternX: column,
@@ -562,6 +563,7 @@ export class MappingWindow extends ToolWindowBase {
                 const [column, row] = key.split(',').map(Number);
                 cells.push({
                     ring,
+                    key,
                     gridColumn: column - originColumn + 1,
                     gridRow: row - originRow + 1,
                     // Absolute cell coordinates. CSS shifts each tile's pattern
@@ -1300,10 +1302,21 @@ export class MappingWindow extends ToolWindowBase {
     _handleMapContextMenu(event) {
         event.preventDefault();
         if (this._suppressContextMenu || this.viewMode !== 'map') return;
-        const cell = event.target.closest('.cartographer-mapping-cell.is-explored');
+        // Rock can be right-clicked as well as floor, because telling the map
+        // that somewhere is floor is only useful where it currently is not.
+        const cell = event.target.closest('.cartographer-mapping-cell.is-explored')
+            ?? event.target.closest('.cartographer-mapping-hatch');
         if (!cell || !this.manager.canAnnotateRecord()) return;
         const [column, row] = String(cell.dataset.cell ?? '').split(',').map(Number);
         if (!Number.isInteger(column) || !Number.isInteger(row)) return;
+        const at = this._clickedPointIn(cell, event);
+
+        // Rock carries none of the annotations, which all belong to floor.
+        if (!cell.classList.contains('is-explored')) {
+            if (!this.manager.canManageRecord()) return;
+            this._showCellMenu(event, [this._fixMenu(column, row, at)]);
+            return;
+        }
 
         const contextMenu = game.modules.get('coffee-pub-blacksmith')?.api?.uiContextMenu;
         if (typeof contextMenu?.show !== 'function') return;
@@ -1371,7 +1384,44 @@ export class MappingWindow extends ToolWindowBase {
                 callback: () => this.manager.setFloorType(floor.type, column, row)
             }))
         });
+        items.push({ separator: true });
+        items.push(this._fixMenu(column, row, at));
         this._showCellMenu(event, items);
+    }
+
+    /**
+     * Where in a square the click landed, in that square's own coordinates.
+     *
+     * Kept because a square a wall cuts through is part floor and part rock,
+     * and the point clicked is known to be on the floor side of it -- the one
+     * thing about such a square that nothing else can establish.
+     */
+    _clickedPointIn(cell, event) {
+        const box = cell.getBoundingClientRect();
+        if (!box.width || !box.height) return [50, 50];
+        return [
+            Math.round(((event.clientX - box.left) / box.width) * 100),
+            Math.round(((event.clientY - box.top) / box.height) * 100)
+        ];
+    }
+
+    /** Telling the map what it got wrong, rather than having it guess again. */
+    _fixMenu(column, row, at) {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.${key}`);
+        const isFloor = this.manager.isFloor(column, row);
+        return {
+            name: localize('mapping.fixThings'),
+            icon: 'fa-solid fa-wand-magic-sparkles',
+            submenu: [{
+                name: localize('mapping.markFloor'),
+                icon: 'fa-solid fa-square',
+                callback: () => this.manager.markFloor(column, row, at)
+            }, {
+                name: `${localize('mapping.markRock')}${isFloor ? '' : ' ✓'}`,
+                icon: 'fa-solid fa-mountain',
+                callback: () => this.manager.markRock(column, row)
+            }]
+        };
     }
 
     _showCellMenu(event, items) {

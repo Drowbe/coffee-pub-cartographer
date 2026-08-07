@@ -70,7 +70,7 @@
             {{! Solid rock around the mapped area. Drawn before the floor cells
                 so nothing can sit on top of a room. }}
             {{#each hatchCells}}
-            <div class="cartographer-mapping-hatch is-ring-{{ring}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}}; --cartographer-hatch-x: {{patternX}}; --cartographer-hatch-y: {{patternY}};" aria-hidden="true"></div>
+            <div class="cartographer-mapping-hatch is-ring-{{ring}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}}; --cartographer-hatch-x: {{patternX}}; --cartographer-hatch-y: {{patternY}};" aria-hidden="true"></div>
             {{/each}}
             {{#each cells}}
             <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}}; --cartographer-floor-x: {{patternX}}; --cartographer-floor-y: {{patternY}};{{#if floorClip}} --cartographer-floor-clip: polygon({{floorClip}});{{/if}}">

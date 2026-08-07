@@ -183,6 +183,13 @@ class MappingManager {
             // secret as ordinary wall until its id appears here.
             secrets: [],
             sides: {},
+            // Squares the party has struck off by hand. The mapper works from
+            // walls a GM traced over a picture, so now and then it reads a
+            // corner the way the trace describes it rather than the way the
+            // room really is. Rather than guess harder, the map takes being
+            // told, and remembers -- a square struck off stays struck off, and
+            // exploring again does not put it back.
+            hidden: [],
             lastPosition: null,
             createdAt: 0,
             updatedAt: 0,
@@ -536,6 +543,9 @@ class MappingManager {
                 ? [...new Set(raw.secrets.filter(id => typeof id === 'string' && id))]
                 : [],
             sides: this._normalizeSides(raw.sides),
+            hidden: Array.isArray(raw.hidden)
+                ? [...new Set(raw.hidden.filter(key => /^-?\d+,-?\d+$/.test(key)))]
+                : [],
             lastPosition: this._normalizePosition(raw.lastPosition),
             createdAt: Number(raw.createdAt) || Number(raw.updatedAt) || 0,
             updatedAt: Number(raw.updatedAt) || 0,
@@ -1356,6 +1366,7 @@ class MappingManager {
         if (this._isTombstoned(id)) return;
         const existing = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
         const explored = new Set(existing.explored);
+        const hidden = new Set(existing.hidden ?? []);
         const secrets = new Set(existing.secrets ?? []);
         // Which way the floor lies in each square, settled when the square was
         // first seen and never revisited. Worked out afresh at drawing time it
@@ -1403,7 +1414,11 @@ class MappingManager {
                 revealKeys.add(here);
                 sides[here] ??= this._standingPoint(step, path[index - 1], tokenDocument);
             }
-            for (const key of revealKeys) explored.add(key);
+            // Being told beats being worked out: a square struck off by hand
+            // stays off however convincingly the sightlines argue otherwise.
+            for (const key of revealKeys) {
+                if (!hidden.has(key)) explored.add(key);
+            }
 
 
             // Walking a secret door is how it is found. Tested per leg against
@@ -1447,7 +1462,10 @@ class MappingManager {
         // An annotation can be placed while a long route is still catching up,
         // so rebase onto the latest record rather than the one read at the top.
         const latest = this.records.get(id) ?? existing;
-        const combinedExplored = new Set([...(latest.explored ?? []), ...explored]);
+        const struckOff = new Set([...(latest.hidden ?? []), ...hidden]);
+        const combinedExplored = new Set(
+            [...(latest.explored ?? []), ...explored].filter(key => !struckOff.has(key))
+        );
         for (const secretId of latest.secrets ?? []) secrets.add(secretId);
         // Whatever was settled first stands, so this can only ever grow.
         const combinedSides = { ...sides, ...(latest.sides ?? {}) };
@@ -1470,6 +1488,7 @@ class MappingManager {
             floors,
             secrets: [...secrets],
             sides: combinedSides,
+            hidden: [...struckOff],
             lastPosition: position,
             createdAt: latest.createdAt || Date.now(),
             updatedAt: Date.now(),
@@ -1683,6 +1702,54 @@ class MappingManager {
         return true;
     }
 
+    /**
+     * Say that a square is floor, or that it is not.
+     *
+     * The mapper reads walls a GM traced over a picture of walls, so now and
+     * then it renders a corner the way the trace describes it rather than the
+     * way the room plainly is. Guessing harder has a poor record; being told is
+     * exact. Marking sticks: a square struck off stays off however convincingly
+     * the sightlines later argue for it.
+     *
+     * Where in the square the click landed matters, and is kept. A square a
+     * wall cuts through is part floor and part rock, and the point clicked is
+     * known to be on the floor side of it -- which is the one thing about such
+     * a square that nothing else can establish.
+     */
+    async markFloor(column, row, at) {
+        const record = this.records.get(this.currentMapId);
+        // Redrawing the shape of the map stays with the Actor's owner.
+        if (!record || !this.canManageRecord(record)) return false;
+        const point = Array.isArray(at) && at.length === 2 && at.every(Number.isFinite)
+            ? [Math.round(at[0]), Math.round(at[1])]
+            : [50, 50];
+        await this._requestMutation({
+            action: 'mark-floor',
+            mapId: record.id,
+            column: Number(column),
+            row: Number(row),
+            at: point
+        });
+        return true;
+    }
+
+    async markRock(column, row) {
+        const record = this.records.get(this.currentMapId);
+        if (!record || !this.canManageRecord(record)) return false;
+        await this._requestMutation({
+            action: 'mark-rock',
+            mapId: record.id,
+            column: Number(column),
+            row: Number(row)
+        });
+        return true;
+    }
+
+    /** Whether a square is on the map as floor. */
+    isFloor(column, row) {
+        return Boolean(this.state.explored?.includes(`${Number(column)},${Number(row)}`));
+    }
+
     async setFloorType(type, column, row) {
         if (!MAPPING_FLOOR_TYPE_IDS.has(type)) return false;
         const record = this.records.get(this.currentMapId);
@@ -1849,6 +1916,38 @@ class MappingManager {
             }
             record = { ...record, floors, updatedAt: Date.now(), updatedBy: user.id };
             this.records.set(record.id, record);
+        } else if (data.action === 'mark-floor' || data.action === 'mark-rock') {
+            const column = Number(data.column);
+            const row = Number(data.row);
+            if (!Number.isInteger(column) || !Number.isInteger(row)) return;
+            if (!this.canManageRecord(record, user)) return;
+            const key = `${column},${row}`;
+            const explored = new Set(record.explored);
+            const hidden = new Set(record.hidden ?? []);
+            const sides = { ...this._normalizeSides(record.sides) };
+            if (data.action === 'mark-floor') {
+                hidden.delete(key);
+                explored.add(key);
+                // The point clicked is floor, so that is what gets recorded --
+                // the same thing the reveal writes down, arrived at by being
+                // told rather than by looking.
+                const at = Array.isArray(data.at) && data.at.length === 2
+                    ? data.at.map(Number)
+                    : [50, 50];
+                if (at.every(Number.isFinite)) sides[key] = at;
+            } else {
+                hidden.add(key);
+                explored.delete(key);
+            }
+            record = {
+                ...record,
+                explored: [...explored],
+                hidden: [...hidden],
+                sides,
+                updatedAt: Date.now(),
+                updatedBy: user.id
+            };
+            this.records.set(record.id, record);
         } else if (data.action === 'reset') {
             record = {
                 ...record,
@@ -1857,6 +1956,7 @@ class MappingManager {
                 floors: {},
                 secrets: [],
                 sides: {},
+                hidden: [],
                 lastPosition: null,
                 updatedAt: Date.now(),
                 updatedBy: user.id
