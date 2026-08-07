@@ -32,10 +32,22 @@
 
 /** How far off square a wall may sit and still be drawn on the grid. */
 const AXIS_TOLERANCE_DEGREES = 15;
-/** Turn at a joint, in degrees, above which it is a corner rather than a curve. */
-const CURVE_MAX_TURN = 60;
-/** Longest chord, in squares, that can belong to a curve rather than a wall. */
-const CURVE_MAX_CHORD = 2;
+/**
+ * Turn at a joint, in degrees, above which it is a corner rather than a curve.
+ *
+ * This is what separates an arc from an angular room, and it has to, because
+ * chord length cannot: a GM sweeping a long corridor lays down few, long
+ * chords, exactly as they would tracing an octagon. But an arc drawn with N
+ * chords across a quarter turn bends by 90/N at each joint -- a handful of
+ * degrees -- while a cut corner bends by forty-five however it was traced.
+ */
+const CURVE_MAX_TURN = 35;
+/**
+ * Longest chord, in squares, that can belong to a curve. Generous, because a
+ * wide sweep traced with a few clicks has long chords and is still a curve; it
+ * is the turn at each joint that says what the shape is.
+ */
+const CURVE_MAX_CHORD = 4;
 /**
  * How far a run of same-way joints must bend in total to be a curve.
  *
@@ -77,6 +89,15 @@ const FIT_TOLERANCE = 0.5;
  * little; a stepped wall turns a right angle at every joint.
  */
 const HEADING_TOLERANCE_DEGREES = 35;
+/**
+ * How finely a curve is redrawn, in squares per span.
+ *
+ * A curve is only ever traced as a handful of straight chords, and drawing
+ * those chords is drawing a polygon. Since the shape is known to be a curve,
+ * it is redrawn through the points the trace gave, which is what makes a wide
+ * sweep read as a sweep instead of as a few long facets.
+ */
+const CURVE_SMOOTHING = 0.4;
 /** Share of a square a doorway must cover to be drawn as occupying it. */
 const OPENING_COVERAGE = 0.6;
 /** Features drawn with the doorway glyph rather than as a boundary stroke. */
@@ -534,6 +555,43 @@ function stepsOf(points, piece) {
 }
 
 /**
+ * Redraw a curve smoothly through the points the trace gave.
+ *
+ * A Catmull-Rom spline, which passes exactly through every control point --
+ * so the ends stay where they were pulled onto the grid, and the curve still
+ * follows the wall the GM traced rather than an idea of one.
+ */
+function smoothCurve(points) {
+    if (points.length < 3) return points;
+    const at = index => points[Math.min(points.length - 1, Math.max(0, index))];
+    const smoothed = [points[0]];
+    for (let index = 0; index < points.length - 1; index++) {
+        const p0 = at(index - 1);
+        const p1 = at(index);
+        const p2 = at(index + 1);
+        const p3 = at(index + 2);
+        const span = Math.hypot(p2.column - p1.column, p2.row - p1.row);
+        const steps = Math.max(1, Math.min(24, Math.ceil(span / CURVE_SMOOTHING)));
+        for (let step = 1; step <= steps; step++) {
+            const t = step / steps;
+            const t2 = t * t;
+            const t3 = t2 * t;
+            const blend = (a, b, c, d) => 0.5 * (
+                (2 * b)
+                + ((-a + c) * t)
+                + (((2 * a) - (5 * b) + (4 * c) - d) * t2)
+                + ((-a + (3 * b) - (3 * c) + d) * t3)
+            );
+            smoothed.push({
+                column: blend(p0.column, p1.column, p2.column, p3.column),
+                row: blend(p0.row, p1.row, p2.row, p3.row)
+            });
+        }
+    }
+    return smoothed;
+}
+
+/**
  * Redraw one traced wall run as the grid map it was tracing.
  *
  * A Foundry wall is not the architecture -- it is a GM's mouse-trace over a
@@ -660,15 +718,17 @@ function normalizeRun(points) {
                 );
                 distance.push(travelled);
             }
-            let previous = start;
+            const carried = [start];
             for (let vertex = piece.first + 1; vertex <= piece.last; vertex++) {
                 const along = travelled ? distance[vertex - piece.first] / travelled : 1;
-                const next = vertex === piece.last ? end : {
+                carried.push(vertex === piece.last ? end : {
                     column: points[vertex].column + (head.column * (1 - along)) + (tail.column * along),
                     row: points[vertex].row + (head.row * (1 - along)) + (tail.row * along)
-                };
-                draw(previous, next, true);
-                previous = next;
+                });
+            }
+            const smoothed = smoothCurve(carried);
+            for (let index = 1; index < smoothed.length; index++) {
+                draw(smoothed[index - 1], smoothed[index], true);
             }
         }
 
