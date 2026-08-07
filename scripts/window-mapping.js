@@ -702,21 +702,30 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     /**
-     * The square whose SVG draws a piece of wall lying in square (column, row).
+     * The square whose SVG draws a piece of wall, or null if the party has not
+     * been anywhere they could have seen it from.
      *
-     * Its own square when explored, otherwise the nearest explored square
-     * orthogonally beside it. A wall drawn with thickness puts its Foundry line
-     * inside the wall band, and nobody walks into a wall, so the square holding
-     * the line is unexplored even though the party is standing against it.
-     * Never further than one square, so linework can lean out of the mapped
-     * area onto the wall it belongs to and no further.
+     * The square the piece lies in, when they have explored it. Otherwise the
+     * only way they could have seen it is from a square next door, and only if
+     * the wall actually reaches the boundary the two share -- a wall standing in
+     * the middle of ground nobody has been to is not visible merely because
+     * something was explored nearby. That laxness is what drew the second wall
+     * of a pair when the party could only see the first.
      *
-     * Position is absolute either way -- the layer draws outside its own box --
-     * so this decides only whether a piece is drawn, never where.
+     * Position is absolute either way, since the layer draws outside its own
+     * box, so this decides only whether a piece is drawn and never where.
      */
-    _hostCell(column, row, explored) {
+    _hostCell(column, row, explored, from, to) {
         if (explored.has(`${column},${row}`)) return { column, row };
-        for (const [columnOffset, rowOffset] of [[-1, 0], [0, -1], [1, 0], [0, 1]]) {
+        const edge = 0.001;
+        const sides = [
+            [-1, 0, Math.min(from.x, to.x) <= column + edge],
+            [0, -1, Math.min(from.y, to.y) <= row + edge],
+            [1, 0, Math.max(from.x, to.x) >= column + 1 - edge],
+            [0, 1, Math.max(from.y, to.y) >= row + 1 - edge]
+        ];
+        for (const [columnOffset, rowOffset, reaches] of sides) {
+            if (!reaches) continue;
             const host = { column: column + columnOffset, row: row + rowOffset };
             if (explored.has(`${host.column},${host.row}`)) return host;
         }
@@ -771,7 +780,7 @@ export class MappingWindow extends ToolWindowBase {
                     if (from.x === column + 1 && to.x === column + 1) continue;
                     if (from.y === row + 1 && to.y === row + 1) continue;
 
-                    const host = this._hostCell(column, row, explored);
+                    const host = this._hostCell(column, row, explored, from, to);
                     if (!host) continue;
                     // Rounded because these go straight into markup, and a clip
                     // lands on values like 30.00000000000007.

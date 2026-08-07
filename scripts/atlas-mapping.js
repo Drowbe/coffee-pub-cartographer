@@ -55,10 +55,28 @@ const CURVE_COHERENCE = 0.6;
  * an arc when its walls happen to be short.
  */
 const CURVE_MIN_JOINTS = 3;
-/** Longest off-square stub, in squares, that can be absorbed at a run's end. */
-const STRAY_ANGLE_LENGTH = 1.2;
-/** Longest off-square detour, in squares, that a wall can be straightened through. */
-const STRAY_ANGLE_SPAN = 3;
+/**
+ * How deep a stretch must bow away from the straight line between its ends, in
+ * squares, to be a curve. A quarter circle strays by about three tenths of its
+ * radius; an unsteady hand strays by a fraction of a square.
+ */
+const CURVE_MIN_BOW = 0.7;
+/**
+ * How far a stretch may stray from the line between its own ends, in squares,
+ * and still be that line.
+ *
+ * The single dial that decides what counts as noise. Everything a trace does
+ * accidentally -- a wobble, a jog, a spur, a slow drift -- is small, and
+ * everything it does on purpose -- a corner, a step, an alcove -- is at least
+ * a square. Half a square sits between the two.
+ */
+const FIT_TOLERANCE = 0.5;
+/**
+ * Shortest piece, in squares, that counts as architecture. A map drawn on
+ * squares cannot render anything smaller, so anything below this is a trace
+ * artefact whichever way it points.
+ */
+const MIN_FEATURE = 0.9;
 /** Share of a square a doorway must cover to be drawn as occupying it. */
 const OPENING_COVERAGE = 0.6;
 /** Features drawn with the doorway glyph rather than as a boundary stroke. */
@@ -324,268 +342,295 @@ function latticeEdgesBetween(from, to) {
 }
 
 /**
- * Which stretches of a run are a deliberate curve rather than a shaky hand.
- *
- * Short chords and gentle turns are not enough to tell those apart, because
- * that is also what tracing a straight wall with a handful of quick clicks
- * looks like -- and reading one as a curve keeps its wobble, which puts a
- * visibly crooked line on a map whose whole promise is square.
- *
- * What separates them is whether the turning goes anywhere. An arc bends the
- * same way over and over and adds up to something; an unsteady hand bends one
- * way then the other and nets out to nothing. Comparing the net turn against
- * the total turn says exactly that, and unlike testing each joint on its own it
- * survives a jittery trace: a couple of joints nudged the wrong way barely move
- * the net, so a real arc is still recognised as one.
+ * How far a stretch departs from the straight line between its own ends, in
+ * squares, and where. The depth of the bow, in other words.
  */
-function curvedSegments(segments) {
-    const curved = new Array(segments.length).fill(false);
-    const joints = [];
-    for (let index = 1; index < segments.length; index++) {
-        const before = segments[index - 1];
-        const after = segments[index];
-        const cross = (before.dc * after.dr) - (before.dr * after.dc);
-        const dot = (before.dc * after.dc) + (before.dr * after.dr);
-        const turn = Math.atan2(cross, dot) * (180 / Math.PI);
-        joints[index] = {
-            turn,
-            // A sharp turn is a corner, and a long run is a wall rather than
-            // one chord of a curve. Either ends the stretch.
-            continues: Math.abs(turn) < CURVE_MAX_TURN
-                && before.length < CURVE_MAX_CHORD && after.length < CURVE_MAX_CHORD
-        };
+function bowDepth(points, first, last) {
+    const from = points[first];
+    const to = points[last];
+    const dc = to.column - from.column;
+    const dr = to.row - from.row;
+    const length = Math.hypot(dc, dr);
+    let deepest = 0;
+    let at = -1;
+    for (let vertex = first + 1; vertex < last; vertex++) {
+        const point = points[vertex];
+        // A stretch returning to where it started has no line to measure
+        // against, so measure from the point itself.
+        const distance = length
+            ? Math.abs(((point.column - from.column) * dr) - ((point.row - from.row) * dc)) / length
+            : Math.hypot(point.column - from.column, point.row - from.row);
+        if (distance > deepest) {
+            deepest = distance;
+            at = vertex;
+        }
     }
-
-    let index = 1;
-    while (index < segments.length) {
-        if (!joints[index]?.continues) {
-            index++;
-            continue;
-        }
-        let last = index;
-        while (last + 1 < segments.length && joints[last + 1]?.continues) last++;
-
-        let net = 0;
-        let total = 0;
-        for (let joint = index; joint <= last; joint++) {
-            net += joints[joint].turn;
-            total += Math.abs(joints[joint].turn);
-        }
-        net = Math.abs(net);
-        // Enough joints to be a curve rather than a chamfered corner, bending
-        // far enough to be deliberate, and mostly the same way throughout.
-        if (last - index + 1 >= CURVE_MIN_JOINTS
-            && net >= CURVE_MIN_TOTAL_TURN
-            && total > 0
-            && (net / total) >= CURVE_COHERENCE) {
-            for (let segment = index - 1; segment <= last; segment++) curved[segment] = true;
-        }
-        index = last + 1;
-    }
-    return curved;
+    return { deepest, at };
 }
 
 /**
- * Fold stray off-square segments back into the wall they interrupt.
+ * Whether a stretch is a deliberate curve.
  *
- * A chamfered corner, a genuine step in a wall, and a badly landed click all
- * look alike on their own: a short segment set at an angle. What tells them
- * apart is what they join.
- *
- * A chamfer cuts between two walls at right angles to each other, so its
- * neighbours run different ways. A step and a bad click both sit between walls
- * running the same way -- but a step leaves the wall on a different line, while
- * a bad click leaves it on the one it was already on. So an angled stretch is
- * absorbed only when the wall carries straight on through it.
+ * Four things have to hold at once, and each rules out a different impostor. It
+ * has to be built from enough short chords, or it is a chamfered corner. No
+ * single joint may turn sharply, or it is a corner with clutter around it. The
+ * turning has to keep going the same way and add up, or it is an unsteady hand
+ * wandering back and forth. And it has to actually stray from the line between
+ * its own ends, or it is a wall that merely drifted on its way.
  */
-function absorbStrayAngles(segments, points, curved) {
-    let index = 0;
-    while (index < segments.length) {
-        if (curved[index] || segments[index].axis !== 'angled') {
-            index++;
-            continue;
-        }
-        let last = index;
-        while (last + 1 < segments.length && !curved[last + 1] && segments[last + 1].axis === 'angled') last++;
-
-        const before = index > 0 && !curved[index - 1] ? segments[index - 1] : null;
-        const after = last + 1 < segments.length && !curved[last + 1] ? segments[last + 1] : null;
-        const span = segments.slice(index, last + 1).reduce((total, segment) => total + segment.length, 0);
-        const straighten = axis => {
-            for (let segment = index; segment <= last; segment++) segments[segment].axis = axis;
+function isCurve(points, first, last) {
+    if (last - first < CURVE_MIN_JOINTS + 1) return false;
+    let net = 0;
+    let total = 0;
+    for (let vertex = first + 1; vertex < last; vertex++) {
+        const before = {
+            dc: points[vertex].column - points[vertex - 1].column,
+            dr: points[vertex].row - points[vertex - 1].row
         };
-
-        if (before && after && before.axis === after.axis && before.axis !== 'angled') {
-            const line = before.axis === 'horizontal' ? 'row' : 'column';
-            const carriesOn = Math.round(points[index][line]) === Math.round(points[last + 1][line]);
-            if (carriesOn && span < STRAY_ANGLE_SPAN) straighten(before.axis);
-        } else if (Boolean(before) !== Boolean(after) && span < STRAY_ANGLE_LENGTH) {
-            // At the end of a run there is only one neighbour to go on, so a
-            // short stub is absorbed and a longer one is believed.
-            const only = (before ?? after).axis;
-            if (only !== 'angled') straighten(only);
-        }
-        index = last + 1;
+        const after = {
+            dc: points[vertex + 1].column - points[vertex].column,
+            dr: points[vertex + 1].row - points[vertex].row
+        };
+        if (Math.hypot(before.dc, before.dr) >= CURVE_MAX_CHORD) return false;
+        if (Math.hypot(after.dc, after.dr) >= CURVE_MAX_CHORD) return false;
+        const cross = (before.dc * after.dr) - (before.dr * after.dc);
+        const dot = (before.dc * after.dc) + (before.dr * after.dr);
+        const turn = Math.atan2(cross, dot) * (180 / Math.PI);
+        if (Math.abs(turn) >= CURVE_MAX_TURN) return false;
+        net += turn;
+        total += Math.abs(turn);
     }
+    net = Math.abs(net);
+    return total > 0
+        && net >= CURVE_MIN_TOTAL_TURN
+        && (net / total) >= CURVE_COHERENCE
+        && bowDepth(points, first, last).deepest >= CURVE_MIN_BOW;
+}
+
+/**
+ * Break a traced run into the pieces it is really made of.
+ *
+ * This is the heart of normalization, and it replaces judging each traced
+ * segment on its own. Judging segments meant every kind of trace noise -- a
+ * wobble, a jog, a spur, a slow drift -- needed its own rule to recognise and
+ * undo, the rules interacted, and each new shape of sloppiness found the gap
+ * between them. Worse, a run was straightened by averaging: a long wall that
+ * drifted a square from end to end was flattened onto the mean row, which put
+ * half of it a full square from where it belonged.
+ *
+ * So instead of asking what each segment is, ask where the run stops being
+ * straight. A stretch that stays within half a square of the line between its
+ * own ends *is* that line, whatever wandering it did on the way -- which
+ * disposes of every kind of noise at once, because noise is by definition small.
+ * Where a stretch strays further, it is doing something real, so it splits at
+ * the point that strays most and each half is asked the same question. Corners,
+ * steps and alcoves survive because that is exactly what straying means.
+ *
+ * Curves are asked about first, since an arc never settles down under splitting
+ * -- it would shatter into ever shorter straight pieces, which is precisely the
+ * faceting a cave must not have.
+ */
+function fitRun(points, first, last, pieces) {
+    if (last - first < 1) return;
+    if (isCurve(points, first, last)) {
+        pieces.push({ kind: 'curve', first, last });
+        return;
+    }
+    const { deepest, at } = bowDepth(points, first, last);
+    if (at < 0 || deepest <= FIT_TOLERANCE) {
+        pieces.push({ kind: 'line', first, last });
+        return;
+    }
+    fitRun(points, first, at, pieces);
+    fitRun(points, at, last, pieces);
+}
+
+/** Which line a straight piece sits on, or that it is angled or curved. */
+function classifyPiece(points, piece) {
+    if (piece.kind === 'curve') return { ...piece, axis: 'curve' };
+    const from = points[piece.first];
+    const to = points[piece.last];
+    const dc = to.column - from.column;
+    const dr = to.row - from.row;
+    if (degreesOffAxis(dc, dr) > AXIS_TOLERANCE_DEGREES) return { ...piece, axis: 'angled' };
+    const axis = Math.abs(dc) >= Math.abs(dr) ? 'horizontal' : 'vertical';
+    let sum = 0;
+    for (let vertex = piece.first; vertex <= piece.last; vertex++) {
+        sum += axis === 'horizontal' ? points[vertex].row : points[vertex].column;
+    }
+    return { ...piece, axis, line: Math.round(sum / (piece.last - piece.first + 1)) };
+}
+
+/**
+ * Split a near-square piece wherever it crosses onto the next row or column,
+ * so a long wall that drifts is drawn as a wall that steps.
+ */
+function stepsOf(points, piece) {
+    if (piece.kind === 'curve') return [piece];
+    const from = points[piece.first];
+    const to = points[piece.last];
+    const dc = to.column - from.column;
+    const dr = to.row - from.row;
+    if (degreesOffAxis(dc, dr) > AXIS_TOLERANCE_DEGREES) return [piece];
+    const across = Math.abs(dc) >= Math.abs(dr) ? 'row' : 'column';
+
+    let lowest = Infinity;
+    let highest = -Infinity;
+    for (let vertex = piece.first; vertex <= piece.last; vertex++) {
+        lowest = Math.min(lowest, points[vertex][across]);
+        highest = Math.max(highest, points[vertex][across]);
+    }
+    if (highest - lowest <= FIT_TOLERANCE) return [piece];
+
+    const parts = [];
+    let start = piece.first;
+    let line = Math.round(points[piece.first][across]);
+    for (let vertex = piece.first + 1; vertex <= piece.last; vertex++) {
+        const here = Math.round(points[vertex][across]);
+        if (here === line) continue;
+        if (vertex > start) parts.push({ kind: 'line', first: start, last: vertex });
+        start = vertex;
+        line = here;
+    }
+    if (piece.last > start) parts.push({ kind: 'line', first: start, last: piece.last });
+    return parts.length ? parts : [piece];
 }
 
 /**
  * Redraw one traced wall run as the grid map it was tracing.
  *
- * This is the whole point of the atlas, and it is not the same thing as reading
- * the walls. A Foundry wall is not the architecture -- it is a GM's mouse-trace
- * over a picture of the architecture, laid down without ever seeing the line
- * they were following. So it wanders a couple of degrees off square, overshoots
- * its corners, and carries little jogs where a click landed badly. None of that
- * is intentional and none of it should reach the map: nobody in play ever sees
- * it, because all a wall does for them is stop movement and sight.
+ * A Foundry wall is not the architecture -- it is a GM's mouse-trace over a
+ * picture of the architecture, laid down without ever seeing the line they were
+ * following. So it wanders a couple of degrees off square, overshoots its
+ * corners, and carries jogs where a click landed badly. None of that is
+ * intentional and none of it should reach the map: nobody in play ever sees it,
+ * because all a wall does for them is stop movement and sight.
  *
- * What the artist drew underneath was almost certainly square. So every corner
- * of the trace is pulled onto the nearest grid intersection, and every stretch
- * that is merely a few degrees off square is made exactly square -- one shared
- * row for a horizontal stretch, one shared column for a vertical one, so
- * corners close by construction rather than by luck. A jog collapses to nothing
- * when both its ends land on the same intersection.
+ * What the artist drew underneath was almost certainly square. So the run is
+ * broken into the pieces it is really made of, and each piece is then drawn as
+ * what it is: a piece within a few degrees of square becomes exactly square, on
+ * one shared row or column; a piece genuinely set at an angle keeps its angle,
+ * corner to corner so it still lands on the grid; and a curve keeps its true
+ * shape, with only its ends pulled onto the grid to meet what it joins.
  *
- * Two things survive that treatment, because they are design rather than
- * sloppiness: a wall genuinely set at an angle keeps its angle, drawn corner to
- * corner so it still lands on the grid, and a curve keeps its true shape.
+ * Where two pieces no longer meet -- a wall that really does step from one line
+ * to another -- the step is drawn square rather than as a slanted join.
  */
 function normalizeRun(points) {
     if (points.length < 2) return { edges: [], lines: [] };
 
-    const segments = [];
-    for (let index = 1; index < points.length; index++) {
-        const dc = points[index].column - points[index - 1].column;
-        const dr = points[index].row - points[index - 1].row;
-        const length = Math.hypot(dc, dr);
-        const axis = degreesOffAxis(dc, dr) <= AXIS_TOLERANCE_DEGREES
-            ? (Math.abs(dc) >= Math.abs(dr) ? 'horizontal' : 'vertical')
-            : 'angled';
-        segments.push({ dc, dr, length, axis });
+    const fitted = [];
+    fitRun(points, 0, points.length - 1, fitted);
+    if (!fitted.length) return { edges: [], lines: [] };
+
+    // Nothing shorter than a square is architecture. A map drawn on squares
+    // cannot say "three quarters of a square", and a trace is full of stubs
+    // that size -- the overshoot past a corner, the click that landed wide.
+    // Dropping them lets the walls either side join up directly, which is what
+    // the artist drew.
+    const kept = fitted.filter(piece => piece.kind === 'curve' || Math.hypot(
+        points[piece.last].column - points[piece.first].column,
+        points[piece.last].row - points[piece.first].row
+    ) >= MIN_FEATURE);
+    const pieces = [];
+    for (const piece of (kept.length ? kept : fitted)) {
+        // A straight wall a few degrees off square still crosses from one row
+        // to the next if it runs far enough, and averaging it onto a single
+        // line would put one end a whole square from where it belongs. Where
+        // that happens the wall does not lie on one line at all: it steps, and
+        // it is split so each part sits on its own.
+        for (const part of stepsOf(points, piece)) pieces.push(classifyPiece(points, part));
     }
-    const curved = curvedSegments(segments);
-    absorbStrayAngles(segments, points, curved);
 
-    // A vertex with curve on both sides belongs to the curve. Every other
-    // vertex is going onto the grid.
-    const onCurve = points.map((_, index) => (
-        index > 0 && index < points.length - 1 && curved[index - 1] && curved[index]
-    ));
-    const placed = points.map(point => ({
-        column: point.column, row: point.row, hasColumn: false, hasRow: false
-    }));
-
-    // Straighten each stretch of near-square segments onto one row or column,
-    // a stretch at a time rather than a segment at a time, so a wall the GM
-    // traced with several clicks ends up on a single line.
-    let index = 0;
-    while (index < segments.length) {
-        if (curved[index] || segments[index].axis === 'angled') {
-            index++;
-            continue;
-        }
-        const axis = segments[index].axis;
-        let last = index;
-        while (last + 1 < segments.length && !curved[last + 1] && segments[last + 1].axis === axis) last++;
-        const span = [];
-        for (let vertex = index; vertex <= last + 1; vertex++) span.push(vertex);
-
-        if (axis === 'horizontal') {
-            // A stretch meeting one already placed adopts its line, so two
-            // stretches sharing a corner cannot pull it two ways.
-            const anchored = span.find(vertex => placed[vertex].hasRow);
-            const row = anchored !== undefined
-                ? placed[anchored].row
-                : Math.round(span.reduce((total, vertex) => total + points[vertex].row, 0) / span.length);
-            for (const vertex of span) {
-                placed[vertex].row = row;
-                placed[vertex].hasRow = true;
+    // Each piece places its own two ends. A piece fixes the coordinate its own
+    // line settles, and takes the other from the piece it joins, so a corner
+    // between a horizontal and a vertical closes exactly.
+    const ends = pieces.map((piece, index) => {
+        const place = (vertex, neighbour) => {
+            const point = {
+                column: Math.round(points[vertex].column),
+                row: Math.round(points[vertex].row)
+            };
+            for (const source of [neighbour, piece]) {
+                if (source?.axis === 'horizontal') point.row = source.line;
+                if (source?.axis === 'vertical') point.column = source.line;
             }
-        } else {
-            const anchored = span.find(vertex => placed[vertex].hasColumn);
-            const column = anchored !== undefined
-                ? placed[anchored].column
-                : Math.round(span.reduce((total, vertex) => total + points[vertex].column, 0) / span.length);
-            for (const vertex of span) {
-                placed[vertex].column = column;
-                placed[vertex].hasColumn = true;
-            }
-        }
-        index = last + 1;
-    }
-
-    // Everything not already placed goes to its nearest intersection: the ends
-    // of angled walls, and the ends of curves.
-    for (const [vertex, point] of placed.entries()) {
-        if (onCurve[vertex]) continue;
-        if (!point.hasColumn) point.column = Math.round(point.column);
-        if (!point.hasRow) point.row = Math.round(point.row);
-    }
-
-    // A curve's ends are pulled onto the grid like everything else, so that it
-    // meets whatever it joins. Moving only the ends would bend the first and
-    // last chord and leave a kink; instead the whole arc is carried along with
-    // them, each vertex taking a share of the two end shifts according to how
-    // far along it sits. The arc keeps its shape and lands on the grid.
-    for (const [first, last] of curvedSpans(curved)) {
-        const shift = vertex => ({
-            column: placed[vertex].column - points[vertex].column,
-            row: placed[vertex].row - points[vertex].row
-        });
-        const head = shift(first);
-        const tail = shift(last);
-        let travelled = 0;
-        const distance = [0];
-        for (let vertex = first + 1; vertex <= last; vertex++) {
-            travelled += Math.hypot(
-                points[vertex].column - points[vertex - 1].column,
-                points[vertex].row - points[vertex - 1].row
-            );
-            distance.push(travelled);
-        }
-        if (!travelled) continue;
-        for (let vertex = first + 1; vertex < last; vertex++) {
-            const along = distance[vertex - first] / travelled;
-            placed[vertex].column = points[vertex].column + (head.column * (1 - along)) + (tail.column * along);
-            placed[vertex].row = points[vertex].row + (head.row * (1 - along)) + (tail.row * along);
-        }
-    }
+            return point;
+        };
+        return {
+            start: place(piece.first, pieces[index - 1]),
+            end: place(piece.last, pieces[index + 1])
+        };
+    });
 
     const edges = [];
     const lines = [];
-    for (let segment = 0; segment < segments.length; segment++) {
-        const from = placed[segment];
-        const to = placed[segment + 1];
-        // A jog whose ends met on the same intersection was never architecture.
-        if (from.column === to.column && from.row === to.row) continue;
-        if (!curved[segment] && (from.column === to.column || from.row === to.row)) {
+    const draw = (from, to, curved) => {
+        if (from.column === to.column && from.row === to.row) return;
+        if (!curved && (from.column === to.column || from.row === to.row)) {
             edges.push(...latticeEdgesBetween(from, to));
-            continue;
+            return;
         }
         lines.push([
             [round(from.column), round(from.row)],
             [round(to.column), round(to.row)]
         ]);
-    }
-    return { edges, lines };
-}
+    };
 
-/** Each maximal run of curved segments, as the vertex range it spans. */
-function curvedSpans(curved) {
-    const spans = [];
-    let index = 0;
-    while (index < curved.length) {
-        if (!curved[index]) {
-            index++;
+    for (const [index, piece] of pieces.entries()) {
+        const { start, end } = ends[index];
+        if (piece.kind !== 'curve') {
+            draw(start, end, false);
+        } else {
+            // Pulling only a curve's ends onto the grid would bend its first
+            // and last chord and leave a kink. Every vertex takes a share of
+            // the two end shifts instead, by how far along it sits, so the arc
+            // keeps its shape and still lands on the grid.
+            const head = {
+                column: start.column - points[piece.first].column,
+                row: start.row - points[piece.first].row
+            };
+            const tail = {
+                column: end.column - points[piece.last].column,
+                row: end.row - points[piece.last].row
+            };
+            const distance = [0];
+            let travelled = 0;
+            for (let vertex = piece.first + 1; vertex <= piece.last; vertex++) {
+                travelled += Math.hypot(
+                    points[vertex].column - points[vertex - 1].column,
+                    points[vertex].row - points[vertex - 1].row
+                );
+                distance.push(travelled);
+            }
+            let previous = start;
+            for (let vertex = piece.first + 1; vertex <= piece.last; vertex++) {
+                const along = travelled ? distance[vertex - piece.first] / travelled : 1;
+                const next = vertex === piece.last ? end : {
+                    column: points[vertex].column + (head.column * (1 - along)) + (tail.column * along),
+                    row: points[vertex].row + (head.row * (1 - along)) + (tail.row * along)
+                };
+                draw(previous, next, true);
+                previous = next;
+            }
+        }
+
+        // Two pieces that no longer meet are a wall stepping from one line to
+        // another. Drawn as a right angle, because that is what the artist
+        // drew; a straight join between them would slant across the step.
+        const following = ends[index + 1];
+        if (!following) continue;
+        const gap = following.start;
+        if (gap.column === end.column && gap.row === end.row) continue;
+        if (gap.column === end.column || gap.row === end.row) {
+            draw(end, gap, false);
             continue;
         }
-        let last = index;
-        while (last + 1 < curved.length && curved[last + 1]) last++;
-        spans.push([index, last + 1]);
-        index = last + 1;
+        const corner = { column: gap.column, row: end.row };
+        draw(end, corner, false);
+        draw(corner, gap, false);
     }
-    return spans;
+    return { edges, lines };
 }
 
 /**

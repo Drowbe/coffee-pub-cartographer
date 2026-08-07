@@ -1458,27 +1458,20 @@ class MappingManager {
         return Boolean(token && this._isSquareGrid() && this._canManageActor(token.actor));
     }
 
+    /**
+     * Map this scene with the selected token.
+     *
+     * Starts recording rather than only creating the record. Nobody adds a map
+     * for a token in order to leave it empty -- it is the first step of mapping
+     * with that token, so pressing Record afterwards was a step that only ever
+     * had one sensible answer. Recording an already-recorded map moves the
+     * session onto the newly chosen token.
+     */
     async createMapForSelection() {
-        const token = this._getSingleControlledToken();
-        if (!token || !this._isSquareGrid()) {
-            notify(game.i18n.localize(`${MODULE.ID}.mapping.selectTokenTitle`), {
-                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.selectTokenHint`), type: 'warn'
-            });
-            return false;
-        }
-        if (!this._canManageActor(token.actor)) {
-            notify(game.i18n.localize(`${MODULE.ID}.mapping.notOwnerTitle`), { type: 'warn' });
-            return false;
-        }
-        this.trackedTokenId = token.id;
-        this._selectMapForToken(token);
-        if (!this.records.has(this.currentMapId)) {
-            await this._requestMutation({ action: 'create', actorId: token.actor.id, sceneId: canvas.scene.id });
-        }
-        this.window?.showMap?.();
-        await this.renderWindow();
-        await new Promise(resolve => requestAnimationFrame(resolve));
-        this.window?.centerOnMap?.();
+        if (this.active) await this.stopMapping({ closeWindow: false });
+        // startMapping explains its own refusals, so there is nothing to add.
+        if (!await this.startMapping()) return false;
+        this._announceMode();
         return true;
     }
 
