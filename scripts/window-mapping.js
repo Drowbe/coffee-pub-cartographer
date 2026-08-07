@@ -59,6 +59,20 @@ const THUMBNAIL_INK = {
 /** How far a press may drift, in pixels, and still count as a click. */
 const PRESS_SLOP = 4;
 /** Window width below which chrome buttons drop their captions. */
+/**
+ * The three ways to read the Recorded Maps list, one in effect at a time.
+ *
+ * The first two decide what the headings are keyed on. The third is not a
+ * filter laid over them -- it narrows to the reader's own maps and keys those
+ * on the scene, because a list of one character's maps has nothing to say by
+ * naming that character over and over.
+ */
+const LIST_GROUPINGS = [
+    { id: 'scene', icon: 'fa-solid fa-map-location-dot', textKey: 'mapping.groupBySceneShort', labelKey: 'mapping.groupByScene' },
+    { id: 'actor', icon: 'fa-solid fa-user', textKey: 'mapping.groupByActorShort', labelKey: 'mapping.groupByActor' },
+    { id: 'mine', icon: 'fa-solid fa-user-check', textKey: 'mapping.justMine', labelKey: 'mapping.justMineHint' }
+];
+
 const COMPACT_CHROME_WIDTH = 460;
 /** Rings of hatching drawn outward from the explored edge. Must fit the margin. */
 const HATCH_RINGS = MAP_MARGIN_CELLS;
@@ -99,7 +113,7 @@ export class MappingWindow extends ToolWindowBase {
         'set-mode': (_event, target, app) => void app.manager.setMode(target.dataset.mode),
         'toggle-list': (_event, _target, app) => void app.toggleList(),
         'add-map': (_event, _target, app) => void app.manager.createMapForSelection(),
-        'toggle-grouping': (_event, _target, app) => void app.toggleListGrouping(),
+        'set-grouping': (_event, target, app) => void app.setListGrouping(target.dataset.grouping),
         'select-map': (_event, target, app) => void app.selectMap(target.dataset.mapId),
         'rename-map': (event, target, app) => {
             event.stopPropagation();
@@ -208,21 +222,28 @@ export class MappingWindow extends ToolWindowBase {
 
     _buildTopActions(model) {
         if (this.viewMode === 'list') {
-            // Only the view toggle. Making a map is what the card at the head
-            // of the list is for -- a second way to do it in the chrome meant
-            // the card looked optional, and it was the one that named the scene.
-            const buttons = [this._chromeButton({
+            // The same shape as the map view: the view switch alone, then a
+            // divider, then the controls for what is being looked at. Making a
+            // map is not among them -- that is what the card at the head of the
+            // list is for, and it is the one that names the scene.
+            const view = this._chromeButton({
                 action: 'toggle-list',
                 icon: 'fa-solid fa-map',
                 label: model.viewMapLabel
-            }), this._chromeButton({
-                action: 'toggle-grouping',
-                // Both icon and tooltip name what pressing it would do, not
-                // what the list is doing now.
-                icon: model.groupedByScene ? 'fa-solid fa-user' : 'fa-solid fa-map-location-dot',
-                label: model.groupedByScene ? model.groupByActorLabel : model.groupBySceneLabel
-            })];
-            return `<span class="cartographer-mapping-chrome-actions is-primary">${buttons.join('')}</span>`;
+            });
+            // All three shown at once, the way the modes are: one is in effect
+            // at a time, and which one has to be readable at a glance rather
+            // than inferred from a button naming the others.
+            const groupings = model.groupings.map(option => this._chromeButton({
+                action: 'set-grouping',
+                icon: option.icon,
+                label: option.label,
+                text: option.text,
+                dataset: { grouping: option.id },
+                className: `cartographer-mapping-toggle${option.isCurrent ? ' is-current' : ''}`
+            }));
+            return `<span class="cartographer-mapping-chrome-actions">${view}</span>`
+                + `<span class="cartographer-mapping-chrome-actions is-modes">${groupings.join('')}</span>`;
         }
 
         const list = this._chromeButton({
@@ -347,6 +368,7 @@ export class MappingWindow extends ToolWindowBase {
         const maps = this.manager.getMapList().map(record => ({
             id: record.id,
             name: record.name,
+            actorId: record.actorId,
             actorName: record.actorName,
             sceneName: record.sceneName,
             updated: record.updatedAt ? new Date(record.updatedAt).toLocaleString() : '',
@@ -359,15 +381,28 @@ export class MappingWindow extends ToolWindowBase {
         }));
         if (this.viewMode === 'list') {
             const grouping = this.listGrouping;
+            const mine = grouping === 'mine';
+            const own = mine ? this._ownActorIds() : null;
+            const visible = mine ? maps.filter(map => own.has(map.actorId)) : maps;
+            // An empty list has to say why, since the reader has just pressed
+            // the thing that emptied it. A GM's own maps are whichever token is
+            // selected, so for them it is usually that nothing is.
+            const emptyKey = !mine ? 'mapping.noMaps'
+                : (game.user?.isGM && !own.size) ? 'mapping.noMapsMineToken'
+                : 'mapping.noMapsMine';
             return {
                 isListView: true,
-                maps,
-                groups: this._groupMaps(maps, grouping),
-                groupedByScene: grouping === 'scene',
-                groupBySceneLabel: game.i18n.localize(`${MODULE.ID}.mapping.groupByScene`),
-                groupByActorLabel: game.i18n.localize(`${MODULE.ID}.mapping.groupByActor`),
-                listEmpty: maps.length === 0,
-                listEmptyMessage: game.i18n.localize(`${MODULE.ID}.mapping.noMaps`),
+                maps: visible,
+                groups: this._groupMaps(visible, mine ? 'scene' : grouping),
+                groupings: LIST_GROUPINGS.map(option => ({
+                    id: option.id,
+                    icon: option.icon,
+                    text: game.i18n.localize(`${MODULE.ID}.${option.textKey}`),
+                    label: game.i18n.localize(`${MODULE.ID}.${option.labelKey}`),
+                    isCurrent: option.id === grouping
+                })),
+                listEmpty: visible.length === 0,
+                listEmptyMessage: game.i18n.localize(`${MODULE.ID}.${emptyKey}`),
                 // Always offered. It used to appear only when this scene had
                 // no map the reader could record into, which meant a GM -- who
                 // can record into anyone's -- never saw it once one map
@@ -392,21 +427,47 @@ export class MappingWindow extends ToolWindowBase {
      * is a reading preference rather than anything about the maps.
      */
     get listGrouping() {
+        let stored;
         try {
-            return game.settings.get(MODULE.ID, 'mapping.listGrouping') === 'actor' ? 'actor' : 'scene';
+            stored = game.settings.get(MODULE.ID, 'mapping.listGrouping');
         } catch {
-            return 'scene';
+            stored = null;
         }
+        return LIST_GROUPINGS.some(option => option.id === stored) ? stored : 'scene';
     }
 
-    async toggleListGrouping() {
-        const next = this.listGrouping === 'scene' ? 'actor' : 'scene';
+    async setListGrouping(grouping) {
+        if (!LIST_GROUPINGS.some(option => option.id === grouping)) return;
+        if (grouping === this.listGrouping) return;
         try {
-            await game.settings.set(MODULE.ID, 'mapping.listGrouping', next);
+            await game.settings.set(MODULE.ID, 'mapping.listGrouping', grouping);
         } catch {
             return;
         }
         await this.manager.renderWindow();
+    }
+
+    /**
+     * Whose maps count as the reader's own.
+     *
+     * Ownership alone cannot answer this, because a GM owns every actor as far
+     * as Foundry is concerned -- so for them "mine" is whichever token they
+     * have selected, which is the character they are speaking for. A player's
+     * own maps are all of their characters', however many they have, which is
+     * why this narrows the list rather than picking a single map out of it.
+     */
+    _ownActorIds() {
+        const ids = new Set();
+        if (game.user?.isGM) {
+            const actorId = this.manager._getSingleControlledToken()?.actor?.id;
+            if (actorId) ids.add(actorId);
+            return ids;
+        }
+        if (game.user?.character?.id) ids.add(game.user.character.id);
+        for (const actor of game.actors ?? []) {
+            if (actor.testUserPermission?.(game.user, CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER)) ids.add(actor.id);
+        }
+        return ids;
     }
 
     /**

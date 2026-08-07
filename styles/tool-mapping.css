@@ -636,12 +636,6 @@
     gap: 3px;
 }
 
-.cartographer-mapping-chrome-actions.is-primary {
-    margin-left: 4px;
-    padding-left: 8px;
-    border-left: 1px solid var(--blacksmith-tool-divider);
-}
-
 .cartographer-mapping-chrome-actions button {
     display: inline-grid;
     width: 24px;
@@ -684,11 +678,13 @@
     border-left: 1px solid var(--blacksmith-tool-divider);
 }
 
-.cartographer-mapping-chrome-actions button.cartographer-mapping-mode {
+.cartographer-mapping-chrome-actions button.cartographer-mapping-mode,
+.cartographer-mapping-chrome-actions button.cartographer-mapping-toggle {
     color: var(--blacksmith-tool-text-muted);
 }
 
-.cartographer-mapping-chrome-actions button.cartographer-mapping-mode.is-current {
+.cartographer-mapping-chrome-actions button.cartographer-mapping-mode.is-current,
+.cartographer-mapping-chrome-actions button.cartographer-mapping-toggle.is-current {
     border-color: var(--blacksmith-tool-accent);
     background: var(--blacksmith-tool-surface-selected);
     color: var(--blacksmith-tool-accent);

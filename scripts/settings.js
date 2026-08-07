@@ -250,8 +250,9 @@ export const registerSettings = () => {
 		type: String
 	});
 	
-	// How the Recorded Maps list is gathered: by scene, or by character.
-	// Toggled from the list itself, so it is not offered in the settings form.
+	// Which of the Recorded Maps list's three tabs is in effect: by scene, by
+	// character, or the reader's own. Chosen from the list itself, so it is not
+	// offered in the settings form.
 	game.settings.register(MODULE.ID, 'mapping.listGrouping', {
 		name: '',
 		hint: '',
