@@ -715,7 +715,8 @@ export class MappingWindow extends ToolWindowBase {
         }
         const floorClipByCell = new Map();
         for (const [key, shapes] of wallShapesByCell) {
-            const clip = this._floorClip(shapes);
+            const [column, row] = key.split(',').map(Number);
+            const clip = this._floorClip(shapes, { column, row }, explored);
             if (clip) floorClipByCell.set(key, clip);
         }
         return {
@@ -745,11 +746,25 @@ export class MappingWindow extends ToolWindowBase {
      * turns a curved corridor into a staircase of blocks -- the walls sweep
      * round while the floor underneath them steps. So where a wall crosses a
      * square, the floor is cut back to it: the square starts whole and each
-     * wall shaves off whatever lies on its far side. Which side is far is
-     * settled by the middle of the square, because that is the point the party
-     * had to see to have explored it at all.
+     * wall shaves off whatever lies on its far side.
+     *
+     * Which side is far is decided by where the party has been. The middle of
+     * the square is not a safe answer, tempting as it is: a square the party
+     * merely stood in is explored whether or not its middle is, so a token
+     * hugging the inside of a bend occupies squares whose middles are in the
+     * rock -- and cutting to the middle then kept the rock and threw away the
+     * floor. Their neighbours cannot be wrong that way, because a neighbour is
+     * only explored if it can be walked. The middle is kept as a tie-break for
+     * a square with nothing explored beside it.
      */
-    _floorClip(shapes) {
+    _floorClip(shapes, cell, explored) {
+        const middle = { x: 50, y: 50 };
+        const beside = [
+            { at: { x: -50, y: 50 }, key: `${cell.column - 1},${cell.row}` },
+            { at: { x: 150, y: 50 }, key: `${cell.column + 1},${cell.row}` },
+            { at: { x: 50, y: -50 }, key: `${cell.column},${cell.row - 1}` },
+            { at: { x: 50, y: 150 }, key: `${cell.column},${cell.row + 1}` }
+        ].filter(neighbour => explored.has(neighbour.key));
         let polygon = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
         let cut = false;
         for (const shape of shapes) {
@@ -757,11 +772,17 @@ export class MappingWindow extends ToolWindowBase {
             const dy = shape.end.y - shape.start.y;
             if (!dx && !dy) continue;
             const side = point => ((point.x - shape.start.x) * dy) - ((point.y - shape.start.y) * dx);
-            const keep = side({ x: 50, y: 50 });
-            // A wall straight through the middle says nothing about which half
-            // is floor, so it cuts nothing.
-            if (Math.abs(keep) < 0.5) continue;
-            const facing = Math.sign(keep);
+            let facing = 0;
+            for (const neighbour of beside) facing += Math.sign(side(neighbour.at));
+            facing = Math.sign(facing);
+            // With walkable ground on both sides, or none, fall back to the
+            // middle. A wall straight through it says nothing either way, and
+            // cuts nothing.
+            if (!facing) {
+                const centre = side(middle);
+                if (Math.abs(centre) < 0.5) continue;
+                facing = Math.sign(centre);
+            }
             const clipped = [];
             for (let index = 0; index < polygon.length; index++) {
                 const from = polygon[index];
