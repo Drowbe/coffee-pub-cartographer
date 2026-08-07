@@ -32,12 +32,33 @@
 
 /** How far off square a wall may sit and still be drawn on the grid. */
 const AXIS_TOLERANCE_DEGREES = 15;
-/** Turn at a joint, in degrees, below which a trace is merely unsteady. */
-const CURVE_MIN_TURN = 3;
 /** Turn at a joint, in degrees, above which it is a corner rather than a curve. */
-const CURVE_MAX_TURN = 55;
+const CURVE_MAX_TURN = 60;
 /** Longest chord, in squares, that can belong to a curve rather than a wall. */
-const CURVE_MAX_CHORD = 1.5;
+const CURVE_MAX_CHORD = 2;
+/**
+ * How far a run of same-way joints must bend in total to be a curve.
+ *
+ * This is what tells a deliberate arc from an unsteady hand: an arc keeps
+ * turning the same way and adds up, while a wobble turns back on itself and
+ * never gets anywhere.
+ */
+const CURVE_MIN_TOTAL_TURN = 25;
+/**
+ * How much of a stretch's turning must pull the same way, as a share of all of
+ * it. An arc approaches one; an unsteady hand approaches zero.
+ */
+const CURVE_COHERENCE = 0.6;
+/**
+ * Joints a curve needs at least. A chamfered corner is two, and a curve is
+ * always many, so this is what stops a small room's cut corner being drawn as
+ * an arc when its walls happen to be short.
+ */
+const CURVE_MIN_JOINTS = 3;
+/** Longest off-square stub, in squares, that can be absorbed at a run's end. */
+const STRAY_ANGLE_LENGTH = 1.2;
+/** Longest off-square detour, in squares, that a wall can be straightened through. */
+const STRAY_ANGLE_SPAN = 3;
 /** Share of a square a doorway must cover to be drawn as occupying it. */
 const OPENING_COVERAGE = 0.6;
 /** Features drawn with the doorway glyph rather than as a boundary stroke. */
@@ -305,39 +326,107 @@ function latticeEdgesBetween(from, to) {
 /**
  * Which stretches of a run are a deliberate curve rather than a shaky hand.
  *
- * A curve is authored as a fan of short chords, each turning by a little, in
- * the same direction, over and over. A traced rectangle is long segments
- * meeting at square corners, and a chamfered corner is one short segment
- * between two long ones. Requiring both neighbours of a joint to be short is
- * what tells those apart, and requiring two consecutive such joints is what
- * stops a single wobble in a traced line from being mistaken for an arc.
+ * Short chords and gentle turns are not enough to tell those apart, because
+ * that is also what tracing a straight wall with a handful of quick clicks
+ * looks like -- and reading one as a curve keeps its wobble, which puts a
+ * visibly crooked line on a map whose whole promise is square.
+ *
+ * What separates them is whether the turning goes anywhere. An arc bends the
+ * same way over and over and adds up to something; an unsteady hand bends one
+ * way then the other and nets out to nothing. Comparing the net turn against
+ * the total turn says exactly that, and unlike testing each joint on its own it
+ * survives a jittery trace: a couple of joints nudged the wrong way barely move
+ * the net, so a real arc is still recognised as one.
  */
 function curvedSegments(segments) {
     const curved = new Array(segments.length).fill(false);
-    const smooth = [];
+    const joints = [];
     for (let index = 1; index < segments.length; index++) {
         const before = segments[index - 1];
         const after = segments[index];
         const cross = (before.dc * after.dr) - (before.dr * after.dc);
         const dot = (before.dc * after.dc) + (before.dr * after.dr);
-        const turn = Math.abs(Math.atan2(cross, dot) * (180 / Math.PI));
-        smooth[index] = turn > CURVE_MIN_TURN && turn < CURVE_MAX_TURN
-            && before.length < CURVE_MAX_CHORD && after.length < CURVE_MAX_CHORD;
+        const turn = Math.atan2(cross, dot) * (180 / Math.PI);
+        joints[index] = {
+            turn,
+            // A sharp turn is a corner, and a long run is a wall rather than
+            // one chord of a curve. Either ends the stretch.
+            continues: Math.abs(turn) < CURVE_MAX_TURN
+                && before.length < CURVE_MAX_CHORD && after.length < CURVE_MAX_CHORD
+        };
     }
+
     let index = 1;
     while (index < segments.length) {
-        if (!smooth[index]) {
+        if (!joints[index]?.continues) {
             index++;
             continue;
         }
         let last = index;
-        while (last + 1 < segments.length && smooth[last + 1]) last++;
-        if (last - index + 1 >= 2) {
+        while (last + 1 < segments.length && joints[last + 1]?.continues) last++;
+
+        let net = 0;
+        let total = 0;
+        for (let joint = index; joint <= last; joint++) {
+            net += joints[joint].turn;
+            total += Math.abs(joints[joint].turn);
+        }
+        net = Math.abs(net);
+        // Enough joints to be a curve rather than a chamfered corner, bending
+        // far enough to be deliberate, and mostly the same way throughout.
+        if (last - index + 1 >= CURVE_MIN_JOINTS
+            && net >= CURVE_MIN_TOTAL_TURN
+            && total > 0
+            && (net / total) >= CURVE_COHERENCE) {
             for (let segment = index - 1; segment <= last; segment++) curved[segment] = true;
         }
         index = last + 1;
     }
     return curved;
+}
+
+/**
+ * Fold stray off-square segments back into the wall they interrupt.
+ *
+ * A chamfered corner, a genuine step in a wall, and a badly landed click all
+ * look alike on their own: a short segment set at an angle. What tells them
+ * apart is what they join.
+ *
+ * A chamfer cuts between two walls at right angles to each other, so its
+ * neighbours run different ways. A step and a bad click both sit between walls
+ * running the same way -- but a step leaves the wall on a different line, while
+ * a bad click leaves it on the one it was already on. So an angled stretch is
+ * absorbed only when the wall carries straight on through it.
+ */
+function absorbStrayAngles(segments, points, curved) {
+    let index = 0;
+    while (index < segments.length) {
+        if (curved[index] || segments[index].axis !== 'angled') {
+            index++;
+            continue;
+        }
+        let last = index;
+        while (last + 1 < segments.length && !curved[last + 1] && segments[last + 1].axis === 'angled') last++;
+
+        const before = index > 0 && !curved[index - 1] ? segments[index - 1] : null;
+        const after = last + 1 < segments.length && !curved[last + 1] ? segments[last + 1] : null;
+        const span = segments.slice(index, last + 1).reduce((total, segment) => total + segment.length, 0);
+        const straighten = axis => {
+            for (let segment = index; segment <= last; segment++) segments[segment].axis = axis;
+        };
+
+        if (before && after && before.axis === after.axis && before.axis !== 'angled') {
+            const line = before.axis === 'horizontal' ? 'row' : 'column';
+            const carriesOn = Math.round(points[index][line]) === Math.round(points[last + 1][line]);
+            if (carriesOn && span < STRAY_ANGLE_SPAN) straighten(before.axis);
+        } else if (Boolean(before) !== Boolean(after) && span < STRAY_ANGLE_LENGTH) {
+            // At the end of a run there is only one neighbour to go on, so a
+            // short stub is absorbed and a longer one is believed.
+            const only = (before ?? after).axis;
+            if (only !== 'angled') straighten(only);
+        }
+        index = last + 1;
+    }
 }
 
 /**
@@ -360,8 +449,7 @@ function curvedSegments(segments) {
  *
  * Two things survive that treatment, because they are design rather than
  * sloppiness: a wall genuinely set at an angle keeps its angle, drawn corner to
- * corner so it still lands on the grid, and a curve keeps its true shape with
- * only its ends pulled onto the grid to meet whatever it joins.
+ * corner so it still lands on the grid, and a curve keeps its true shape.
  */
 function normalizeRun(points) {
     if (points.length < 2) return { edges: [], lines: [] };
@@ -377,9 +465,10 @@ function normalizeRun(points) {
         segments.push({ dc, dr, length, axis });
     }
     const curved = curvedSegments(segments);
+    absorbStrayAngles(segments, points, curved);
 
-    // A vertex with curve on both sides belongs to the curve and keeps its true
-    // position. Every other vertex is going onto the grid.
+    // A vertex with curve on both sides belongs to the curve. Every other
+    // vertex is going onto the grid.
     const onCurve = points.map((_, index) => (
         index > 0 && index < points.length - 1 && curved[index - 1] && curved[index]
     ));
@@ -434,6 +523,35 @@ function normalizeRun(points) {
         if (!point.hasRow) point.row = Math.round(point.row);
     }
 
+    // A curve's ends are pulled onto the grid like everything else, so that it
+    // meets whatever it joins. Moving only the ends would bend the first and
+    // last chord and leave a kink; instead the whole arc is carried along with
+    // them, each vertex taking a share of the two end shifts according to how
+    // far along it sits. The arc keeps its shape and lands on the grid.
+    for (const [first, last] of curvedSpans(curved)) {
+        const shift = vertex => ({
+            column: placed[vertex].column - points[vertex].column,
+            row: placed[vertex].row - points[vertex].row
+        });
+        const head = shift(first);
+        const tail = shift(last);
+        let travelled = 0;
+        const distance = [0];
+        for (let vertex = first + 1; vertex <= last; vertex++) {
+            travelled += Math.hypot(
+                points[vertex].column - points[vertex - 1].column,
+                points[vertex].row - points[vertex - 1].row
+            );
+            distance.push(travelled);
+        }
+        if (!travelled) continue;
+        for (let vertex = first + 1; vertex < last; vertex++) {
+            const along = distance[vertex - first] / travelled;
+            placed[vertex].column = points[vertex].column + (head.column * (1 - along)) + (tail.column * along);
+            placed[vertex].row = points[vertex].row + (head.row * (1 - along)) + (tail.row * along);
+        }
+    }
+
     const edges = [];
     const lines = [];
     for (let segment = 0; segment < segments.length; segment++) {
@@ -451,6 +569,23 @@ function normalizeRun(points) {
         ]);
     }
     return { edges, lines };
+}
+
+/** Each maximal run of curved segments, as the vertex range it spans. */
+function curvedSpans(curved) {
+    const spans = [];
+    let index = 0;
+    while (index < curved.length) {
+        if (!curved[index]) {
+            index++;
+            continue;
+        }
+        let last = index;
+        while (last + 1 < curved.length && curved[last + 1]) last++;
+        spans.push([index, last + 1]);
+        index = last + 1;
+    }
+    return spans;
 }
 
 /**
