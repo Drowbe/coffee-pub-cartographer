@@ -1405,6 +1405,7 @@ class MappingManager {
             }
             for (const key of revealKeys) explored.add(key);
 
+
             // Walking a secret door is how it is found. Tested per leg against
             // the atlas, which already knows where every secret is.
             if (index > 0) {
