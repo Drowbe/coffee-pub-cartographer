@@ -56,6 +56,8 @@ const THUMBNAIL_INK = {
     dark: 'rgba(236, 227, 208, 0.78)',
     glass: 'rgba(242, 234, 217, 0.72)'
 };
+/** How far a press may drift, in pixels, and still count as a click. */
+const PRESS_SLOP = 4;
 /** Window width below which chrome buttons drop their captions. */
 const COMPACT_CHROME_WIDTH = 460;
 /** Rings of hatching drawn outward from the explored edge. Must fit the margin. */
@@ -121,6 +123,7 @@ export class MappingWindow extends ToolWindowBase {
         this._renderedExplored = new Set();
         this._listScrollTop = 0;
         this._pan = null;
+        this._press = null;
         // Camera state lives here, not in the DOM. See the camera section below.
         this.camera = { x: 0, y: 0 };
         this._cameraTarget = { x: 0, y: 0 };
@@ -1255,6 +1258,12 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     _handlePanStart(event) {
+        // A left press opens the menu on release, so long as it was a click
+        // rather than the start of a drag.
+        if (event.button === 0) {
+            this._press = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+            return;
+        }
         if (event.button !== 2) return;
         const viewport = event.currentTarget;
         event.preventDefault();
@@ -1275,6 +1284,10 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     _handlePanMove(event) {
+        if (this._press && event.pointerId === this._press.pointerId) {
+            const moved = Math.hypot(event.clientX - this._press.x, event.clientY - this._press.y);
+            if (moved > PRESS_SLOP) this._press = null;
+        }
         if (!this._pan || event.pointerId !== this._pan.pointerId) return;
         event.preventDefault();
         const deltaX = event.clientX - this._pan.x;
@@ -1288,38 +1301,53 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     _handlePanEnd(event) {
+        if (this._press && event.pointerId === this._press.pointerId) {
+            const press = this._press;
+            this._press = null;
+            if (Math.hypot(event.clientX - press.x, event.clientY - press.y) <= PRESS_SLOP) {
+                this._openCellMenu(event);
+            }
+        }
         if (!this._pan || event.pointerId !== this._pan.pointerId) return;
         const viewport = event.currentTarget;
         viewport.releasePointerCapture?.(event.pointerId);
         viewport.classList.remove('is-panning');
-        this._suppressContextMenu = this._pan.moved;
         this._pan = null;
-        if (this._suppressContextMenu) {
-            setTimeout(() => { this._suppressContextMenu = false; }, 100);
-        }
     }
 
+    /**
+     * The map's own menu opens on a left click, not a right one.
+     *
+     * Panning is a right-drag, and a right-drag ends in a right-click as far as
+     * the browser is concerned -- so the menu and the pan were the same gesture,
+     * separated only by watching how far the pointer had moved and then
+     * ignoring the menu for a moment afterwards. That is a race, and it was
+     * lost often enough to be worth removing rather than tuning. Left to open,
+     * right to pan: the two can no longer be confused.
+     */
     _handleMapContextMenu(event) {
+        // Only to keep the browser's own menu from appearing during a pan.
         event.preventDefault();
-        if (this._suppressContextMenu || this.viewMode !== 'map') return;
-        // Rock can be right-clicked as well as floor, because telling the map
-        // that somewhere is floor is only useful where it currently is not.
-        const cell = event.target.closest('.cartographer-mapping-cell.is-explored')
-            ?? event.target.closest('.cartographer-mapping-hatch');
-        if (!cell || !this.manager.canAnnotateRecord()) return;
-        const [column, row] = String(cell.dataset.cell ?? '').split(',').map(Number);
-        if (!Number.isInteger(column) || !Number.isInteger(row)) return;
-        const at = this._clickedPointIn(cell, event);
+    }
 
-        // Rock carries none of the annotations, which all belong to floor.
-        if (!cell.classList.contains('is-explored')) {
+    _openCellMenu(event) {
+        if (this.viewMode !== 'map') return;
+        if (!this.manager.canAnnotateRecord()) return;
+        const spot = this._squareAt(event);
+        if (!spot) return;
+        const { column, row, at } = spot;
+
+        // Rock carries none of the annotations, which all belong to floor -- but
+        // it still has to answer, because telling the map that somewhere is
+        // floor is only ever useful where it currently is not.
+        if (!this.manager.isFloor(column, row)) {
             if (!this.manager.canManageRecord()) return;
             this._showCellMenu(event, [this._fixMenu(column, row, at)]);
             return;
         }
 
-        const contextMenu = game.modules.get('coffee-pub-blacksmith')?.api?.uiContextMenu;
-        if (typeof contextMenu?.show !== 'function') return;
+        // Whether a menu can be shown at all is settled once, where it is
+        // shown; asking again here only made floor and rock disagree about it.
         const localize = key => game.i18n.localize(`${MODULE.ID}.${key}`);
         const place = type => () => this.manager.placeMapSymbol(type, column, row);
         // Sorted on the localized name rather than the catalogue order, so the
@@ -1390,19 +1418,41 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     /**
-     * Where in a square the click landed, in that square's own coordinates.
+     * Which square a click landed in, and whereabouts in it.
      *
-     * Kept because a square a wall cuts through is part floor and part rock,
-     * and the point clicked is known to be on the floor side of it -- the one
-     * thing about such a square that nothing else can establish.
+     * Worked out from the grid's own geometry rather than from whatever element
+     * happens to be under the pointer. Only explored squares have an element of
+     * their own; rock has a hatch tile at best, which is drawn straight through
+     * by pointer events, and past the hatched band there is nothing there at
+     * all. Asking the grid means every square can be clicked, which is what
+     * telling the map about the ones it got wrong requires.
+     *
+     * Where in the square matters and is kept: a square a wall cuts through is
+     * part floor and part rock, and the point clicked is known to be on the
+     * floor side of it -- the one thing about such a square that nothing else
+     * can establish.
      */
-    _clickedPointIn(cell, event) {
-        const box = cell.getBoundingClientRect();
-        if (!box.width || !box.height) return [50, 50];
-        return [
-            Math.round(((event.clientX - box.left) / box.width) * 100),
-            Math.round(((event.clientY - box.top) / box.height) * 100)
-        ];
+    _squareAt(event) {
+        const grid = this.element?.querySelector('.cartographer-mapping-grid');
+        if (!grid) return null;
+        const box = grid.getBoundingClientRect();
+        const columns = Number(grid.style.getPropertyValue('--cartographer-map-columns'));
+        const rows = Number(grid.style.getPropertyValue('--cartographer-map-rows'));
+        if (!box.width || !box.height || !columns || !rows) return null;
+        const across = (event.clientX - box.left) / (box.width / columns);
+        const down = (event.clientY - box.top) / (box.height / rows);
+        if (across < 0 || down < 0 || across >= columns || down >= rows) return null;
+        const originColumn = Number(grid.dataset.originColumn);
+        const originRow = Number(grid.dataset.originRow);
+        if (!Number.isInteger(originColumn) || !Number.isInteger(originRow)) return null;
+        return {
+            column: originColumn + Math.floor(across),
+            row: originRow + Math.floor(down),
+            at: [
+                Math.round((across - Math.floor(across)) * 100),
+                Math.round((down - Math.floor(down)) * 100)
+            ]
+        };
     }
 
     /** Telling the map what it got wrong, rather than having it guess again. */
