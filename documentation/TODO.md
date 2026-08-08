@@ -15,7 +15,7 @@
 
 ### Next
 
-- [ ] Filter the Recorded Maps list. It is now gathered under scene or character headings, which handles a campaign's worth of maps, but there is still no way to search for one by name.
+- [ ] Search the Recorded Maps list by name. It is now read three ways -- by scene, by character, or just the reader's own -- which handles a campaign's worth of maps, but there is still no way to find one by typing part of its name.
 - [ ] Export a map as an image, to the clipboard and to a PNG file. Screen capture covers this for now. Worth staging: the linework and symbols are already SVG and can be assembled and rasterised nearly as-is, while floor surfaces and the rock hatching are CSS masks and gradients that would each need an SVG `<pattern>` equivalent kept in step with the CSS. Note also that `navigator.clipboard.write()` needs a secure context — a GM on `localhost` can copy, but a player on a LAN IP over plain http cannot, so a PNG download has to be offered alongside it.
 - [ ] Distinguish one-way doors. Detection is trivial (`Wall#dir`), but the official glyph is a directional arrow and Foundry stores direction as LEFT/RIGHT relative to the wall's own vector rather than as a compass bearing. That has to be mapped through the atlas's edge snapping first, or the arrow points the wrong way half the time.
 - [ ] Expand the remaining official key symbols that have no Foundry equivalent and must be author-placed: false door, trapped door, revolving door, portcullis, gate, arrow slit, illusory wall.

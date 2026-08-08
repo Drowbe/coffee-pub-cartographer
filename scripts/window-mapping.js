@@ -1359,8 +1359,12 @@ export class MappingWindow extends ToolWindowBase {
             getComputedStyle(grid).getPropertyValue('--cartographer-map-cell-size')
         );
         if (cellSize > 0) this._cellSize = cellSize;
-        const tracked = this.manager.active ? this.manager.getTrackedPositionForCurrentMap() : null;
-        if (tracked && this._followArmed) {
+        // Whatever is being tracked, recorded or merely followed. Asking for
+        // the recording position only meant following never moved the view
+        // after the first frame: every step re-drew the map around a camera
+        // that had been left where the party started.
+        const tracked = this._followArmed ? this.manager.getTrackedPositionForCurrentMap() : null;
+        if (tracked) {
             const { x, y } = this._cellCenter(tracked);
             // Snap the first time the map is drawn, glide once it is on screen.
             this._setCamera(x, y, { animate: this._hasPaintedMap });
@@ -1671,7 +1675,10 @@ export class MappingWindow extends ToolWindowBase {
         grid.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${this.zoom})`;
         // While following, the pinned marker is shown and the in-grid one is
         // hidden, so the party never drifts off centre during a camera glide.
-        viewport.classList.toggle('is-following', this._followArmed && Boolean(this.manager.active));
+        viewport.classList.toggle(
+            'is-following',
+            this._followArmed && Boolean(this.manager.active || this.manager.following)
+        );
         viewport.style.setProperty('--cartographer-map-zoom', this.zoom);
         return true;
     }

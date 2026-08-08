@@ -70,7 +70,10 @@ class MappingManager {
         this.currentMapId = null;
         this.lastGridKey = null;
         this.state = this._emptyRecord();
+        // Maps validated in full, materialized on first use. See _index for
+        // why almost none of them are.
         this.records = new Map();
+        this._index = new Map();
         this.window = null;
         this._hooks = [];
         this._saveQueue = Promise.resolve();
@@ -100,6 +103,9 @@ class MappingManager {
         // Derived, never saved, and thrown away whenever walls change.
         this._atlases = new Map();
         this._atlasFrame = null;
+        // Where the followed token has actually got to, taken from the move
+        // itself. See getTrackedPositionForCurrentMap.
+        this._followPosition = null;
     }
 
     /**
@@ -241,6 +247,7 @@ class MappingManager {
         this.mode = 'view';
         this.paused = false;
         this.trackedTokenId = null;
+        this._followPosition = null;
         this.currentMapId = null;
         this.lastGridKey = null;
         this._resetMovementPath();
@@ -250,6 +257,8 @@ class MappingManager {
         if (this._atlasFrame) cancelAnimationFrame(this._atlasFrame);
         this._atlasFrame = null;
         this._atlases.clear();
+        this.records.clear();
+        this._index.clear();
         this.window = null;
     }
 
@@ -384,6 +393,10 @@ class MappingManager {
             // they have no permission to write to.
             if (this.following && !this.active) {
                 if (moved) {
+                    // Where the move says it went. The document is read again
+                    // when the view is drawn, and drawing happens soon enough
+                    // that it can still be reporting the square the token left.
+                    this._followPosition = { tokenId: tokenDocument.id, ...position };
                     this.window?.armFollow();
                     void this.renderWindow();
                     void this._considerUnexplored(position);
@@ -416,7 +429,7 @@ class MappingManager {
 
         const updateScene = Hooks.on('updateScene', (scene, changes) => {
             if (!changes?.flags?.[MODULE.ID]?.[FLAG_KEY]) return;
-            this._replaceSceneRecords(scene, scene.getFlag(MODULE.ID, FLAG_KEY));
+            this._indexScene(scene, scene.getFlag(MODULE.ID, FLAG_KEY));
             void this.renderWindow();
         });
         this._hooks.push({ name: 'updateScene', id: updateScene });
@@ -443,6 +456,7 @@ class MappingManager {
         const canvasReady = Hooks.on('canvasReady', () => {
             if (this.active) void this.stopMapping();
             this.trackedTokenId = null;
+            this._followPosition = null;
             this._resetMovementPath();
             this.rebuildAtlas();
             this.loadMapRecords();
@@ -469,12 +483,25 @@ class MappingManager {
         });
     }
 
+    /**
+     * Index every map in the world, without reading any of them.
+     *
+     * Foundry already holds every scene's flags in memory, so walking them all
+     * and validating each map into a second copy bought nothing: it doubled the
+     * storage and spent the time twice over, on load and again on every scene
+     * change, for maps nobody had asked to see. At six players across sixty
+     * scenes that was 360 maps, 450ms and 17MB, every time the canvas changed.
+     * What the list actually needs is who, where, when and how much, and that
+     * can be read off the stored object without touching its contents. A map is
+     * validated in full the moment it is selected or drawn, and not before.
+     */
     loadMapRecords() {
         const selectedId = this.currentMapId;
         this.records.clear();
-        for (const scene of game.scenes ?? []) this._replaceSceneRecords(scene, scene.getFlag(MODULE.ID, FLAG_KEY));
+        this._index.clear();
+        for (const scene of game.scenes ?? []) this._indexScene(scene, scene.getFlag(MODULE.ID, FLAG_KEY));
 
-        if (selectedId && this.records.has(selectedId)) this.selectMap(selectedId, { render: false });
+        if (selectedId && this._index.has(selectedId)) this.selectMap(selectedId, { render: false });
         else {
             const selected = this._getSingleControlledToken();
             if (selected) this._selectMapForToken(selected);
@@ -487,18 +514,82 @@ class MappingManager {
                 }
             }
         }
-        return this.records;
+        return this._index;
     }
 
-    _replaceSceneRecords(scene, raw) {
-        for (const [id, record] of this.records) {
-            if (record.sceneId === scene.id) this.records.delete(id);
+    /**
+     * What the list has to say about a map, taken off the stored object rather
+     * than out of a validated copy of it.
+     *
+     * `explored` is the stored array itself, not a copy. Nothing writes through
+     * it -- the list counts it and the thumbnail reads it, and both tolerate a
+     * malformed key -- and copying it is the entire cost this exists to avoid.
+     */
+    _indexEntry(raw, scene) {
+        const actorId = typeof raw?.actorId === 'string' ? raw.actorId : null;
+        const sceneId = scene?.id ?? (typeof raw?.sceneId === 'string' ? raw.sceneId : null);
+        if (!actorId || !sceneId) return null;
+        const actorName = String(raw.actorName || game.actors?.get(actorId)?.name || '');
+        const sceneName = String(raw.sceneName || scene?.name || '');
+        return {
+            id: this._recordId(actorId, sceneId),
+            actorId,
+            actorName,
+            sceneId,
+            sceneName,
+            name: String(raw.name || `${actorName || 'Map'} — ${sceneName}`),
+            explored: Array.isArray(raw.explored) ? raw.explored : [],
+            gridDistance: 5,
+            createdAt: Number(raw.createdAt) || Number(raw.updatedAt) || 0,
+            updatedAt: Number(raw.updatedAt) || 0,
+            updatedBy: typeof raw.updatedBy === 'string' ? raw.updatedBy : null,
+            raw
+        };
+    }
+
+    /**
+     * A map validated in full, materialized on first use and kept thereafter.
+     *
+     * Nothing is evicted. A held record can carry changes that have not reached
+     * the scene flag yet, and dropping one would silently roll them back --
+     * they are dropped only when the scene is re-indexed, which is the point at
+     * which the flag has become the truth again. Entries appear only for maps
+     * somebody actually opened or recorded into.
+     */
+    getRecord(id) {
+        if (!id) return null;
+        const held = this.records.get(id);
+        if (held) return held;
+        const entry = this._index.get(id);
+        if (!entry) return null;
+        const record = this._normalizeRecord(entry.raw, game.scenes?.get(entry.sceneId));
+        if (!record.id) return null;
+        this.records.set(id, record);
+        return record;
+    }
+
+    /** Hold a changed map, and keep the index in step so the list agrees. */
+    _cacheRecord(record) {
+        if (!record?.id) return record;
+        this.records.set(record.id, record);
+        const entry = this._indexEntry(record, game.scenes?.get(record.sceneId));
+        if (entry) this._index.set(record.id, entry);
+        return record;
+    }
+
+    _indexScene(scene, raw) {
+        for (const [id, entry] of this._index) {
+            if (entry.sceneId !== scene.id) continue;
+            this._index.delete(id);
+            // The flag is the truth again, so anything held for this scene is
+            // stale by definition.
+            this.records.delete(id);
         }
         const incoming = new Map();
         if (Number(raw?.version) >= STATE_VERSION && raw.maps && typeof raw.maps === 'object') {
             for (const value of Object.values(raw.maps)) {
-                const record = this._normalizeRecord(value, scene);
-                if (record.id) incoming.set(record.id, record);
+                const entry = this._indexEntry(value, scene);
+                if (entry) incoming.set(entry.id, entry);
             }
         }
 
@@ -512,12 +603,12 @@ class MappingManager {
             if (!id.endsWith(`::${scene.id}`)) continue;
             if (!incoming.has(id) || expiry <= Date.now()) this._deletedMapIds.delete(id);
         }
-        for (const [id, record] of incoming) {
-            if (!this._deletedMapIds.has(id)) this.records.set(id, record);
+        for (const [id, entry] of incoming) {
+            if (!this._deletedMapIds.has(id)) this._index.set(id, entry);
         }
 
         if (this.currentMapId) {
-            const current = this.records.get(this.currentMapId);
+            const current = this.getRecord(this.currentMapId);
             if (current) {
                 // How far the drawing has got, which is what clears the
                 // mapping spinner. Logging every change shows the map falling
@@ -596,14 +687,14 @@ class MappingManager {
     }
 
     getMapList() {
-        return [...this.records.values()].sort((left, right) => {
+        return [...this._index.values()].sort((left, right) => {
             if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
             return left.name.localeCompare(right.name);
         });
     }
 
     selectMap(mapId, { render = true } = {}) {
-        const record = this.records.get(mapId);
+        const record = this.getRecord(mapId);
         if (!record) return false;
         this.currentMapId = record.id;
         this.state = record;
@@ -622,7 +713,7 @@ class MappingManager {
         if (!actor || !canvas?.scene) return false;
         const id = this._recordId(actor.id, canvas.scene.id);
         this.currentMapId = id;
-        this.state = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
+        this.state = this.getRecord(id) ?? this._newRecord(actor, canvas.scene);
         return true;
     }
 
@@ -633,6 +724,9 @@ class MappingManager {
      */
     async setMode(next) {
         if (!MAPPING_MODES.includes(next) || next === this.mode) return this.mode;
+        // A move seen under the previous mode says nothing about where the
+        // party is now, and following again would open on that stale square.
+        this._followPosition = null;
         if (this.mode === 'record') await this.stopMapping({ closeWindow: false });
         if (next === 'record') {
             // startMapping explains its own refusals, so stay put on failure
@@ -896,7 +990,14 @@ class MappingManager {
             if (this._mapIdForToken(token) !== this.currentMapId) return null;
             return this._normalizePosition(this.state.lastPosition) ?? this._gridPosition(token.document);
         }
-        return this.following ? this._gridPosition(token.document) : null;
+        if (!this.following) return null;
+        // The change set, when there is one for this token. Following redraws
+        // the moment the move is reported, and at that point the document can
+        // still be carrying the coordinates it is moving away from -- which
+        // put the marker, and the view with it, one square behind the party.
+        const followed = this._followPosition;
+        if (followed?.tokenId === token.id) return { column: followed.column, row: followed.row };
+        return this._gridPosition(token.document);
     }
 
     /**
@@ -1388,7 +1489,7 @@ class MappingManager {
         const position = { column: path.at(-1).column, row: path.at(-1).row };
         const id = this._recordId(actor.id, canvas.scene.id);
         if (this._isTombstoned(id)) return;
-        const existing = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
+        const existing = this.getRecord(id) ?? this._newRecord(actor, canvas.scene);
         const explored = new Set(existing.explored);
         const hidden = new Set(existing.hidden ?? []);
         const secrets = new Set(existing.secrets ?? []);
@@ -1485,7 +1586,7 @@ class MappingManager {
 
         // An annotation can be placed while a long route is still catching up,
         // so rebase onto the latest record rather than the one read at the top.
-        const latest = this.records.get(id) ?? existing;
+        const latest = this.getRecord(id) ?? existing;
         const struckOff = new Set([...(latest.hidden ?? []), ...hidden]);
         const combinedExplored = new Set(
             [...(latest.explored ?? []), ...explored].filter(key => !struckOff.has(key))
@@ -1519,7 +1620,7 @@ class MappingManager {
             updatedAt: Date.now(),
             updatedBy: data.userId
         };
-        this.records.set(id, next);
+        this._cacheRecord(next);
         this.currentMapId = id;
         this.state = next;
         void this.renderWindow();
@@ -1594,8 +1695,8 @@ class MappingManager {
     hasManageableMapForCurrentScene() {
         const sceneId = canvas?.scene?.id;
         if (!sceneId) return false;
-        for (const record of this.records.values()) {
-            if (record.sceneId === sceneId && this.canManageRecord(record)) return true;
+        for (const entry of this._index.values()) {
+            if (entry.sceneId === sceneId && this.canManageRecord(entry)) return true;
         }
         return false;
     }
@@ -1623,7 +1724,7 @@ class MappingManager {
     }
 
     async renameMap(mapId) {
-        const record = this.records.get(mapId);
+        const record = this._index.get(mapId);
         if (!record || !this.canManageRecord(record)) return false;
         const result = await foundry.applications.api.DialogV2.input({
             window: { title: game.i18n.localize(`${MODULE.ID}.mapping.renameTitle`) },
@@ -1639,7 +1740,7 @@ class MappingManager {
     }
 
     async deleteMap(mapId) {
-        const record = this.records.get(mapId);
+        const record = this._index.get(mapId);
         if (!record || !this.canManageRecord(record)) return false;
         const confirmed = await foundry.applications.api.DialogV2.confirm({
             window: { title: game.i18n.localize(`${MODULE.ID}.mapping.deleteTitle`) },
@@ -1663,7 +1764,7 @@ class MappingManager {
     }
 
     async resetMap() {
-        const record = this.records.get(this.currentMapId);
+        const record = this.getRecord(this.currentMapId);
         if (!record || !this.canManageRecord(record)) return false;
         const confirmed = await foundry.applications.api.DialogV2.confirm({
             window: { title: game.i18n.localize(`${MODULE.ID}.mapping.resetTitle`) },
@@ -1678,7 +1779,7 @@ class MappingManager {
 
     async placeMapSymbol(type, column, row) {
         if (!MAPPING_SYMBOL_TYPES.has(type)) return false;
-        const record = this.records.get(this.currentMapId);
+        const record = this.getRecord(this.currentMapId);
         const cellKey = `${Number(column)},${Number(row)}`;
         if (!record || !record.explored.includes(cellKey) || !this.canAnnotateRecord(record)) return false;
 
@@ -1716,7 +1817,7 @@ class MappingManager {
     }
 
     async removeMapSymbol(column, row) {
-        const record = this.records.get(this.currentMapId);
+        const record = this.getRecord(this.currentMapId);
         if (!record || !this.canAnnotateRecord(record)) return false;
         await this._requestMutation({
             action: 'remove-symbol',
@@ -1742,7 +1843,7 @@ class MappingManager {
      * a square that nothing else can establish.
      */
     async markFloor(column, row, at) {
-        const record = this.records.get(this.currentMapId);
+        const record = this.getRecord(this.currentMapId);
         // Redrawing the shape of the map stays with the Actor's owner.
         if (!record || !this.canManageRecord(record)) return false;
         const point = Array.isArray(at) && at.length === 2 && at.every(Number.isFinite)
@@ -1759,7 +1860,7 @@ class MappingManager {
     }
 
     async markRock(column, row) {
-        const record = this.records.get(this.currentMapId);
+        const record = this.getRecord(this.currentMapId);
         if (!record || !this.canManageRecord(record)) return false;
         await this._requestMutation({
             action: 'mark-rock',
@@ -1777,7 +1878,7 @@ class MappingManager {
 
     async setFloorType(type, column, row) {
         if (!MAPPING_FLOOR_TYPE_IDS.has(type)) return false;
-        const record = this.records.get(this.currentMapId);
+        const record = this.getRecord(this.currentMapId);
         const cellKey = `${Number(column)},${Number(row)}`;
         // A surface restyles a whole area, so it stays with the Actor's owner.
         if (!record || !record.explored.includes(cellKey) || !this.canManageRecord(record)) return false;
@@ -1820,7 +1921,7 @@ class MappingManager {
         const user = game.users.get(data.userId);
         if (!user?.active) return;
 
-        let record = data.mapId ? this.records.get(data.mapId) : null;
+        let record = data.mapId ? this.getRecord(data.mapId) : null;
         if (data.action === 'delete') {
             const actorId = String(data.actorId ?? record?.actorId ?? '');
             const sceneId = String(data.sceneId ?? record?.sceneId ?? '');
@@ -1848,7 +1949,7 @@ class MappingManager {
             if (!this._canManageActor(actor, user)) return;
             const id = this._recordId(actor.id, data.sceneId);
             this._deletedMapIds.delete(id);
-            record = this.records.get(id) ?? this._newRecord(actor, canvas.scene);
+            record = this.getRecord(id) ?? this._newRecord(actor, canvas.scene);
             const now = Date.now();
             record = {
                 ...record,
@@ -1859,7 +1960,7 @@ class MappingManager {
                 updatedAt: now,
                 updatedBy: user.id
             };
-            this.records.set(id, record);
+            this._cacheRecord(record);
             if (this.currentMapId === id) this.state = record;
             // Let the GM know someone has started mapping. Only for other
             // users -- a GM who pressed Record does not need telling.
@@ -1886,7 +1987,7 @@ class MappingManager {
             const name = String(data.name ?? '').trim().slice(0, 100);
             if (!name) return;
             record = { ...record, name, updatedAt: Date.now(), updatedBy: user.id };
-            this.records.set(record.id, record);
+            this._cacheRecord(record);
         } else if (data.action === 'place-symbol') {
             const type = String(data.type ?? '');
             const column = Number(data.column);
@@ -1908,7 +2009,7 @@ class MappingManager {
                 createdBy: user.id
             });
             record = { ...record, symbols, updatedAt: Date.now(), updatedBy: user.id };
-            this.records.set(record.id, record);
+            this._cacheRecord(record);
         } else if (data.action === 'remove-symbol') {
             const column = Number(data.column);
             const row = Number(data.row);
@@ -1916,7 +2017,7 @@ class MappingManager {
             const symbols = this._normalizeSymbols(record.symbols)
                 .filter(symbol => symbol.column !== column || symbol.row !== row);
             record = { ...record, symbols, updatedAt: Date.now(), updatedBy: user.id };
-            this.records.set(record.id, record);
+            this._cacheRecord(record);
         } else if (data.action === 'set-floor') {
             const type = String(data.type ?? '');
             const column = Number(data.column);
@@ -1941,7 +2042,7 @@ class MappingManager {
                 else floors[key] = type;
             }
             record = { ...record, floors, updatedAt: Date.now(), updatedBy: user.id };
-            this.records.set(record.id, record);
+            this._cacheRecord(record);
         } else if (data.action === 'mark-floor' || data.action === 'mark-rock') {
             const column = Number(data.column);
             const row = Number(data.row);
@@ -1981,7 +2082,7 @@ class MappingManager {
                 updatedAt: Date.now(),
                 updatedBy: user.id
             };
-            this.records.set(record.id, record);
+            this._cacheRecord(record);
         } else if (data.action === 'reset') {
             record = {
                 ...record,
@@ -1995,7 +2096,7 @@ class MappingManager {
                 updatedAt: Date.now(),
                 updatedBy: user.id
             };
-            this.records.set(record.id, record);
+            this._cacheRecord(record);
         } else return;
 
         if (this.currentMapId === record.id) {
@@ -2018,6 +2119,7 @@ class MappingManager {
         if (!record?.id) return;
         this._deletedMapIds.set(record.id, Date.now() + DELETE_TOMBSTONE_MS);
         this.records.delete(record.id);
+        this._index.delete(record.id);
         if (this.currentMapId !== record.id) return;
         this.currentMapId = null;
         this.state = this._emptyRecord();
@@ -2065,8 +2167,12 @@ class MappingManager {
         const scene = game.scenes?.get(sceneId);
         if (!scene || !game.user.isGM) return;
         const maps = {};
-        for (const record of this.records.values()) {
-            if (record.sceneId === sceneId) maps[record.actorId] = foundry.utils.deepClone(record);
+        for (const entry of this._index.values()) {
+            if (entry.sceneId !== sceneId) continue;
+            // Untouched maps go back exactly as they came. Reading one only to
+            // write it out again is the work this avoids, and the container is
+            // replaced wholesale, so leaving one out would delete it.
+            maps[entry.actorId] = foundry.utils.deepClone(this.records.get(entry.id) ?? entry.raw);
         }
         const container = { version: STATE_VERSION, maps };
         this._saveQueue = this._saveQueue
@@ -2083,7 +2189,7 @@ class MappingManager {
     _handleRegistryUpdated(data) {
         const scene = game.scenes?.get(data?.sceneId);
         if (!scene || !data.container) return;
-        this._replaceSceneRecords(scene, data.container);
+        this._indexScene(scene, data.container);
         if (!this.currentMapId) {
             const latest = this.getMapList()[0];
             if (latest) this.selectMap(latest.id, { render: false });
