@@ -577,6 +577,26 @@ class MappingManager {
         return record;
     }
 
+    /**
+     * Take one map into the index, leaving the rest of the scene alone.
+     *
+     * What arrives when a single map is written, which is every step of every
+     * recording. Re-reading the whole scene for one changed map is the work
+     * this exists to avoid.
+     */
+    _indexMap(scene, raw) {
+        const entry = this._indexEntry(raw, scene);
+        if (!entry || this._deletedMapIds.has(entry.id)) return null;
+        this._index.set(entry.id, entry);
+        // Whatever was held for this map has just been superseded.
+        this.records.delete(entry.id);
+        if (this.currentMapId === entry.id) {
+            const current = this.getRecord(entry.id);
+            if (current) this.state = current;
+        }
+        return entry;
+    }
+
     _indexScene(scene, raw) {
         for (const [id, entry] of this._index) {
             if (entry.sceneId !== scene.id) continue;
@@ -1624,7 +1644,7 @@ class MappingManager {
         this.currentMapId = id;
         this.state = next;
         void this.renderWindow();
-        await this._persistSceneRecords(canvas.scene.id);
+        await this._persistMapRecord(next);
     }
 
     /**
@@ -1974,7 +1994,7 @@ class MappingManager {
                 });
             }
             void this.renderWindow();
-            await this._persistSceneRecords(data.sceneId);
+            await this._persistMapRecord(record);
             return;
         }
 
@@ -2103,7 +2123,7 @@ class MappingManager {
             this.state = record;
         }
         void this.renderWindow();
-        await this._persistSceneRecords(record.sceneId);
+        await this._persistMapRecord(record);
         if (data.action === 'reset') notify(game.i18n.localize(`${MODULE.ID}.mapping.resetDone`), { type: 'info' });
     }
 
@@ -2126,7 +2146,22 @@ class MappingManager {
     }
 
     /**
-     * Write the map container to a Scene flag.
+     * Every map on a scene, as it would be stored.
+     *
+     * Untouched maps go back exactly as they came: reading one only to write it
+     * straight out again is the work the index exists to avoid.
+     */
+    _sceneMaps(sceneId, overrides = {}) {
+        const maps = {};
+        for (const entry of this._index.values()) {
+            if (entry.sceneId !== sceneId) continue;
+            maps[entry.actorId] = foundry.utils.deepClone(this.records.get(entry.id) ?? entry.raw);
+        }
+        return { ...maps, ...overrides };
+    }
+
+    /**
+     * Write the whole map container to a Scene flag.
      *
      * Document#setFlag is update({flags: {scope: {key: value}}}), and document
      * updates merge recursively. A container whose `maps` object is simply
@@ -2134,6 +2169,9 @@ class MappingManager {
      * a deletion, so a removed map survives in the database and returns on
      * reload. The "==" prefix forces replacement of the whole flag instead of
      * merging into it, which is the only way a removal actually persists.
+     *
+     * Only deletions and the first write on a scene need this. Everything else
+     * goes through _persistMapRecord, which writes one map.
      */
     async _writeSceneContainer(scene, container) {
         await scene.update({
@@ -2152,6 +2190,9 @@ class MappingManager {
                     : {};
                 delete maps[actorId];
                 const container = { version: STATE_VERSION, maps };
+                // Unlike a write, this says what the scene now holds rather
+                // than what one map now says -- an absence cannot be sent as a
+                // record.
                 await this._writeSceneContainer(scene, container);
                 await socketManager.broadcast('mapping', 'registry-updated', {
                     userId: game.user.id,
@@ -2163,33 +2204,73 @@ class MappingManager {
         return this._saveQueue;
     }
 
-    async _persistSceneRecords(sceneId) {
-        const scene = game.scenes?.get(sceneId);
-        if (!scene || !game.user.isGM) return;
-        const maps = {};
-        for (const entry of this._index.values()) {
-            if (entry.sceneId !== sceneId) continue;
-            // Untouched maps go back exactly as they came. Reading one only to
-            // write it out again is the work this avoids, and the container is
-            // replaced wholesale, so leaving one out would delete it.
-            maps[entry.actorId] = foundry.utils.deepClone(this.records.get(entry.id) ?? entry.raw);
-        }
-        const container = { version: STATE_VERSION, maps };
+    /**
+     * Write one map, and tell everyone about that one map.
+     *
+     * A scene flag has no partial update of its own, so the whole container was
+     * written back on every change -- every character's map on the scene,
+     * serialized to the database and broadcast to every client, for one party's
+     * single step. On a well-explored scene with a full party that is megabytes
+     * a move, and it grows all session as the maps fill in.
+     *
+     * A document update addresses a path, and the path can reach inside the
+     * container to one Actor's key, so only that map crosses the wire. The "=="
+     * on the Actor's own key replaces that map rather than merging into it,
+     * which matters because a merge cannot take anything away: a floor set back
+     * to default, or a square struck off, would quietly come back.
+     */
+    async _persistMapRecord(record) {
+        const scene = game.scenes?.get(record?.sceneId);
+        if (!scene || !record?.actorId || !game.user.isGM) return;
+        const payload = foundry.utils.deepClone(record);
         this._saveQueue = this._saveQueue
-            .then(() => this._writeSceneContainer(scene, container))
-            .then(() => socketManager.broadcast('mapping', 'registry-updated', {
-                userId: game.user.id,
-                sceneId,
-                container
-            }))
-            .catch(error => console.error(`${MODULE.NAME}: Failed to persist mapping records`, error));
+            .then(async () => {
+                // Read inside the queue, not before it: two maps written at
+                // once would otherwise both find no container and the second
+                // would lay one down over the first.
+                const stored = scene.getFlag(MODULE.ID, FLAG_KEY);
+                const seeded = Number(stored?.version) >= STATE_VERSION
+                    && stored?.maps && typeof stored.maps === 'object';
+                if (seeded) {
+                    // "==" only where there is something to replace. Foundry
+                    // drops a forced-replacement key whose target does not
+                    // exist yet, which would lose a character's first map on a
+                    // scene that already holds someone else's -- and a plain
+                    // key is equally correct there, since an insert has nothing
+                    // to merge into.
+                    const key = record.actorId in stored.maps
+                        ? `==${record.actorId}`
+                        : record.actorId;
+                    await scene.update({
+                        [`flags.${MODULE.ID}.${FLAG_KEY}.maps.${key}`]: payload
+                    });
+                } else {
+                    // Nothing to reach into yet, or a container this version
+                    // cannot read. Lay a whole one down for later writes.
+                    await this._writeSceneContainer(scene, {
+                        version: STATE_VERSION,
+                        maps: this._sceneMaps(scene.id, { [record.actorId]: payload })
+                    });
+                }
+                await socketManager.broadcast('mapping', 'registry-updated', {
+                    userId: game.user.id,
+                    sceneId: record.sceneId,
+                    actorId: record.actorId,
+                    record: payload
+                });
+            })
+            .catch(error => console.error(`${MODULE.NAME}: Failed to persist the map`, error));
         return this._saveQueue;
     }
 
     _handleRegistryUpdated(data) {
         const scene = game.scenes?.get(data?.sceneId);
-        if (!scene || !data.container) return;
-        this._indexScene(scene, data.container);
+        if (!scene) return;
+        // One map, which is what every write sends. A container arrives only
+        // for a deletion, where the point is what the scene no longer holds.
+        if (data.record) this._indexMap(scene, data.record);
+        else if (data.container) this._indexScene(scene, data.container);
+        else return;
         if (!this.currentMapId) {
             const latest = this.getMapList()[0];
             if (latest) this.selectMap(latest.id, { render: false });
