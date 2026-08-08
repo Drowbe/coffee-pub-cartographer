@@ -333,24 +333,36 @@ class MappingManager {
         });
     }
 
+    /**
+     * The menubar button's right-click menu.
+     *
+     * Every item names its handler `onClick`, which is what the menubar calls.
+     * They were written as `callback` -- the name Foundry's own context menus
+     * use, and the one the map window's menus use -- so the menu opened,
+     * looked right, and did nothing at all whichever item was chosen.
+     */
     _menubarMenuItems() {
         const localize = key => game.i18n.localize(`${MODULE.ID}.mapping.${key}`);
         const items = [{
             name: localize('openMap'),
             icon: 'fa-solid fa-map',
-            callback: () => void this.openWindow()
+            onClick: () => void this.openWindow()
         }, { separator: true }];
         if (this.active) {
             items.push({
+                name: localize(this.paused ? 'resumeRecording' : 'pauseRecording'),
+                icon: this.paused ? 'fa-solid fa-play' : 'fa-solid fa-pause',
+                onClick: () => void (this.paused ? this.resumeMapping() : this.pauseMapping())
+            }, {
                 name: localize('stopRecording'),
                 icon: 'fa-solid fa-stop',
-                callback: () => void this.setMode('view')
+                onClick: () => void this.setMode('view')
             });
         } else {
             items.push({
                 name: localize('startRecording'),
                 icon: 'fa-solid fa-circle',
-                callback: () => void this.setMode('record')
+                onClick: () => void this.setMode('record')
             });
         }
         return items;
@@ -813,6 +825,7 @@ class MappingManager {
 
         this.mode = 'record';
         this.paused = false;
+        this.refreshMenubarTool();
         this.trackedTokenId = token.id;
         this.lastGridKey = null;
         // Recording starts from where the token stands, not from whatever

@@ -86,6 +86,8 @@
 	"mapping.centerMap": "Center map",
 	"mapping.startRecording": "Record",
 	"mapping.stopRecording": "Stop Recording",
+	"mapping.pauseRecording": "Pause Recording",
+	"mapping.resumeRecording": "Resume Recording",
 	"mapping.showMaps": "Show recorded maps",
 	"mapping.viewMap": "View map",
 	"mapping.recordedMaps": "Recorded Maps",
