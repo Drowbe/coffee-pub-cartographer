@@ -119,6 +119,7 @@
 	"mapping.kindOfficial": "Official Map",
 	"mapping.partyFallbackName": "The Party",
 	"mapping.officialFallbackName": "Official Map",
+	"mapping.createSection": "New Map",
 	"mapping.createParty": "Start the Party Map",
 	"mapping.createPartyHint": "One shared map of this scene for {party}, built from what everyone donates.",
 	"mapping.createOfficial": "Author an Official Map",

@@ -510,7 +510,6 @@
     stroke-width: 7;
 }
 
-
 .cartographer-mapping-door-line,
 .cartographer-mapping-door-box {
     stroke: var(--cartographer-map-ink);
@@ -833,15 +832,6 @@
     pointer-events: auto;
 }
 
-/* The create card leads the list, so it reads as an action rather than a map. */
-.cartographer-mapping-list-item.is-create {
-    border-style: dashed;
-}
-
-.cartographer-mapping-list-item.is-create .cartographer-mapping-list-icon {
-    background: var(--blacksmith-tool-surface-sunken);
-}
-
 .cartographer-mapping-chrome-actions button.cartographer-mapping-record.is-paused {
     border-color: var(--blacksmith-status-warning);
     background: color-mix(in srgb, var(--blacksmith-status-warning) 18%, var(--blacksmith-tool-field-background));
@@ -954,163 +944,6 @@
     gap: 10px;
 }
 
-.cartographer-mapping-list-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex: 0 0 auto;
-}
-
-/* Foundry styles headings for its own window chrome, which is dark, so the
-   heading arrived light on our light surface. Everything else in the list takes
-   its colour from the tool theme; the heading has to say so explicitly to win
-   against that. */
-.cartographer-mapping-list-header h2 {
-    margin: 0;
-    border: 0;
-    font-size: 1.05rem;
-    color: var(--blacksmith-tool-text);
-}
-
-/* A heading over each run of maps. Sticky, so the group a row belongs to is
-   still legible once the list is long enough to need scrolling -- which is the
-   point at which grouping starts earning its keep. */
-.cartographer-mapping-list-group {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 6px 4px 2px;
-    background: var(--blacksmith-tool-surface-sunken);
-    /* The list is a flex column with a gap, and that gap sits outside the
-       heading's own box -- so once stuck, a scrolling row showed through the
-       strip above it. Painting past the edge covers the gap without taking up
-       any room. */
-    box-shadow: 0 -6px 0 var(--blacksmith-tool-surface-sunken);
-    font-size: 0.82rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--blacksmith-tool-text-muted);
-}
-
-/* The scene being stood in, or the character selected. */
-.cartographer-mapping-list-group.is-here {
-    color: var(--blacksmith-tool-accent);
-}
-
-.cartographer-mapping-group-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.cartographer-mapping-group-count {
-    flex: 0 0 auto;
-    font-variant-numeric: tabular-nums;
-    opacity: 0.7;
-}
-
-.cartographer-mapping-item-actions {
-    display: flex;
-    gap: 4px;
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.cartographer-mapping-item-actions button {
-    width: 30px;
-    height: 30px;
-    margin: 0;
-    padding: 0;
-    border: 1px solid var(--blacksmith-tool-field-border);
-    border-radius: 4px;
-    background: var(--blacksmith-tool-field-background);
-    color: var(--blacksmith-tool-field-text);
-}
-
-.cartographer-mapping-item-actions button:hover {
-    background: var(--blacksmith-tool-surface-hover);
-}
-
-.cartographer-mapping-item-actions button.is-critical {
-    color: var(--blacksmith-status-danger);
-}
-
-.cartographer-mapping-list {
-    display: flex;
-    flex: 1 1 auto;
-    min-height: 0;
-    flex-direction: column;
-    gap: 6px;
-    overflow-y: auto;
-}
-
-.cartographer-mapping-list-item {
-    display: grid;
-    grid-template-columns: 34px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 10px;
-    padding: 10px;
-    border: 1px solid var(--blacksmith-tool-divider);
-    border-radius: 6px;
-    background: var(--blacksmith-tool-surface);
-    cursor: pointer;
-}
-
-.cartographer-mapping-list-item:hover,
-.cartographer-mapping-list-item.is-current {
-    border-color: var(--blacksmith-tool-accent);
-    background: var(--blacksmith-tool-surface-hover);
-}
-
-.cartographer-mapping-list-icon {
-    display: grid;
-    width: 44px;
-    height: 44px;
-    flex: 0 0 auto;
-    place-items: center;
-    border-radius: 4px;
-    background: var(--cartographer-map-paper);
-    color: var(--blacksmith-tool-accent);
-    font-size: 1.2rem;
-}
-
-/* The map silhouette. Rendered small and cached, so it costs nothing to show
-   and nothing to skip when the list is not open. */
-.cartographer-mapping-list-icon img {
-    width: 100%;
-    height: 100%;
-    padding: 3px;
-    box-sizing: border-box;
-    object-fit: contain;
-    image-rendering: pixelated;
-}
-
-.cartographer-mapping-list-copy {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.cartographer-mapping-list-copy strong,
-.cartographer-mapping-list-copy span,
-.cartographer-mapping-list-copy small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.cartographer-mapping-list-copy span,
-.cartographer-mapping-list-copy small {
-    color: var(--blacksmith-tool-text-muted);
-}
-
 /* A note's tooltip, which is a few sentences rather than a label.
 
    Both of these are outside the mapping window in the DOM -- Foundry's tooltip
@@ -1149,22 +982,9 @@
 
 /* A shared map reads as shared at a glance: the eye is open and inked, rather
    than the reader having to hover the button to find out. Unshared is the
-   default state and stays quiet. */
-.cartographer-mapping-item-actions button.cartographer-mapping-share.is-shared {
-    border-color: var(--cartographer-map-party);
-    color: var(--cartographer-map-party);
-}
 
 /* The two create cards that make a map nobody's character owns. Marked apart
    from the ordinary one so the list does not read as three identical rows: the
-   party's map is the party's colour, an artifact is drawn in the map's own ink. */
-.cartographer-mapping-list-item.is-party-create .cartographer-mapping-list-icon {
-    color: var(--cartographer-map-party);
-}
-
-.cartographer-mapping-list-item.is-official-create .cartographer-mapping-list-icon {
-    color: var(--blacksmith-tool-text-muted);
-}
 
 /* Said over blank ruled ground, where there is nothing to suggest what to do
    and the answer is not guessable. Never takes the pointer: the ground beneath
@@ -1200,4 +1020,217 @@
     font-size: 0.8em;
     color: var(--cartographer-map-party);
     vertical-align: baseline;
+}
+
+/* ------------------------------------ */
+/* --- RECORDED MAPS LIST ------------- */
+/* ------------------------------------ */
+
+/* Built entirely from the --blacksmith-tool-* variables the tool window API
+   publishes. That palette is the part of the API that adapts: it is restated per
+   theme, so a list described in terms of it is correct in Light, Dark and Glass
+   without this file knowing which is in effect.
+
+   Blacksmith's blacksmith-list-* and blacksmith-window-section components were
+   tried here and are the wrong family -- they belong to its dark windows and
+   hard-code their colours (`rgba(232,232,232,0.95)` for a row title), which on
+   this window's paper is near-white on cream. Overriding those colours would be
+   fighting the component rather than using it, so the shape is borrowed and the
+   colour comes from the variables. */
+
+/* The list itself: the column the sections stack in, and the thing that
+   scrolls. It carries the gap between sections -- they are plain blocks and set
+   no margins of their own -- and the flex/min-height pair that lets it scroll
+   inside the window rather than growing past it. */
+.cartographer-mapping-list {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+}
+
+/* ----- A group of maps ----- */
+
+.cartographer-mapping-section {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--blacksmith-tool-border);
+    border-radius: 6px;
+    background: var(--blacksmith-tool-surface-raised);
+}
+
+.cartographer-mapping-section-header {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--blacksmith-tool-divider);
+    background: var(--blacksmith-tool-surface-sunken);
+    color: var(--blacksmith-tool-text-muted);
+    font-size: 0.78em;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.cartographer-mapping-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+}
+
+/* How many maps the group holds, at the end of its heading. */
+.cartographer-mapping-section-count {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+}
+
+/* The scene in play, so it can be found without reading. */
+.cartographer-mapping-here > .cartographer-mapping-section-header,
+.cartographer-mapping-here > .cartographer-mapping-section-header i {
+    color: var(--cartographer-map-party);
+}
+
+/* ----- One map ----- */
+
+.cartographer-mapping-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: var(--blacksmith-tool-surface-sunken);
+    color: var(--blacksmith-tool-text);
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+}
+
+.cartographer-mapping-row:hover {
+    border-color: var(--blacksmith-tool-border);
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-mapping-row.is-active {
+    border-color: var(--cartographer-map-party);
+    background: var(--blacksmith-tool-surface-selected);
+}
+
+/* A shade taller than the three lines of text beside it, so the drawing is the
+   thing the eye lands on and the row is anchored by the map rather than by its
+   title. Thumbnails are rendered at 96px, so this is well inside their
+   resolution and stays sharp. */
+.cartographer-mapping-row-img {
+    flex: 0 0 auto;
+    width: 54px;
+    height: 54px;
+    border: 1px solid var(--blacksmith-tool-border);
+    border-radius: 3px;
+}
+
+/* A map's thumbnail is a drawing on paper, not a portrait, so it keeps the
+   map's own background -- on anything else the pale linework reads as blank. */
+img.cartographer-mapping-thumb {
+    background: var(--cartographer-map-paper);
+    object-fit: contain;
+}
+
+/* Rows with no thumbnail: the create actions, and a map too empty to have drawn
+   one. Sized to the same box, so titles line up whichever kind of row it is. */
+.cartographer-mapping-row-glyph {
+    display: grid;
+    place-items: center;
+    border-style: dashed;
+    color: var(--blacksmith-tool-text-muted);
+}
+
+.cartographer-mapping-row-main {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.cartographer-mapping-row-title,
+.cartographer-mapping-row-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cartographer-mapping-row-title {
+    color: var(--blacksmith-tool-text);
+    font-weight: 600;
+}
+
+.cartographer-mapping-row-meta {
+    color: var(--blacksmith-tool-text-muted);
+    font-size: 0.82em;
+}
+
+/* Marks an artifact, so the list reads at a glance rather than by its subtitles. */
+.cartographer-mapping-official-star {
+    color: var(--cartographer-map-party);
+    font-size: 0.85em;
+}
+
+/* Making a map is an invitation rather than a record of one, so it is drawn as
+   an outline where the real rows are filled. */
+.cartographer-mapping-create {
+    border-style: dashed;
+    border-color: var(--blacksmith-tool-border);
+    background: none;
+}
+
+/* ----- What can be done to it ----- */
+
+.cartographer-mapping-row-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 4px;
+}
+
+.cartographer-mapping-action {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    padding: 0;
+    margin: 0;
+    border: 1px solid var(--blacksmith-tool-field-border);
+    border-radius: 4px;
+    background: var(--blacksmith-tool-field-background);
+    color: var(--blacksmith-tool-field-text);
+    line-height: 1;
+}
+
+.cartographer-mapping-action:hover {
+    border-color: var(--blacksmith-tool-text);
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-mapping-action.is-critical:hover {
+    border-color: #a63232;
+    color: #a63232;
+}
+
+/* A shared map reads as shared at a glance, rather than the reader having to
+   hover the button to find out. Unshared is the default and stays quiet. */
+.cartographer-mapping-action.cartographer-mapping-share.is-shared {
+    border-color: var(--cartographer-map-party);
+    color: var(--cartographer-map-party);
+}
+
+.cartographer-mapping-empty-list {
+    padding: 18px 12px;
+    color: var(--blacksmith-tool-text-muted);
+    font-style: italic;
+    text-align: center;
 }

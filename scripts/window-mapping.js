@@ -511,6 +511,12 @@ export class MappingWindow extends ToolWindowBase {
                 // before: a GM can record into anybody's map, so once any map
                 // existed they were told they had one and could never start
                 // another.
+                createSectionLabel: localize('mapping.createSection'),
+                showAnyCreateCard: !this.manager.hasMapForSelectedToken()
+                    || (Boolean(canvas?.scene) && this.manager._isPartyMember()
+                        && !this.manager.hasMapOfKind('party'))
+                    || (Boolean(canvas?.scene) && Boolean(game.user?.isGM)
+                        && !this.manager.hasMapOfKind('official')),
                 showCreateCard: !this.manager.hasMapForSelectedToken(),
                 createTitle: game.i18n.localize(`${MODULE.ID}.mapping.createForScene`),
                 createHint: game.i18n.format(`${MODULE.ID}.mapping.createForSceneHint`, {

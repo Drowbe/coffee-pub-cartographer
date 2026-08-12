@@ -1,95 +1,109 @@
+{{! The list follows the shape of the other tool windows -- a section per group,
+    a row per map -- but is styled from the --blacksmith-tool-* variables the
+    tool window API publishes, which is the part of it that adapts to the theme.
+    Blacksmith's blacksmith-list-* and blacksmith-window-section components are
+    for its dark window family and hard-code their colours; on this window's
+    paper they render near-white text on cream. Overriding a component's colours
+    would be fighting it, so they are not used. }}
 <div class="cartographer-mapping-root{{#if isListView}} is-list-view{{/if}}{{gridClass}}">
     {{#if isListView}}
-    <div class="cartographer-mapping-list-header">
-        <h2>{{localize "coffee-pub-cartographer.mapping.recordedMaps"}}</h2>
-    </div>
-
     <div class="cartographer-mapping-list">
-        {{#if showCreateCard}}
-        {{! The list's own heading action: always offered, and it names the
-            scene it would map. }}
-        <article class="cartographer-mapping-list-item is-create" data-action="add-map">
-            <div class="cartographer-mapping-list-icon"><i class="fa-solid fa-plus"></i></div>
-            <div class="cartographer-mapping-list-copy">
-                <strong>{{createTitle}}</strong>
-                <span>{{createHint}}</span>
+        {{! Making a map. One card per kind, each shown only while the thing it
+            would make does not exist yet. }}
+        {{#if showAnyCreateCard}}
+        <div class="cartographer-mapping-section">
+            <div class="cartographer-mapping-section-header">
+                <i class="fa-solid fa-plus"></i>
+                <span>{{createSectionLabel}}</span>
             </div>
-        </article>
-        {{/if}}
-        {{! The map the party holds together, which is donated to rather than
-            recorded into. Only ever one to a scene. }}
-        {{#if showPartyCard}}
-        <article class="cartographer-mapping-list-item is-create is-party-create" data-action="add-party-map">
-            <div class="cartographer-mapping-list-icon"><i class="fa-solid fa-users"></i></div>
-            <div class="cartographer-mapping-list-copy">
-                <strong>{{partyTitle}}</strong>
-                <span>{{partyHint}}</span>
+            <div class="cartographer-mapping-section-body">
+                {{#if showCreateCard}}
+                <div class="cartographer-mapping-row cartographer-mapping-create" data-action="add-map" role="button" tabindex="0">
+                    <i class="fa-solid fa-user-pen cartographer-mapping-row-img cartographer-mapping-row-glyph"></i>
+                    <div class="cartographer-mapping-row-main">
+                        <div class="cartographer-mapping-row-title">{{createTitle}}</div>
+                        <div class="cartographer-mapping-row-meta">{{createHint}}</div>
+                    </div>
+                </div>
+                {{/if}}
+                {{#if showPartyCard}}
+                <div class="cartographer-mapping-row cartographer-mapping-create" data-action="add-party-map" role="button" tabindex="0">
+                    <i class="fa-solid fa-users cartographer-mapping-row-img cartographer-mapping-row-glyph"></i>
+                    <div class="cartographer-mapping-row-main">
+                        <div class="cartographer-mapping-row-title">{{partyTitle}}</div>
+                        <div class="cartographer-mapping-row-meta">{{partyHint}}</div>
+                    </div>
+                </div>
+                {{/if}}
+                {{#if showOfficialCard}}
+                <div class="cartographer-mapping-row cartographer-mapping-create" data-action="add-official-map" role="button" tabindex="0">
+                    <i class="fa-solid fa-scroll cartographer-mapping-row-img cartographer-mapping-row-glyph"></i>
+                    <div class="cartographer-mapping-row-main">
+                        <div class="cartographer-mapping-row-title">{{officialTitle}}</div>
+                        <div class="cartographer-mapping-row-meta">{{officialHint}}</div>
+                    </div>
+                </div>
+                {{/if}}
             </div>
-        </article>
+        </div>
         {{/if}}
-        {{! An artifact, authored rather than explored: no token is involved and
-            none is wanted. }}
-        {{#if showOfficialCard}}
-        <article class="cartographer-mapping-list-item is-create is-official-create" data-action="add-official-map">
-            <div class="cartographer-mapping-list-icon"><i class="fa-solid fa-scroll"></i></div>
-            <div class="cartographer-mapping-list-copy">
-                <strong>{{officialTitle}}</strong>
-                <span>{{officialHint}}</span>
-            </div>
-        </article>
-        {{/if}}
+
         {{#if listEmpty}}
-        <div class="cartographer-mapping-empty">
-            <i class="fa-solid fa-map"></i>
-            <span>{{listEmptyMessage}}</span>
-        </div>
+        <div class="cartographer-mapping-empty-list">{{listEmptyMessage}}</div>
         {{else}}
-        {{! Gathered under a heading carrying whichever of scene or character
-            the group is keyed on, so each row only has to say the other. }}
+        {{! One section per group, carrying whichever of scene or character the
+            group is keyed on, so each row only has to say the other. }}
         {{#each groups}}
-        <div class="cartographer-mapping-list-group{{#if isHere}} is-here{{/if}}">
-            <span class="cartographer-mapping-group-name">{{name}}</span>
-            <span class="cartographer-mapping-group-count">{{count}}</span>
+        <div class="cartographer-mapping-section{{#if isHere}} cartographer-mapping-here{{/if}}">
+            <div class="cartographer-mapping-section-header">
+                <i class="fa-solid {{#if isHere}}fa-location-dot{{else}}fa-folder{{/if}}"></i>
+                <span>{{name}}</span>
+                <span class="cartographer-mapping-section-count">{{count}}</span>
+            </div>
+            <div class="cartographer-mapping-section-body">
+                {{#each maps}}
+                <div class="cartographer-mapping-row{{#if isCurrent}} is-active{{/if}}" data-action="select-map" data-map-id="{{id}}" role="button" tabindex="0">
+                    {{#if thumbnail}}
+                    <img class="cartographer-mapping-row-img cartographer-mapping-thumb" src="{{thumbnail}}" alt="" draggable="false">
+                    {{else}}
+                    <i class="fa-solid fa-map cartographer-mapping-row-img cartographer-mapping-row-glyph"></i>
+                    {{/if}}
+                    <div class="cartographer-mapping-row-main">
+                        <div class="cartographer-mapping-row-title">
+                            {{#if isOfficial}}<i class="fa-solid fa-star cartographer-mapping-official-star" data-tooltip="{{kindLabel}}"></i> {{/if}}{{name}}
+                        </div>
+                        {{#if subtitle}}<div class="cartographer-mapping-row-meta">{{subtitle}}</div>{{/if}}
+                        <div class="cartographer-mapping-row-meta">{{feetMapped}} {{../../feetMappedLabel}}{{#if updated}} · {{updated}}{{/if}}</div>
+                    </div>
+                    {{#if canManage}}
+                    <div class="cartographer-mapping-row-actions">
+                        {{! Hand what this map knows to the party's. Adds only, so
+                            it can be pressed again after exploring further. }}
+                        {{#if canDonate}}
+                        <button type="button" class="cartographer-mapping-action" data-action="donate-map" data-map-id="{{id}}" data-tooltip="{{../../donateLabel}}" aria-label="{{../../donateLabel}}">
+                            <i class="fa-solid fa-hand-holding-heart"></i>
+                        </button>
+                        {{/if}}
+                        {{! Whether anyone else sees this map at all. }}
+                        {{#if canShare}}
+                        <button type="button" class="cartographer-mapping-action cartographer-mapping-share{{#if isShared}} is-shared{{/if}}" data-action="toggle-shared" data-map-id="{{id}}" data-shared="{{isShared}}" data-tooltip="{{shareLabel}}" aria-label="{{shareLabel}}" aria-pressed="{{isShared}}">
+                            <i class="fa-solid {{#if isShared}}fa-eye{{else}}fa-eye-slash{{/if}}"></i>
+                        </button>
+                        {{/if}}
+                        <button type="button" class="cartographer-mapping-action" data-action="rename-map" data-map-id="{{id}}" data-tooltip="{{../../renameLabel}}" aria-label="{{../../renameLabel}}">
+                            <i class="fa-solid fa-pen"></i>
+                        </button>
+                        {{#if canDelete}}
+                        <button type="button" class="cartographer-mapping-action is-critical" data-action="delete-map" data-map-id="{{id}}" data-tooltip="{{../../deleteLabel}}" aria-label="{{../../deleteLabel}}">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                        {{/if}}
+                    </div>
+                    {{/if}}
+                </div>
+                {{/each}}
+            </div>
         </div>
-        {{#each maps}}
-        <article class="cartographer-mapping-list-item{{#if isCurrent}} is-current{{/if}}" data-action="select-map" data-map-id="{{id}}">
-            <div class="cartographer-mapping-list-icon">
-                {{#if thumbnail}}<img src="{{thumbnail}}" alt="" draggable="false">{{else}}<i class="fa-solid fa-map"></i>{{/if}}
-            </div>
-            <div class="cartographer-mapping-list-copy">
-                <strong>{{#if isOfficial}}<i class="fa-solid fa-star cartographer-mapping-official-star" data-tooltip="{{kindLabel}}"></i> {{/if}}{{name}}</strong>
-                {{#if subtitle}}<span>{{subtitle}}</span>{{/if}}
-                <small>{{feetMapped}} {{../../feetMappedLabel}}{{#if updated}} · {{updated}}{{/if}}</small>
-            </div>
-            {{#if canManage}}
-            <div class="cartographer-mapping-item-actions">
-                {{! Whether the rest of the party sees this map at all. Shown
-                    only on a player map, which is the only kind that can be
-                    kept back. }}
-                {{! Hand what this map knows to the party's. Adds only, so it can
-                    be pressed again after exploring further. }}
-                {{#if canDonate}}
-                <button type="button" data-action="donate-map" data-map-id="{{id}}" data-tooltip="{{../../donateLabel}}" aria-label="{{../../donateLabel}}">
-                    <i class="fa-solid fa-hand-holding-heart"></i>
-                </button>
-                {{/if}}
-                {{#if canShare}}
-                <button type="button" class="cartographer-mapping-share{{#if isShared}} is-shared{{/if}}" data-action="toggle-shared" data-map-id="{{id}}" data-shared="{{isShared}}" data-tooltip="{{shareLabel}}" aria-label="{{shareLabel}}" aria-pressed="{{isShared}}">
-                    <i class="fa-solid {{#if isShared}}fa-eye{{else}}fa-eye-slash{{/if}}"></i>
-                </button>
-                {{/if}}
-                <button type="button" data-action="rename-map" data-map-id="{{id}}" data-tooltip="{{../../renameLabel}}" aria-label="{{../../renameLabel}}">
-                    <i class="fa-solid fa-pen"></i>
-                </button>
-                {{#if canDelete}}
-                <button type="button" class="is-critical" data-action="delete-map" data-map-id="{{id}}" data-tooltip="{{../../deleteLabel}}" aria-label="{{../../deleteLabel}}">
-                    <i class="fa-solid fa-trash-can"></i>
-                </button>
-                {{/if}}
-            </div>
-            {{/if}}
-        </article>
-        {{/each}}
         {{/each}}
         {{/if}}
     </div>
