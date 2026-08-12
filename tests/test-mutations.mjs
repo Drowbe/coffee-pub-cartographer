@@ -24,7 +24,7 @@ const methods = [
 // The real merge, loaded rather than stubbed, so the handler is exercised
 // against the function it actually calls. Resolved from the working directory
 // so this file can live outside the project.
-const { mergeMapInto } = await import(
+const { mergeMapInto, contiguousFloorRegion } = await import(
     `file:///${process.cwd().replace(/\\/g, '/')}/scripts/utils-mapping.js`
 );
 const MODULE = { ID: 'coffee-pub-cartographer', NAME: 'Cartographer' };
@@ -279,6 +279,39 @@ console.log('\ndonating, through the real handler');
     m3.getRecord = (id) => (id === 'a-alice::s1' ? m3._current : null);
     await m3._processMutationRequest({ action: 'donate', mapId: 'a-alice::s1', fromMapId: 'a-alice::s1', userId: 'u-alice' }, { allowLocalGM: true });
     check('cannot donate into a player map', m3.saved, null);
+}
+
+
+console.log('\nstriking off: one square, or the area walled in with it');
+{
+    // A four-square room, all connected, no walls between them.
+    const room = baseRecord({ explored: ['1,1', '2,1', '1,2', '2,2'], floors: { '1,1': 'wood', '2,1': 'wood' } });
+    const atlas = { features: {}, barriers: new Set(), split: new Set() };
+
+    const one = makeManager(room);
+    one.atlasFor = () => atlas;
+    await one._processMutationRequest({ action: 'mark-rock', mapId: room.id, column: 1, row: 1, userId: 'u-gm' }, { allowLocalGM: true });
+    check('a single strike takes one square', one.saved.explored.sort(), ['1,2', '2,1', '2,2']);
+    check('and only its surface', one.saved.floors, { '2,1': 'wood' });
+    check('the square is remembered as struck off', one.saved.hidden, ['1,1']);
+
+    const area = makeManager(room);
+    area.atlasFor = () => atlas;
+    await area._processMutationRequest({ action: 'mark-rock', mapId: room.id, column: 1, row: 1, area: true, userId: 'u-gm' }, { allowLocalGM: true });
+    check('an area strike takes the whole room', area.saved.explored, []);
+    check('and every surface in it', area.saved.floors, {});
+    check('all of it remembered', area.saved.hidden.sort(), ['1,1', '1,2', '2,1', '2,2']);
+}
+
+console.log('\nan area strike stops at a wall, as surfacing does');
+{
+    // A wall between 1,1 and 2,1 splits the run in two.
+    const split = baseRecord({ explored: ['1,1', '2,1'] });
+    const atlas = { features: { '1,1': ['wall:east'] }, barriers: new Set(), split: new Set() };
+    const m = makeManager(split);
+    m.atlasFor = () => atlas;
+    await m._processMutationRequest({ action: 'mark-rock', mapId: split.id, column: 1, row: 1, area: true, userId: 'u-gm' }, { allowLocalGM: true });
+    check('the far side of the wall survives', m.saved.explored, ['2,1']);
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');

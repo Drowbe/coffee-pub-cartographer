@@ -111,6 +111,7 @@
 	"mapping.fixThings": "Fix Things",
 	"mapping.markFloor": "This is a floor",
 	"mapping.markRock": "This is not a floor",
+	"mapping.markRockArea": "This whole area is not floor",
 	"mapping.blankCanvasHint": "Right-click any square and choose Fix Things → This is a floor to start drawing.",
 	"mapping.kindPlayer": "Player Map",
 	"mapping.kindParty": "Party Map",

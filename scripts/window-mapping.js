@@ -1898,7 +1898,16 @@ export class MappingWindow extends ToolWindowBase {
                 name: `${localize('mapping.markRock')}${isFloor ? '' : ' ✓'}`,
                 icon: 'fa-solid fa-mountain',
                 callback: () => this.manager.markRock(column, row)
-            }]
+            },
+            // Separate from the square above rather than replacing it: striking
+            // one square is how a misread corner gets fixed, and flooding from
+            // there would take the whole room that corner opens onto. Offered
+            // only where there is an area to clear.
+            ...(isFloor ? [{
+                name: localize('mapping.markRockArea'),
+                icon: 'fa-solid fa-fill-drip',
+                callback: () => this.manager.markRock(column, row, { area: true })
+            }] : [])]
         };
     }
 

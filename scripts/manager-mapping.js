@@ -2290,14 +2290,30 @@ class MappingManager {
         return true;
     }
 
-    async markRock(column, row) {
+    /**
+     * Strike a square off, or the whole area it belongs to.
+     *
+     * Two actions rather than one because they answer different complaints, and
+     * the wrong one is destructive. A square at a time is what Fix Things was
+     * built for: the mapper reads a corner the way a traced wall describes it
+     * rather than the way the room is, and one square is wrong. Flooding from
+     * there would take the entire room it opens onto, which is the opposite of
+     * what was asked.
+     *
+     * The area is what an authored map wants -- a whole chamber the seeding
+     * enclosed that should not be on the map at all. Bounded exactly as
+     * surfacing a floor is bounded, so it stops at the walls and doorways the
+     * map already knows about and cannot run away across the level.
+     */
+    async markRock(column, row, { area = false } = {}) {
         const record = this.getRecord(this.currentMapId);
         if (!record || !this.canManageRecord(record)) return false;
         await this._requestMutation({
             action: 'mark-rock',
             mapId: record.id,
             column: Number(column),
-            row: Number(row)
+            row: Number(row),
+            area: area === true
         });
         return true;
     }
@@ -2633,9 +2649,22 @@ class MappingManager {
                 // having worked.
                 floors = propagateFloors(explored, this.atlasFor(record.sceneId), floors, [key], sides);
             } else {
-                hidden.add(key);
-                explored.delete(key);
-                delete floors[key];
+                // One square, or everything walled in with it. The region is
+                // read before anything is struck off, since it is worked out
+                // from the squares that are still there.
+                const struck = data.area === true
+                    ? contiguousFloorRegion(
+                        this.exploredSet(record),
+                        this.atlasFor(record.sceneId),
+                        { column, row },
+                        sides
+                    )
+                    : [key];
+                for (const target of struck) {
+                    hidden.add(target);
+                    explored.delete(target);
+                    delete floors[target];
+                }
             }
             record = {
                 ...record,
