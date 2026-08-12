@@ -603,20 +603,19 @@ export class MappingWindow extends ToolWindowBase {
         const cells = coordinates.map(([column, row]) => {
             const key = `${column},${row}`;
             const isParty = trackedPosition?.column === column && trackedPosition?.row === row;
-            const floor = this.manager.state.floors?.[key];
             const isNew = newTiles.has(key);
             const symbol = placedSymbols.get(key);
             const symbolDefinition = symbol ? getMappingSymbol(symbol.type) : null;
+            const clip = mappedGeometry.floorClipByCell.get(key) ?? null;
             return {
                 key,
                 gridColumn: column - originColumn + 1,
                 gridRow: row - originRow + 1,
-                // Absolute coordinates, so a floor surface can phase its
-                // pattern to a single lattice across the whole room.
-                patternX: column,
-                patternY: row,
-                floorClip: mappedGeometry.floorClipByCell.get(key) ?? null,
-                className: `is-explored${isNew ? ' is-new' : ''}${isParty ? ' is-party' : ''}${floor ? ` is-floor-${floor}` : ''}${mappedGeometry.floorClipByCell.has(key) ? ' is-clipped' : ''}`,
+                // The square's own share of the paper, for the layer that draws
+                // it. The surface that sits on top of the paper is not cut here:
+                // it is one layer for the whole map and carries its own clip.
+                floorClip: clip ? this._clipCss(clip) : null,
+                className: `is-explored${isNew ? ' is-new' : ''}${isParty ? ' is-party' : ''}${clip ? ' is-clipped' : ''}`,
                 segments: mappedGeometry.segmentsByCell.get(key) ?? [],
                 doorSymbols: mappedGeometry.doorSymbolsByCell.get(key) ?? [],
                 secretDoorSymbols: mappedGeometry.secretDoorSymbolsByCell.get(key) ?? [],
@@ -647,9 +646,113 @@ export class MappingWindow extends ToolWindowBase {
             hatchCells: this._buildHatchCells(
                 explored, originColumn, originRow, mappedGeometry.floorClipByCell
             ),
+            floorLayers: this._buildFloorLayers(explored, {
+                originColumn, originRow, columnCount, rowCount
+            }, mappedGeometry.floorClipByCell),
             showParty: Boolean(trackedPosition),
             feetMapped: explored.size * (this.manager.state.gridDistance || 5)
         };
+    }
+
+    /**
+     * The surfaces, as one layer each rather than one layer per square.
+     *
+     * A masked box per square is what made choosing anything but Default crawl.
+     * Every surfaced square became its own transparency layer -- thousands of
+     * them, each re-rastered on every zoom step, and each phased to its own mask
+     * position so no two could ever share a raster. The rock hatching had always
+     * done the identical per-square phasing trick with `background-image`, which
+     * costs a tile blit and nothing else, and it never crawled: that is the
+     * comparison this rests on, and it is why the answer is not a thinner
+     * pattern. A thinner pattern would still have been one layer per square.
+     *
+     * So a surface is one element covering the whole grid, tiled once, cut to
+     * the squares carrying it by an SVG clipPath: whole squares as rectangles,
+     * and the squares a wall cuts through as the polygon that wall left behind.
+     * Eight layers at the very worst, whatever the map's size.
+     *
+     * Runs of neighbouring squares along a row collapse into one rectangle,
+     * which takes the count down by about the width of a room -- a 20x20
+     * chamber is 20 rectangles rather than 400.
+     *
+     * Coordinates are fractions of the grid rather than pixels, so nothing here
+     * needs to know the cell size and a theme stays free to change it.
+     */
+    _buildFloorLayers(explored, { originColumn, originRow, columnCount, rowCount }, clips) {
+        const floors = this.manager.state.floors;
+        if (!floors || !columnCount || !rowCount) return [];
+
+        // Grouped by surface, with the squares a wall cuts through kept apart:
+        // those contribute a polygon rather than a rectangle, so they cannot
+        // join a run.
+        const whole = new Map();
+        const cut = new Map();
+        for (const key of explored) {
+            const type = floors[key];
+            if (!type) continue;
+            const [column, row] = key.split(',').map(Number);
+            if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
+            const target = clips.has(key) ? cut : whole;
+            if (!target.has(type)) target.set(type, []);
+            target.get(type).push({ column, row, key });
+        }
+        if (!whole.size && !cut.size) return [];
+
+        const round = value => Math.round(value * 1e6) / 1e6;
+        const across = column => round((column - originColumn) / columnCount);
+        const down = row => round((row - originRow) / rowCount);
+        const layers = [];
+        // Catalogue order, so the markup does not reshuffle between renders.
+        for (const { type } of MAPPING_FLOOR_TYPES) {
+            const squares = whole.get(type) ?? [];
+            const cutSquares = cut.get(type) ?? [];
+            if (!squares.length && !cutSquares.length) continue;
+
+            const rects = [];
+            squares.sort((left, right) => left.row - right.row || left.column - right.column);
+            for (let index = 0; index < squares.length;) {
+                const start = squares[index];
+                let end = index;
+                while (end + 1 < squares.length
+                    && squares[end + 1].row === start.row
+                    && squares[end + 1].column === squares[end].column + 1) end++;
+                rects.push({
+                    x: across(start.column),
+                    y: down(start.row),
+                    width: round((end - index + 1) / columnCount),
+                    height: round(1 / rowCount)
+                });
+                index = end + 1;
+            }
+
+            const polygons = cutSquares
+                .map(square => (clips.get(square.key) ?? [])
+                    .map(point => `${across(square.column + (point.x / 100))},${down(square.row + (point.y / 100))}`)
+                    .join(' '))
+                .filter(points => points);
+
+            layers.push({
+                type,
+                clipId: `${MODULE.ID}-floor-${type}`,
+                rects,
+                polygons,
+                // Phased by the grid's own origin so a surface stays put in the
+                // world as the map grows outward past it. This is what the
+                // per-square phasing was for, now done once for the whole map --
+                // which also makes a surface genuinely continuous instead of
+                // thousands of separately aligned tiles that had to be talked
+                // into meeting at the seams.
+                patternX: originColumn,
+                patternY: originRow
+            });
+        }
+        return layers;
+    }
+
+    /** A clip polygon as CSS, in the square's own percentages. */
+    _clipCss(points) {
+        const round = value => Math.round(value * 100) / 100;
+        return points.map(point => `${round(point.x)}% ${round(point.y)}%`).join(', ');
     }
 
     /**
@@ -895,13 +998,12 @@ export class MappingWindow extends ToolWindowBase {
      */
     _thinnestFloor(clips) {
         let thinnest = 100;
-        for (const polygon of clips.values()) {
-            const points = polygon.split(', ').map(pair => pair.split(' ').map(parseFloat));
+        for (const points of clips.values()) {
             let twiceArea = 0;
             for (let index = 0; index < points.length; index++) {
-                const [x0, y0] = points[index];
-                const [x1, y1] = points[(index + 1) % points.length];
-                twiceArea += (x0 * y1) - (x1 * y0);
+                const from = points[index];
+                const to = points[(index + 1) % points.length];
+                twiceArea += (from.x * to.y) - (to.x * from.y);
             }
             thinnest = Math.min(thinnest, Math.round(Math.abs(twiceArea) / 200));
         }
@@ -961,8 +1063,11 @@ export class MappingWindow extends ToolWindowBase {
             cut = true;
         }
         if (!cut || polygon.length < 3) return null;
-        const round = value => Math.round(value * 100) / 100;
-        return polygon.map(point => `${round(point.x)}% ${round(point.y)}%`).join(', ');
+        // The points themselves rather than a CSS string. Two things need this
+        // shape now -- the paper's own clip-path and the surface layer's
+        // clipPath, which wants them in the grid's coordinates rather than the
+        // square's -- and re-parsing a string to get back to numbers was silly.
+        return polygon;
     }
 
     /**

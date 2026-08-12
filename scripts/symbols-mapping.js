@@ -193,9 +193,18 @@ export const MAPPING_SYMBOL_TEXT_LIMIT = 240;
 /**
  * Floor surfaces, applied to a whole contiguous area rather than one square.
  * "default" carries no pattern and is how a floor is cleared again.
+ *
+ * Order is deliberate rather than alphabetical: clearing first, then the plain
+ * shades, then the patterns. The shades are flat washes with no pattern at all,
+ * which is both the cheapest thing the renderer can draw and what a plain
+ * old-school map actually wants -- a room told apart from its neighbour by tone
+ * rather than by material.
  */
 export const MAPPING_FLOOR_TYPES = Object.freeze([
     { type: 'default', labelKey: 'mapping.floorDefault', icon: 'fa-regular fa-square' },
+    { type: 'shade-light', labelKey: 'mapping.floorShadeLight', icon: 'fa-solid fa-fill' },
+    { type: 'shade-medium', labelKey: 'mapping.floorShadeMedium', icon: 'fa-solid fa-fill-drip' },
+    { type: 'shade-dark', labelKey: 'mapping.floorShadeDark', icon: 'fa-solid fa-square' },
     { type: 'brick', labelKey: 'mapping.floorBrick', icon: 'fa-solid fa-table-cells-large' },
     { type: 'cobblestone', labelKey: 'mapping.floorCobblestone', icon: 'fa-solid fa-circle-nodes' },
     { type: 'dirt', labelKey: 'mapping.floorDirt', icon: 'fa-solid fa-mound' },

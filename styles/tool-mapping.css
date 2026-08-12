@@ -21,6 +21,14 @@
     --cartographer-map-hatch: rgba(23, 19, 16, 0.92);
     --cartographer-map-floor-fill: rgba(23, 19, 16, 0.34);
 
+    /* The plain shades, which carry no pattern. Three steps of the same ink the
+       patterns use, so a shaded room and a surfaced one read as the same pen.
+       Stated per theme because on dark paper a shade has to lighten to register
+       at all, and a straight alpha ramp of one colour cannot do both. */
+    --cartographer-map-floor-tint-light: rgba(23, 19, 16, 0.09);
+    --cartographer-map-floor-tint-medium: rgba(23, 19, 16, 0.19);
+    --cartographer-map-floor-tint-dark: rgba(23, 19, 16, 0.32);
+
     --cartographer-map-party: #c15701;
 }
 
@@ -34,6 +42,9 @@
     --cartographer-map-void-grid: rgba(236, 227, 208, 0.08);
     --cartographer-map-hatch: rgba(236, 227, 208, 0.72);
     --cartographer-map-floor-fill: rgba(236, 227, 208, 0.26);
+    --cartographer-map-floor-tint-light: rgba(236, 227, 208, 0.06);
+    --cartographer-map-floor-tint-medium: rgba(236, 227, 208, 0.13);
+    --cartographer-map-floor-tint-dark: rgba(236, 227, 208, 0.22);
     --cartographer-map-party: #e8a34a;
 }
 
@@ -49,6 +60,9 @@
     --cartographer-map-void-grid: rgba(255, 255, 255, 0.07);
     --cartographer-map-hatch: rgba(242, 234, 217, 0.62);
     --cartographer-map-floor-fill: rgba(242, 234, 217, 0.24);
+    --cartographer-map-floor-tint-light: rgba(242, 234, 217, 0.06);
+    --cartographer-map-floor-tint-medium: rgba(242, 234, 217, 0.12);
+    --cartographer-map-floor-tint-dark: rgba(242, 234, 217, 0.20);
     --cartographer-map-party: rgba(240, 214, 160, 0.95);
 }
 
@@ -228,22 +242,31 @@
     pointer-events: none;
 }
 
-/* A floor surface is cut back with the paper it sits on, and has to stay above
-   it: the paper layer is drawn later in the markup, so both are given an order. */
-.cartographer-mapping-cell.is-clipped::before {
-    z-index: 1;
-    clip-path: var(--cartographer-floor-clip);
-}
+/* Floor surfaces are one layer per surface for the whole map, not a masked box
+   per square. A masked box per square is what made choosing anything but Default
+   crawl: every surfaced square became its own transparency layer -- thousands of
+   them, re-rastered on every zoom step, and each phased to its own mask position
+   so no two could ever share a raster. The hatch band had always done the very
+   same per-square phasing with background-image, which costs a tile blit and
+   nothing else, and it never crawled. That comparison is why the fix here is the
+   layer count and not a thinner pattern: a thinner pattern would still have been
+   one layer per square.
 
-/* Floor surfaces are painted by a masked overlay rather than a background, so
-   the square keeps its paper underneath and the pattern still takes its colour
-   from the theme. Each square phases the mask by its own grid position, the
-   same trick the hatching uses, so a surface reads as one continuous material
-   across a room instead of restarting at every square. */
-.cartographer-mapping-cell.is-explored[class*="is-floor-"]::before {
-    content: '';
+   Each layer covers the whole grid, tiles its pattern once, and is cut to the
+   squares carrying that surface by an SVG clipPath the renderer builds. The
+   pattern is still phased, but by the grid's origin rather than per square, so
+   it stays put in the world as the map grows outward -- and a surface is now
+   genuinely one continuous material rather than thousands of separately aligned
+   tiles talked into meeting at their seams.
+
+   Masked rather than filled with a background image so the pattern keeps taking
+   its colour from the theme. Sits above the paper and below the linework, in the
+   stacking order the cells already establish. */
+.cartographer-mapping-floor {
     position: absolute;
     inset: 0;
+    z-index: 1;
+    pointer-events: none;
     background-color: var(--cartographer-map-floor-fill);
     -webkit-mask-repeat: repeat;
     mask-repeat: repeat;
@@ -253,67 +276,103 @@
     mask-position:
         calc(var(--cartographer-floor-x, 0) * var(--cartographer-map-cell-size) * -1)
         calc(var(--cartographer-floor-y, 0) * var(--cartographer-map-cell-size) * -1);
-    pointer-events: none;
 }
 
-/* Grit gathered into clusters rather than spread evenly, so it reads as
-   scuffed ground the way the grass tufts read as growth. */
-.cartographer-mapping-cell.is-floor-dirt::before {
-    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cg fill='%23000'%3E%3Ccircle cx='6' cy='6' r='1.4'/%3E%3Ccircle cx='9.4' cy='7.6' r='0.85'/%3E%3Ccircle cx='6.8' cy='9.3' r='0.6'/%3E%3Ccircle cx='4.2' cy='8.2' r='0.5'/%3E%3Ccircle cx='18' cy='17' r='1.5'/%3E%3Ccircle cx='21' cy='18.6' r='0.9'/%3E%3Ccircle cx='18.7' cy='20.4' r='0.6'/%3E%3Ccircle cx='15.6' cy='18.9' r='0.55'/%3E%3Ccircle cx='20' cy='5' r='1.1'/%3E%3Ccircle cx='22.4' cy='6.6' r='0.6'/%3E%3Ccircle cx='6' cy='20' r='1'/%3E%3Ccircle cx='3.6' cy='21.4' r='0.55'/%3E%3C/g%3E%3C/svg%3E");
-    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cg fill='%23000'%3E%3Ccircle cx='6' cy='6' r='1.4'/%3E%3Ccircle cx='9.4' cy='7.6' r='0.85'/%3E%3Ccircle cx='6.8' cy='9.3' r='0.6'/%3E%3Ccircle cx='4.2' cy='8.2' r='0.5'/%3E%3Ccircle cx='18' cy='17' r='1.5'/%3E%3Ccircle cx='21' cy='18.6' r='0.9'/%3E%3Ccircle cx='18.7' cy='20.4' r='0.6'/%3E%3Ccircle cx='15.6' cy='18.9' r='0.55'/%3E%3Ccircle cx='20' cy='5' r='1.1'/%3E%3Ccircle cx='22.4' cy='6.6' r='0.6'/%3E%3Ccircle cx='6' cy='20' r='1'/%3E%3Ccircle cx='3.6' cy='21.4' r='0.55'/%3E%3C/g%3E%3C/svg%3E");
-    -webkit-mask-size: 26px 26px;
-    mask-size: 26px 26px;
+/* The clip shapes have to be in the document, but must take up none of it. */
+.cartographer-mapping-floor-clips {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
 }
 
-/* Tufts, a few to a square. */
-.cartographer-mapping-cell.is-floor-grass::before {
-    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M6 19 L5 13 M6 19 L7 13 M6 19 L9 15'/%3E%3Cpath d='M18 24 L17 18 M18 24 L19 18 M18 24 L21 20'/%3E%3Cpath d='M13 10 L12 5 M13 10 L14 5 M13 10 L16 7'/%3E%3C/g%3E%3C/svg%3E");
-    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M6 19 L5 13 M6 19 L7 13 M6 19 L9 15'/%3E%3Cpath d='M18 24 L17 18 M18 24 L19 18 M18 24 L21 20'/%3E%3Cpath d='M13 10 L12 5 M13 10 L14 5 M13 10 L16 7'/%3E%3C/g%3E%3C/svg%3E");
-    -webkit-mask-size: 26px 26px;
-    mask-size: 26px 26px;
+/* The plain shades carry no pattern at all, so they skip the mask entirely and
+   are a flat wash: the cheapest thing in this file, and what a plain map wants
+   when one room only needs telling apart from the next by tone. */
+.cartographer-mapping-floor.is-floor-shade-light {
+    background-color: var(--cartographer-map-floor-tint-light);
 }
 
-/* Clustered boulders in assorted sizes. */
-.cartographer-mapping-cell.is-floor-rock::before {
-    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Ccircle cx='7' cy='8' r='3.4'/%3E%3Ccircle cx='13' cy='12' r='1.9'/%3E%3Ccircle cx='4' cy='14' r='1.4'/%3E%3Ccircle cx='21' cy='21' r='3.8'/%3E%3Ccircle cx='26' cy='16' r='1.7'/%3E%3Ccircle cx='18' cy='26' r='2.3'/%3E%3Ccircle cx='25' cy='5' r='2.1'/%3E%3C/g%3E%3C/svg%3E");
-    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Ccircle cx='7' cy='8' r='3.4'/%3E%3Ccircle cx='13' cy='12' r='1.9'/%3E%3Ccircle cx='4' cy='14' r='1.4'/%3E%3Ccircle cx='21' cy='21' r='3.8'/%3E%3Ccircle cx='26' cy='16' r='1.7'/%3E%3Ccircle cx='18' cy='26' r='2.3'/%3E%3Ccircle cx='25' cy='5' r='2.1'/%3E%3C/g%3E%3C/svg%3E");
-    -webkit-mask-size: 30px 30px;
-    mask-size: 30px 30px;
+.cartographer-mapping-floor.is-floor-shade-medium {
+    background-color: var(--cartographer-map-floor-tint-medium);
 }
 
-/* Packed cobbles, offset row to row. */
-.cartographer-mapping-cell.is-floor-cobblestone::before {
-    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='16' viewBox='0 0 24 16'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cellipse cx='6' cy='4' rx='5' ry='3'/%3E%3Cellipse cx='18' cy='4' rx='5' ry='3'/%3E%3Cellipse cx='0' cy='12' rx='5' ry='3'/%3E%3Cellipse cx='12' cy='12' rx='5' ry='3'/%3E%3Cellipse cx='24' cy='12' rx='5' ry='3'/%3E%3C/g%3E%3C/svg%3E");
-    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='16' viewBox='0 0 24 16'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cellipse cx='6' cy='4' rx='5' ry='3'/%3E%3Cellipse cx='18' cy='4' rx='5' ry='3'/%3E%3Cellipse cx='0' cy='12' rx='5' ry='3'/%3E%3Cellipse cx='12' cy='12' rx='5' ry='3'/%3E%3Cellipse cx='24' cy='12' rx='5' ry='3'/%3E%3C/g%3E%3C/svg%3E");
-    -webkit-mask-size: 24px 16px;
-    mask-size: 24px 16px;
+.cartographer-mapping-floor.is-floor-shade-dark {
+    background-color: var(--cartographer-map-floor-tint-dark);
 }
 
-/* Running bond, the courses staggered by half a brick. */
-.cartographer-mapping-cell.is-floor-brick::before {
-    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='12' viewBox='0 0 24 12'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H24 M0 6.5 H24'/%3E%3Cpath d='M0.5 0.5 V6.5 M12.5 0.5 V6.5'/%3E%3Cpath d='M6.5 6.5 V12 M18.5 6.5 V12'/%3E%3C/g%3E%3C/svg%3E");
-    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='12' viewBox='0 0 24 12'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H24 M0 6.5 H24'/%3E%3Cpath d='M0.5 0.5 V6.5 M12.5 0.5 V6.5'/%3E%3Cpath d='M6.5 6.5 V12 M18.5 6.5 V12'/%3E%3C/g%3E%3C/svg%3E");
-    -webkit-mask-size: 24px 12px;
-    mask-size: 24px 12px;
+/* Grit gathered into loose clusters rather than spread evenly, so it reads as
+   scuffed ground the way the grass tufts read as growth. Six marks to a 34px
+   tile: twelve to a 26px tile was three times the density and read as noise
+   under the linework rather than as ground. */
+.cartographer-mapping-floor.is-floor-dirt {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'%3E%3Cg fill='%23000'%3E%3Ccircle cx='8' cy='7' r='1.3'/%3E%3Ccircle cx='11.6' cy='9.2' r='0.7'/%3E%3Ccircle cx='6.4' cy='10.4' r='0.55'/%3E%3Ccircle cx='23' cy='22' r='1.35'/%3E%3Ccircle cx='26.4' cy='24.2' r='0.7'/%3E%3Ccircle cx='21' cy='25.2' r='0.5'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'%3E%3Cg fill='%23000'%3E%3Ccircle cx='8' cy='7' r='1.3'/%3E%3Ccircle cx='11.6' cy='9.2' r='0.7'/%3E%3Ccircle cx='6.4' cy='10.4' r='0.55'/%3E%3Ccircle cx='23' cy='22' r='1.35'/%3E%3Ccircle cx='26.4' cy='24.2' r='0.7'/%3E%3Ccircle cx='21' cy='25.2' r='0.5'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 34px 34px;
+    mask-size: 34px 34px;
 }
 
-/* Long boards with occasional butt joints. */
-.cartographer-mapping-cell.is-floor-wood::before {
-    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='12' viewBox='0 0 36 12'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H36 M0 6.5 H36'/%3E%3Cpath d='M9.5 0.5 V6.5 M25.5 6.5 V12'/%3E%3C/g%3E%3C/svg%3E");
-    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='12' viewBox='0 0 36 12'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H36 M0 6.5 H36'/%3E%3Cpath d='M9.5 0.5 V6.5 M25.5 6.5 V12'/%3E%3C/g%3E%3C/svg%3E");
-    -webkit-mask-size: 36px 12px;
-    mask-size: 36px 12px;
+/* Tufts, thinned to three in a wider tile so growth reads as sparse ground
+   cover rather than a lawn. */
+.cartographer-mapping-floor.is-floor-grass {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M8 24 L7 17 M8 24 L9 17 M8 24 L12 20'/%3E%3Cpath d='M24 31 L23 24 M24 31 L25 24 M24 31 L28 27'/%3E%3Cpath d='M17 13 L16 6 M17 13 L18 6 M17 13 L22 9'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cpath d='M8 24 L7 17 M8 24 L9 17 M8 24 L12 20'/%3E%3Cpath d='M24 31 L23 24 M24 31 L25 24 M24 31 L28 27'/%3E%3Cpath d='M17 13 L16 6 M17 13 L18 6 M17 13 L22 9'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 34px 34px;
+    mask-size: 34px 34px;
 }
 
-.cartographer-mapping-cell.is-floor-tile::before {
+/* Boulders in assorted sizes, four to a tile rather than seven: at map scale the
+   denser cluster lost its gaps and read as a grey wash. */
+.cartographer-mapping-floor.is-floor-rock {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='38' height='38' viewBox='0 0 38 38'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Ccircle cx='9' cy='10' r='3.6'/%3E%3Ccircle cx='15.6' cy='15.2' r='1.7'/%3E%3Ccircle cx='27' cy='27' r='4'/%3E%3Ccircle cx='31' cy='9' r='2'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='38' height='38' viewBox='0 0 38 38'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Ccircle cx='9' cy='10' r='3.6'/%3E%3Ccircle cx='15.6' cy='15.2' r='1.7'/%3E%3Ccircle cx='27' cy='27' r='4'/%3E%3Ccircle cx='31' cy='9' r='2'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 38px 38px;
+    mask-size: 38px 38px;
+}
+
+/* Cobbles set the way cobbles actually are: assorted sizes, each turned a
+   different way, packed with the gaps falling where they fall. The old offset
+   lattice of identical ellipses read as a second grid laid over the map's own,
+   which is exactly what a cobbled floor does not look like. */
+.cartographer-mapping-floor.is-floor-cobblestone {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cellipse cx='7' cy='6' rx='4.2' ry='3.1' transform='rotate(-14 7 6)'/%3E%3Cellipse cx='18' cy='9' rx='3.4' ry='2.6' transform='rotate(22 18 9)'/%3E%3Cellipse cx='27.5' cy='5' rx='3' ry='2.3' transform='rotate(-8 27.5 5)'/%3E%3Cellipse cx='11' cy='17' rx='3.6' ry='2.5' transform='rotate(34 11 17)'/%3E%3Cellipse cx='23' cy='19' rx='4' ry='2.8' transform='rotate(-24 23 19)'/%3E%3Cellipse cx='5.5' cy='27' rx='3.2' ry='2.4' transform='rotate(12 5.5 27)'/%3E%3Cellipse cx='17' cy='28' rx='3.8' ry='2.6' transform='rotate(-30 17 28)'/%3E%3Cellipse cx='28' cy='26' rx='2.8' ry='2.2' transform='rotate(18 28 26)'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Cellipse cx='7' cy='6' rx='4.2' ry='3.1' transform='rotate(-14 7 6)'/%3E%3Cellipse cx='18' cy='9' rx='3.4' ry='2.6' transform='rotate(22 18 9)'/%3E%3Cellipse cx='27.5' cy='5' rx='3' ry='2.3' transform='rotate(-8 27.5 5)'/%3E%3Cellipse cx='11' cy='17' rx='3.6' ry='2.5' transform='rotate(34 11 17)'/%3E%3Cellipse cx='23' cy='19' rx='4' ry='2.8' transform='rotate(-24 23 19)'/%3E%3Cellipse cx='5.5' cy='27' rx='3.2' ry='2.4' transform='rotate(12 5.5 27)'/%3E%3Cellipse cx='17' cy='28' rx='3.8' ry='2.6' transform='rotate(-30 17 28)'/%3E%3Cellipse cx='28' cy='26' rx='2.8' ry='2.2' transform='rotate(18 28 26)'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 32px 32px;
+    mask-size: 32px 32px;
+}
+
+/* Running bond, the courses staggered by half a brick. The lattice is kept --
+   it is what makes this read as brick rather than as marks -- but the period is
+   half again as large and the line lighter, so it sits under the linework
+   instead of competing with the map's own grid. */
+.cartographer-mapping-floor.is-floor-brick {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='18' viewBox='0 0 36 18'%3E%3Cg fill='none' stroke='%23000' stroke-width='0.9' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H36 M0 9.5 H36'/%3E%3Cpath d='M0.5 0.5 V9.5 M18.5 0.5 V9.5'/%3E%3Cpath d='M9.5 9.5 V18 M27.5 9.5 V18'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='18' viewBox='0 0 36 18'%3E%3Cg fill='none' stroke='%23000' stroke-width='0.9' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H36 M0 9.5 H36'/%3E%3Cpath d='M0.5 0.5 V9.5 M18.5 0.5 V9.5'/%3E%3Cpath d='M9.5 9.5 V18 M27.5 9.5 V18'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 36px 18px;
+    mask-size: 36px 18px;
+}
+
+/* Long boards with occasional butt joints, the boards wider and longer so a
+   room reads as planking rather than as stripes. */
+.cartographer-mapping-floor.is-floor-wood {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='16' viewBox='0 0 48 16'%3E%3Cg fill='none' stroke='%23000' stroke-width='0.9' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H48 M0 8.5 H48'/%3E%3Cpath d='M13.5 0.5 V8.5 M33.5 8.5 V16'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='16' viewBox='0 0 48 16'%3E%3Cg fill='none' stroke='%23000' stroke-width='0.9' stroke-linecap='round'%3E%3Cpath d='M0 0.5 H48 M0 8.5 H48'/%3E%3Cpath d='M13.5 0.5 V8.5 M33.5 8.5 V16'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 48px 16px;
+    mask-size: 48px 16px;
+}
+
+/* Half a square to a tile rather than a quarter. At a 9px period this was a
+   second grid arguing with the map's own; at 18px it reads as large flagstones,
+   which is what the symbol is for. */
+.cartographer-mapping-floor.is-floor-tile {
     -webkit-mask-image:
-        repeating-linear-gradient(0deg, #000 0, #000 0.9px, transparent 0.9px, transparent 9px),
-        repeating-linear-gradient(90deg, #000 0, #000 0.9px, transparent 0.9px, transparent 9px);
+        repeating-linear-gradient(0deg, #000 0, #000 0.8px, transparent 0.8px, transparent 18px),
+        repeating-linear-gradient(90deg, #000 0, #000 0.8px, transparent 0.8px, transparent 18px);
     mask-image:
-        repeating-linear-gradient(0deg, #000 0, #000 0.9px, transparent 0.9px, transparent 9px),
-        repeating-linear-gradient(90deg, #000 0, #000 0.9px, transparent 0.9px, transparent 9px);
-    -webkit-mask-size: 9px 9px;
-    mask-size: 9px 9px;
+        repeating-linear-gradient(0deg, #000 0, #000 0.8px, transparent 0.8px, transparent 18px),
+        repeating-linear-gradient(90deg, #000 0, #000 0.8px, transparent 0.8px, transparent 18px);
+    -webkit-mask-size: 18px 18px;
+    mask-size: 18px 18px;
 }
 
 .cartographer-mapping-cell.is-explored.is-new {

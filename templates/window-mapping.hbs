@@ -81,8 +81,30 @@
             {{#each hatchCells}}
             <div class="cartographer-mapping-hatch is-ring-{{ring}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}}; --cartographer-hatch-x: {{patternX}}; --cartographer-hatch-y: {{patternY}};" aria-hidden="true"></div>
             {{/each}}
+            {{! Floor surfaces: one layer per surface for the whole map, not one
+                masked box per square, which is what made any surface but Default
+                crawl. Each layer tiles its pattern once across the grid and is
+                cut to the squares carrying it -- whole squares as rectangles,
+                run-merged along each row, and the squares a wall cuts through as
+                the polygon that wall left. Ordered by z-index rather than by
+                markup: above the paper, below the linework. }}
+            {{#if floorLayers}}
+            <svg class="cartographer-mapping-floor-clips" aria-hidden="true" focusable="false">
+                <defs>
+                    {{#each floorLayers}}
+                    <clipPath id="{{clipId}}" clipPathUnits="objectBoundingBox">
+                        {{#each rects}}<rect x="{{x}}" y="{{y}}" width="{{width}}" height="{{height}}"></rect>{{/each}}
+                        {{#each polygons}}<polygon points="{{this}}"></polygon>{{/each}}
+                    </clipPath>
+                    {{/each}}
+                </defs>
+            </svg>
+            {{#each floorLayers}}
+            <div class="cartographer-mapping-floor is-floor-{{type}}" style="clip-path: url(#{{clipId}}); --cartographer-floor-x: {{patternX}}; --cartographer-floor-y: {{patternY}};" aria-hidden="true"></div>
+            {{/each}}
+            {{/if}}
             {{#each cells}}
-            <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}}; --cartographer-floor-x: {{patternX}}; --cartographer-floor-y: {{patternY}};{{#if floorClip}} --cartographer-floor-clip: polygon({{floorClip}});{{/if}}">
+            <div class="cartographer-mapping-cell {{className}}" data-cell="{{key}}" style="grid-column: {{gridColumn}}; grid-row: {{gridRow}};{{#if floorClip}} --cartographer-floor-clip: polygon({{floorClip}});{{/if}}">
                 {{#if hasLinework}}
                 <svg class="cartographer-mapping-segments" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                     {{#each segments}}

@@ -1144,11 +1144,6 @@ class MappingManager {
         return normalized;
     }
 
-    /**
-     * Floors are additive to the record rather than a new schema version: an
-     * older client simply ignores the key, and a record written before floors
-     * existed normalizes to none.
-     */
     /** Which way the floor lies in each square, as recorded when it was seen. */
     _normalizeSides(sides) {
         if (!sides || typeof sides !== 'object') return {};
@@ -1162,6 +1157,11 @@ class MappingManager {
         return normalized;
     }
 
+    /**
+     * Floors are additive to the record rather than a new schema version: an
+     * older client simply ignores the key, and a record written before floors
+     * existed normalizes to none.
+     */
     _normalizeFloors(floors) {
         if (!floors || typeof floors !== 'object') return {};
         const normalized = {};
