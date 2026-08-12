@@ -73,6 +73,26 @@ const LIST_GROUPINGS = [
     { id: 'mine', icon: 'fa-solid fa-user-check', textKey: 'mapping.justMine', labelKey: 'mapping.justMineHint' }
 ];
 
+/**
+ * How heavily the squares are ruled, in the order they are offered.
+ *
+ * A reading preference rather than anything about the map, so it is kept per
+ * user and never written to the record: it says nothing about where the party
+ * went, it costs nobody else anything, and a player looking at someone else's
+ * map is as entitled to turn the ruling down as its owner is. That is also why
+ * it sits outside the ownership check the surfaces are behind.
+ *
+ * The weights scale whatever the theme chose rather than replacing it, so each
+ * theme keeps its own ink and only the strength moves. Medium is 1 -- the
+ * weight every theme was drawn at before this was adjustable.
+ */
+const MAPPING_GRID_WEIGHTS = [
+    { id: 'off', weight: 0, labelKey: 'mapping.gridOff', icon: 'fa-solid fa-border-none' },
+    { id: 'light', weight: 0.5, labelKey: 'mapping.gridLight', icon: 'fa-solid fa-table-cells-large' },
+    { id: 'medium', weight: 1, labelKey: 'mapping.gridMedium', icon: 'fa-solid fa-table-cells' },
+    { id: 'dark', weight: 1.8, labelKey: 'mapping.gridDark', icon: 'fa-solid fa-border-all' }
+];
+
 const COMPACT_CHROME_WIDTH = 460;
 /** Rings of hatching drawn outward from the explored edge. Must fit the margin. */
 const HATCH_RINGS = MAP_MARGIN_CELLS;
@@ -365,6 +385,11 @@ export class MappingWindow extends ToolWindowBase {
 
     _buildModel() {
         const isList = this.viewMode === 'list';
+        // Carried on the root rather than the window, because the composed grid
+        // colours are declared there: a weight set further down could not reach
+        // them, since a custom property resolves against the element that
+        // declares it and not against the one that uses it.
+        const gridClass = ` is-grid-${this.gridWeight}`;
         const maps = this.manager.getMapList().map(record => ({
             id: record.id,
             name: record.name,
@@ -392,6 +417,7 @@ export class MappingWindow extends ToolWindowBase {
                 : 'mapping.noMapsMine';
             return {
                 isListView: true,
+                gridClass,
                 maps: visible,
                 groups: this._groupMaps(visible, mine ? 'scene' : grouping),
                 groupings: LIST_GROUPINGS.map(option => ({
@@ -419,7 +445,33 @@ export class MappingWindow extends ToolWindowBase {
                 feetMapped: this.manager.state.explored.length * (this.manager.state.gridDistance || 5)
             };
         }
-        return { ...this._buildMapModel(), isListView: false, maps };
+        return { ...this._buildMapModel(), isListView: false, gridClass, maps };
+    }
+
+    /**
+     * How heavily the reader last chose to rule the squares. Kept per user for
+     * the same reason the list grouping is: it is how they like to read a map,
+     * not anything about the map.
+     */
+    get gridWeight() {
+        let stored;
+        try {
+            stored = game.settings.get(MODULE.ID, 'mapping.gridWeight');
+        } catch {
+            stored = null;
+        }
+        return MAPPING_GRID_WEIGHTS.some(option => option.id === stored) ? stored : 'medium';
+    }
+
+    async setGridWeight(weight) {
+        if (!MAPPING_GRID_WEIGHTS.some(option => option.id === weight)) return;
+        if (weight === this.gridWeight) return;
+        try {
+            await game.settings.set(MODULE.ID, 'mapping.gridWeight', weight);
+        } catch {
+            return;
+        }
+        await this.manager.renderWindow();
     }
 
     /**
@@ -1715,15 +1767,40 @@ export class MappingWindow extends ToolWindowBase {
         };
     }
 
+    /**
+     * How heavily the squares are ruled.
+     *
+     * Last in the menu and offered on every square, floor or rock, to whoever is
+     * reading. Everything above it changes the map; this changes only how this
+     * one reader sees it, so it sits apart from all of it and behind none of the
+     * ownership checks.
+     */
+    _gridMenu() {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.${key}`);
+        const current = this.gridWeight;
+        return {
+            name: localize('mapping.gridLines'),
+            icon: 'fa-solid fa-border-all',
+            submenu: MAPPING_GRID_WEIGHTS.map(option => ({
+                name: `${localize(option.labelKey)}${option.id === current ? ' ✓' : ''}`,
+                icon: option.icon,
+                callback: () => void this.setGridWeight(option.id)
+            }))
+        };
+    }
+
     _showCellMenu(event, items) {
         const contextMenu = game.modules.get('coffee-pub-blacksmith')?.api?.uiContextMenu;
         if (typeof contextMenu?.show !== 'function') return;
+        // Appended here rather than at each of the three ways a cell menu is
+        // built, so it cannot go missing from one of them.
+        const withGrid = [...items, { separator: true }, this._gridMenu()];
         contextMenu.show({
             id: `${MODULE.ID}-mapping-cell-context`,
             x: event.clientX,
             y: event.clientY,
             root: this.element?.ownerDocument?.body ?? document.body,
-            zones: { module: items },
+            zones: { module: withGrid },
             className: 'cartographer-mapping-cell-context'
         });
     }

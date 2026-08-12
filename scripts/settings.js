@@ -262,6 +262,20 @@ export const registerSettings = () => {
 		type: String
 	});
 
+	// How heavily the map's squares are ruled: off, light, medium or dark. Chosen
+	// from a square's own menu, so it is not offered in the settings form. Per
+	// user, because it is how someone likes to read a map rather than anything
+	// about the map -- a player is free to turn the ruling down on a map they do
+	// not own, and nobody else's view changes when they do.
+	game.settings.register(MODULE.ID, 'mapping.gridWeight', {
+		name: '',
+		hint: '',
+		scope: 'user',
+		config: false,
+		default: 'medium',
+		type: String
+	});
+
 	// Symbol size selection (symbols group)
 	game.settings.register(MODULE.ID, 'toolbar.symbolSize', {
 		name: '', // Hidden setting

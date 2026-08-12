@@ -13,11 +13,17 @@
     /* Explored floor, and anything that must read as drawn on top of it. */
     --cartographer-map-paper: #f7ecd8;
     --cartographer-map-ink: #171310;
-    --cartographer-map-floor-grid: rgba(112, 85, 49, 0.22);
+    /* The ruling is stated as an ink and a strength rather than as one colour,
+       so the reader's Grid preference can scale a theme's own choice instead of
+       replacing it. The strengths here are what every theme was drawn at before
+       the ruling became adjustable, and are what Medium still resolves to. */
+    --cartographer-map-floor-grid-ink: 112, 85, 49;
+    --cartographer-map-floor-grid-strength: 0.22;
 
     /* Undiscovered ground behind the drawing. */
     --cartographer-map-void: rgba(112, 85, 49, 0.08);
-    --cartographer-map-void-grid: rgba(112, 85, 49, 0.16);
+    --cartographer-map-void-grid-ink: 112, 85, 49;
+    --cartographer-map-void-grid-strength: 0.16;
     --cartographer-map-hatch: rgba(23, 19, 16, 0.92);
     /* A surface is the faintest thing on the paper, and deliberately fainter
        than the grid it sits under: it says what a room is made of, which the
@@ -40,11 +46,13 @@
 .application.blacksmith-window-tool.cartographer-mapping-window.blacksmith-window-tool-theme-dark {
     --cartographer-map-paper: #23211d;
     --cartographer-map-ink: #ece3d0;
-    --cartographer-map-floor-grid: rgba(236, 227, 208, 0.16);
+    --cartographer-map-floor-grid-ink: 236, 227, 208;
+    --cartographer-map-floor-grid-strength: 0.16;
     /* Matches --blacksmith-tool-surface-sunken for this theme so the endless
        canvas does not show a tonal seam where the grid box ends. */
     --cartographer-map-void: rgba(0, 0, 0, 0.25);
-    --cartographer-map-void-grid: rgba(236, 227, 208, 0.08);
+    --cartographer-map-void-grid-ink: 236, 227, 208;
+    --cartographer-map-void-grid-strength: 0.08;
     --cartographer-map-hatch: rgba(236, 227, 208, 0.72);
     --cartographer-map-floor-fill: rgba(236, 227, 208, 0.15);
     --cartographer-map-floor-tint-light: rgba(236, 227, 208, 0.06);
@@ -60,9 +68,11 @@
 .application.blacksmith-window-tool.cartographer-mapping-window.blacksmith-window-tool-theme-glass {
     --cartographer-map-paper: rgba(26, 23, 19, 0.9);
     --cartographer-map-ink: #f2ead9;
-    --cartographer-map-floor-grid: rgba(242, 234, 217, 0.18);
+    --cartographer-map-floor-grid-ink: 242, 234, 217;
+    --cartographer-map-floor-grid-strength: 0.18;
     --cartographer-map-void: transparent;
-    --cartographer-map-void-grid: rgba(255, 255, 255, 0.07);
+    --cartographer-map-void-grid-ink: 255, 255, 255;
+    --cartographer-map-void-grid-strength: 0.07;
     --cartographer-map-hatch: rgba(242, 234, 217, 0.62);
     --cartographer-map-floor-fill: rgba(242, 234, 217, 0.14);
     --cartographer-map-floor-tint-light: rgba(242, 234, 217, 0.06);
@@ -121,6 +131,45 @@
     min-height: 240px;
     background: var(--blacksmith-tool-surface-sunken);
     color: var(--blacksmith-tool-text);
+
+    /* The ruling, composed from the theme's ink and the reader's chosen weight.
+       Declared here rather than in the theme blocks because a custom property
+       resolves against the element that declares it: composed up on the window
+       and the weight class would have to live up there too, out of reach of the
+       template that knows what the reader picked.
+
+       Everything that draws a grid line reads these two, so the whole ruling
+       moves together -- the squares of explored floor and the faint lattice over
+       undiscovered ground are one grid to the eye, and turning "the grid" off
+       while half of it stayed would be a strange thing to mean. */
+    --cartographer-map-grid-weight: 1;
+    --cartographer-map-floor-grid: rgba(
+        var(--cartographer-map-floor-grid-ink),
+        calc(var(--cartographer-map-floor-grid-strength) * var(--cartographer-map-grid-weight))
+    );
+    --cartographer-map-void-grid: rgba(
+        var(--cartographer-map-void-grid-ink),
+        calc(var(--cartographer-map-void-grid-strength) * var(--cartographer-map-grid-weight))
+    );
+}
+
+/* Off is a weight of nothing rather than a separate code path: the lines are
+   still drawn, in a colour with no opacity, so there is one way the ruling works
+   and not two. */
+.cartographer-mapping-root.is-grid-off {
+    --cartographer-map-grid-weight: 0;
+}
+
+.cartographer-mapping-root.is-grid-light {
+    --cartographer-map-grid-weight: 0.5;
+}
+
+.cartographer-mapping-root.is-grid-medium {
+    --cartographer-map-grid-weight: 1;
+}
+
+.cartographer-mapping-root.is-grid-dark {
+    --cartographer-map-grid-weight: 1.8;
 }
 
 /* The viewport is a fixed camera frame. It is never scrolled: the map is
