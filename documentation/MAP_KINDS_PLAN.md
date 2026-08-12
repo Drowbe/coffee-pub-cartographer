@@ -9,7 +9,7 @@ world that can be found and carried.
 | --- | --- | --- |
 | **Player map** | one Actor | recorded, annotated, edited, reset, deleted by that Actor's owners. **Private unless shared.** |
 | **Party map** | the party | **donated to** by any member; annotated and edited by any member. Not recorded into. One per scene. |
-| **Official map** | nobody — it is an artifact | **annotations only.** Nothing already on it can be removed or changed. |
+| **Official map** | the GM — it is an artifact | **authored by the GM** with no token involved. For everyone else, **annotations only**: nothing already on it can be removed or changed. |
 
 The party map is *the merge of the parts people chose to donate*, not an
 automatic union. A player may keep their own map to themselves for their own
@@ -59,8 +59,8 @@ removing, which is a distinction the current code does not draw anywhere.
 | See it in the list | yes | only if shared | party members | yes |
 | Record into | yes | no | **no** | no |
 | Add symbol / note | yes | no | yes | **yes** |
-| Remove or edit an entry | yes | no | yes | **own additions only** |
-| Floor surfaces, Fix Things | yes | no | yes | no |
+| Remove or edit an entry | yes | no | yes | **own additions only; GM anything** |
+| Floor surfaces, Fix Things | yes | no | yes | **GM** |
 | Rename | yes | no | party members | GM |
 | Reset / delete | yes | no | GM | GM |
 | Donate to the party map | yes | no | — | — |
@@ -68,6 +68,43 @@ removing, which is a distinction the current code does not draw anywhere.
 "Own additions" is decidable from data already stored: every symbol carries
 `createdBy`. Anything that arrived with the map, or that another player added,
 is not removable — a typo of one's own still is.
+
+**Nothing records into the party map, and nothing needs to.** Recording is bound
+to a token — `_mapIdForToken` resolves the record from `token.actor.id` — so
+every recording is already "record as some Actor". A GM seeding a party map
+therefore records as any token they control, a party member or a scout NPC, and
+donates the result. Writing a `party`-targeted recording path would buy nothing
+and would add a special case to the one place the permission rules are simple.
+
+## Official Maps Are Authored, Not Explored
+
+A GM creates one from a button and edits it directly — annotate, Fix Things,
+floor surfaces — with **no token anywhere in it.** The token was only ever a
+proxy for "somebody experienced this square"; an artifact makes no such claim,
+so the GM simply declares what the map shows. `TODO.md` reaches the same
+conclusion from the other end: converting a scene's walls "must be a **GM
+authoring action** that produces an official map, never something that writes a
+party map."
+
+Most of this needs nothing new. Only *recording* requires a token — `markFloor`,
+`markRock` and `setFloorType` already work from a right-click on a square and
+ask for nothing but permission. Once `canManageRecord` grants a GM authority
+over an `official` record, the existing **Fix Things** and **Floor Type** menus
+are the authoring tools, which is what `TODO.md` already observes: "The window
+is most of an editor already."
+
+So "annotations only" is a rule about *players*, not about the kind. The GM owns
+the artifact and can change anything on it; everyone else may add and may take
+back only their own additions.
+
+### One-click create
+
+Seeding from the scene's atlas is close to free, since the atlas already settles
+the whole architecture in one pass. The open question is what "every square"
+should mean: marking the entire grid explored would leave nothing unexplored for
+the rock hatching to describe, and the map would read as one filled rectangle
+with walls drawn across it. Some notion of *inside* is wanted, and the atlas
+knows walls rather than rooms. Worth settling when the button is built, not now.
 
 Party membership comes from `getParty().members` (Actor ids). It is
 GM-configured via `defaultPartySize` and `partyMember1..N` and **may be unset**,
@@ -168,17 +205,19 @@ already handles maps belonging to other scenes.
 2. **The `shared` flag and the list filter.** Small, and independent of the rest.
 3. **The party map** — declare one per scene, plus editing by any member.
 4. **Donation.** Needs 3, and is where the merge rules above land.
-5. **Export as an Item**, with the generated description.
-6. **Filing a found map**, as a new mutation action.
+5. **Official maps and the create button.** Independent of 3 and 4: it needs only
+   step 1's permissions, since the authoring tools already exist.
+6. **Export as an Item**, with the generated description.
+7. **Filing a found map**, as a new mutation action.
 
 Steps 1 and 2 are worth landing and playing with before 3 onward is designed in
 detail: they are where the assumptions get tested.
 
 ## Open Questions
 
-- Should a GM be able to record into the party map directly, as an authoring
-  shortcut? The model says donations build it, but a GM seeding a map by walking
-  a token is a plausible want.
+- `kind: 'player'` is really "owned by an Actor", and a GM recording a scout
+  produces one for an NPC. Worth naming the kind `actor` internally while the UI
+  goes on saying *Player Map*, or is the honest name not worth the churn?
 - Does an official map show a party marker at all? It has no `lastPosition` of
   anyone's, and following is meaningless on a map nobody is recording.
 - Should donating be offered per-scene from the player's map, or as one action

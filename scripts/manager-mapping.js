@@ -54,6 +54,48 @@ const MOVE_SETTLE_MS = 220;
 // and showing itself at whatever the map does know.
 const PENDING_REVEAL_TIMEOUT_MS = 8000;
 
+/**
+ * What owns a map, which is what decides who may do what to it.
+ *
+ * 'player' is a map an Actor explored -- any Actor, so a GM recording a scout
+ * NPC makes one of these too. 'party' is the map the party owns together, built
+ * from the parts its members chose to donate. 'official' is an artifact: a GM
+ * authors it and everyone else may only annotate it.
+ *
+ * Additive rather than a schema version. A record written before kinds existed
+ * reads as 'player', which is what it was, so nothing needs migrating.
+ */
+const MAP_KINDS = Object.freeze(['player', 'party', 'official']);
+/**
+ * The key a party map is stored under in place of an Actor's id. It cannot
+ * collide with a real one: Foundry ids are 16-character random alphanumerics.
+ */
+const PARTY_OWNER_KEY = 'party';
+/** Prefix for an official map's key. Several may share a scene. */
+const OFFICIAL_KEY_PREFIX = 'official:';
+
+function mapKind(raw) {
+    const kind = String(raw ?? '');
+    return MAP_KINDS.includes(kind) ? kind : 'player';
+}
+
+/**
+ * What a map is filed under, which is its Actor only for a player map.
+ *
+ * Derived rather than stored, so it cannot drift out of step with the kind and
+ * the Actor it was built from. Null means the record does not identify an owner
+ * at all, which is the one case that cannot be filed anywhere.
+ */
+function ownerKeyFor(raw) {
+    const kind = mapKind(raw?.kind);
+    if (kind === 'party') return PARTY_OWNER_KEY;
+    if (kind === 'official') {
+        const officialId = typeof raw?.officialId === 'string' ? raw.officialId : '';
+        return officialId ? `${OFFICIAL_KEY_PREFIX}${officialId}` : null;
+    }
+    return typeof raw?.actorId === 'string' && raw.actorId ? raw.actorId : null;
+}
+
 /** Compact "column,row" for diagnostic output. */
 function formatCell(position) {
     return position ? `${position.column},${position.row}` : '-';
@@ -196,8 +238,15 @@ class MappingManager {
         utils?.postConsoleAndNotification?.(MODULE.NAME, message, result, true, false);
     }
 
-    _recordId(actorId, sceneId) {
-        return `${actorId}::${sceneId}`;
+    /**
+     * A map's id, from what owns it and the scene it describes.
+     *
+     * The first half is an Actor's id for a player map and a reserved key for
+     * the other kinds -- see ownerKeyFor. Callers holding an actorId may pass it
+     * straight in, since for a player map the two are the same thing.
+     */
+    _recordId(ownerKey, sceneId) {
+        return `${ownerKey}::${sceneId}`;
     }
 
     _emptyRecord({ actor = null, scene = null } = {}) {
@@ -206,6 +255,13 @@ class MappingManager {
         return {
             version: STATE_VERSION,
             id: actorId && sceneId ? this._recordId(actorId, sceneId) : null,
+            kind: 'player',
+            // Only a player map can be unshared: the other two kinds are shared
+            // by what they are. Default false, so a map someone starts recording
+            // is theirs until they say otherwise.
+            shared: false,
+            // Identifies an official map, which has no Actor to be known by.
+            officialId: null,
             actorId,
             actorName: actor?.name ?? '',
             sceneId,
@@ -549,11 +605,20 @@ class MappingManager {
     _indexEntry(raw, scene) {
         const actorId = typeof raw?.actorId === 'string' ? raw.actorId : null;
         const sceneId = scene?.id ?? (typeof raw?.sceneId === 'string' ? raw.sceneId : null);
-        if (!actorId || !sceneId) return null;
+        const kind = mapKind(raw?.kind);
+        // What owns it, which is an Actor only for a player map. A record naming
+        // no owner at all cannot be filed and is dropped, as before.
+        const ownerKey = ownerKeyFor({ kind, actorId, officialId: raw?.officialId });
+        if (!ownerKey || !sceneId) return null;
         const actorName = String(raw.actorName || game.actors?.get(actorId)?.name || '');
         const sceneName = String(raw.sceneName || scene?.name || '');
         return {
-            id: this._recordId(actorId, sceneId),
+            id: this._recordId(ownerKey, sceneId),
+            kind,
+            // Carried on the entry because the list is built from these, and both
+            // who may see a map and who may change it depend on them.
+            shared: raw?.shared === true,
+            officialId: typeof raw?.officialId === 'string' ? raw.officialId : null,
             actorId,
             actorName,
             sceneId,
@@ -675,14 +740,23 @@ class MappingManager {
         if (!raw || typeof raw !== 'object') return this._emptyRecord();
         const actorId = typeof raw.actorId === 'string' ? raw.actorId : null;
         const sceneId = scene?.id ?? (typeof raw.sceneId === 'string' ? raw.sceneId : null);
-        if (!actorId || !sceneId) return this._emptyRecord();
+        const kind = mapKind(raw.kind);
+        const officialId = typeof raw.officialId === 'string' ? raw.officialId : null;
+        // An Actor is required of a player map and of nothing else, so the guard
+        // asks what actually identifies this kind of map rather than assuming an
+        // Actor identifies all of them.
+        const ownerKey = ownerKeyFor({ kind, actorId, officialId });
+        if (!ownerKey || !sceneId) return this._emptyRecord();
         const actor = game.actors?.get(actorId);
         const explored = Array.isArray(raw.explored)
             ? [...new Set(raw.explored.filter(key => /^-?\d+,-?\d+$/.test(key)))]
             : [];
         return {
             version: STATE_VERSION,
-            id: this._recordId(actorId, sceneId),
+            id: this._recordId(ownerKey, sceneId),
+            kind,
+            shared: raw.shared === true,
+            officialId,
             actorId,
             actorName: String(raw.actorName || actor?.name || ''),
             sceneId,
@@ -1715,9 +1789,79 @@ class MappingManager {
         return actor.testUserPermission(user, CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER);
     }
 
+    /**
+     * The Actors the party is made of, or null when nobody has configured one.
+     *
+     * Read from Blacksmith rather than guessed at. Null is not "no party" -- it
+     * is "no answer", and the difference matters, because treating an
+     * unconfigured world as a party of nobody would quietly make the party map
+     * GM-only.
+     */
+    _partyActorIds() {
+        const party = game.modules.get('coffee-pub-blacksmith')?.api?.campaign?.getParty?.();
+        if (!Array.isArray(party?.members)) return null;
+        const ids = party.members.map(member => member?.id).filter(id => typeof id === 'string' && id);
+        return ids.length ? ids : null;
+    }
+
+    /** Whether a user is one of the party, and so a co-owner of its map. */
+    _isPartyMember(user = game.user) {
+        if (!user) return false;
+        if (user.isGM) return true;
+        const ids = this._partyActorIds();
+        if (ids) return ids.some(id => this._canManageActor(game.actors?.get(id), user));
+        // Nobody has said who the party is. Owning a character is the honest
+        // stand-in, and it keeps the party map usable in a world that has never
+        // opened Blacksmith's campaign settings.
+        return (game.actors ?? []).some(actor => actor.testUserPermission(
+            user, CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER
+        ));
+    }
+
+    /**
+     * Whether a map is this user's to see at all.
+     *
+     * Only a player map can be hidden, and only from people who are not its
+     * Actor's owner. Note what this is and is not: the record still travels to
+     * every client in the scene flag, exactly as the walls themselves do, so
+     * this keeps a map out of someone's list rather than out of their reach.
+     */
+    canViewRecord(record = this.state, user = game.user) {
+        if (!user) return false;
+        if (user.isGM) return true;
+        if (mapKind(record?.kind) !== 'player') return true;
+        if (record?.shared === true) return true;
+        return this._canManageActor(game.actors?.get(record?.actorId), user);
+    }
+
+    /**
+     * Whether a user may change what a map is: its shape, its surfaces, its name.
+     *
+     * An official map is a GM's artifact, so authoring it is theirs alone -- and
+     * needs no token, because a token was only ever a proxy for somebody having
+     * been somewhere, and an artifact claims nothing of the sort. The party map
+     * belongs to everyone in the party, so anyone in it may edit. A player map
+     * stays with its Actor's owner, as it always has.
+     */
     canManageRecord(record = this.state, user = game.user) {
+        if (!user) return false;
+        const kind = mapKind(record?.kind);
+        if (kind === 'official') return Boolean(user.isGM);
+        if (kind === 'party') return this._isPartyMember(user);
         if (!record?.actorId) return false;
         return this._canManageActor(game.actors?.get(record.actorId), user);
+    }
+
+    /**
+     * Whether a user may throw a map away, or empty it.
+     *
+     * Not the same question as editing it. Everyone in the party may edit the
+     * party map; nobody but the GM should be able to delete the thing everyone
+     * has been contributing to.
+     */
+    canDeleteRecord(record = this.state, user = game.user) {
+        if (mapKind(record?.kind) !== 'player') return Boolean(user?.isGM);
+        return this.canManageRecord(record, user);
     }
 
     /**
@@ -1728,9 +1872,36 @@ class MappingManager {
      * experienced. Marking up the result is a shared activity: any party member
      * can add or clear a symbol on any map they can see, while renaming,
      * resetting, deleting and surfacing floors stay with the Actor's owner.
+     *
+     * An official map is the one kind where annotating is all anyone but the GM
+     * may do -- which is not a restriction here but in canRemoveEntry, since
+     * what makes it an artifact is that its existing contents are fixed.
      */
     canAnnotateRecord(record = this.state, user = game.user) {
-        return Boolean(record?.actorId && user);
+        if (!user || !this.canViewRecord(record, user)) return false;
+        const kind = mapKind(record?.kind);
+        if (kind === 'party') return this._isPartyMember(user);
+        if (kind === 'official') return true;
+        return Boolean(record?.actorId);
+    }
+
+    /**
+     * Whether a user may take away something already on a map.
+     *
+     * This is what an official map means. Everything on it when it was found
+     * stays on it: a party may write in the margins of a map they discovered,
+     * but they cannot rub out what its author drew, nor each other's notes. Your
+     * own addition is still yours to take back, so a typo is not permanent, and
+     * the GM who authored it may change anything.
+     *
+     * Decided from what the entry already records -- every symbol carries the
+     * user who created it -- so nothing new has to be stored to answer it.
+     */
+    canRemoveEntry(record = this.state, entry = null, user = game.user) {
+        if (!this.canAnnotateRecord(record, user)) return false;
+        if (mapKind(record?.kind) !== 'official') return true;
+        if (user.isGM) return true;
+        return Boolean(entry?.createdBy) && entry.createdBy === user.id;
     }
 
     /** Whether a map this user could record into already exists on this scene. */
@@ -1738,7 +1909,10 @@ class MappingManager {
         const sceneId = canvas?.scene?.id;
         if (!sceneId) return false;
         for (const entry of this._index.values()) {
-            if (entry.sceneId === sceneId && this.canManageRecord(entry)) return true;
+            // A map to record into, which only a player map ever is -- recording
+            // is bound to a token, and a token is bound to an Actor.
+            if (entry.sceneId !== sceneId || mapKind(entry.kind) !== 'player') continue;
+            if (this.canManageRecord(entry)) return true;
         }
         return false;
     }
@@ -1876,6 +2050,11 @@ class MappingManager {
     async removeMapSymbol(column, row) {
         const record = this.getRecord(this.currentMapId);
         if (!record || !this.canAnnotateRecord(record)) return false;
+        // Checked here as well as GM-side so the menu does not offer to do
+        // something the map will refuse. See canRemoveEntry.
+        const occupant = record.symbols?.find(symbol => symbol.column === Number(column)
+            && symbol.row === Number(row));
+        if (occupant && !this.canRemoveEntry(record, occupant)) return false;
         await this._requestMutation({
             action: 'remove-symbol',
             mapId: record.id,
@@ -2014,11 +2193,15 @@ class MappingManager {
         if (data.action === 'delete') {
             const actorId = String(data.actorId ?? record?.actorId ?? '');
             const sceneId = String(data.sceneId ?? record?.sceneId ?? '');
-            const actor = game.actors?.get(actorId);
-            if (!actorId || !sceneId || data.mapId !== this._recordId(actorId, sceneId)) return;
-            if (!this._canManageActor(actor, user)) return;
+            // What the map is filed under. An Actor for a player map, a reserved
+            // key otherwise -- asked of the record where there is one, since only
+            // it knows which kind of map this is.
+            const owned = record ?? { kind: 'player', actorId };
+            const ownerKey = ownerKeyFor(owned);
+            if (!ownerKey || !sceneId || data.mapId !== this._recordId(ownerKey, sceneId)) return;
+            if (!this.canDeleteRecord(owned, user)) return;
             record ??= this._normalizeRecord(
-                game.scenes?.get(sceneId)?.getFlag(MODULE.ID, FLAG_KEY)?.maps?.[actorId],
+                game.scenes?.get(sceneId)?.getFlag(MODULE.ID, FLAG_KEY)?.maps?.[ownerKey],
                 game.scenes?.get(sceneId)
             );
             this._removeMapRecordLocally(record.id ? record : {
@@ -2027,7 +2210,7 @@ class MappingManager {
                 sceneId
             });
             void this.renderWindow();
-            await this._persistMapDeletion(sceneId, actorId);
+            await this._persistMapDeletion(sceneId, ownerKey);
             return;
         }
 
@@ -2069,9 +2252,14 @@ class MappingManager {
 
         if (!record) return;
         // Marking a map up is open to the whole party; changing what it is, or
-        // what it says was explored, stays with the Actor's owner.
-        if (!ANNOTATION_ACTIONS.includes(data.action)
-            && !this._canManageActor(game.actors?.get(record.actorId), user)) return;
+        // what it says was explored, stays with whoever owns it. Asked through
+        // canManageRecord rather than of the Actor directly, because for a party
+        // or official map the Actor is not who owns it -- for a player map the
+        // two questions are the same one.
+        if (!ANNOTATION_ACTIONS.includes(data.action) && !this.canManageRecord(record, user)) return;
+        // Emptying or discarding a shared map is the GM's call even where editing
+        // it is not.
+        if (data.action === 'reset' && !this.canDeleteRecord(record, user)) return;
         if (data.action === 'rename') {
             const name = String(data.name ?? '').trim().slice(0, 100);
             if (!name) return;
@@ -2086,26 +2274,47 @@ class MappingManager {
                 || !Number.isInteger(column)
                 || !Number.isInteger(row)
                 || !this.exploredSet(record).has(cellKey)) return;
-            const symbols = this._normalizeSymbols(record.symbols)
-                .filter(symbol => symbol.column !== column || symbol.row !== row);
-            symbols.push({
-                id: foundry.utils.randomID(),
-                type,
-                column,
-                row,
-                text: String(data.text ?? '').trim().slice(0, MAPPING_SYMBOL_TEXT_LIMIT),
-                createdAt: Date.now(),
-                createdBy: user.id
-            });
-            record = { ...record, symbols, updatedAt: Date.now(), updatedBy: user.id };
+            const symbols = this._normalizeSymbols(record.symbols);
+            // Placing onto an occupied square replaces what is there, which is a
+            // removal wearing a different hat. On an official map that has to
+            // answer to the same rule, or overwriting would be the way round it.
+            const occupant = symbols.find(symbol => symbol.column === column && symbol.row === row);
+            if (occupant && !this.canRemoveEntry(record, occupant, user)) return;
+            // Built in one expression rather than filtered into a second array
+            // and pushed to: with two names in play it is one slip to save the
+            // one that was not added to, and the symbol vanishes silently.
+            record = {
+                ...record,
+                symbols: [
+                    ...symbols.filter(symbol => symbol.column !== column || symbol.row !== row),
+                    {
+                        id: foundry.utils.randomID(),
+                        type,
+                        column,
+                        row,
+                        text: String(data.text ?? '').trim().slice(0, MAPPING_SYMBOL_TEXT_LIMIT),
+                        createdAt: Date.now(),
+                        createdBy: user.id
+                    }
+                ],
+                updatedAt: Date.now(),
+                updatedBy: user.id
+            };
             this._cacheRecord(record);
         } else if (data.action === 'remove-symbol') {
             const column = Number(data.column);
             const row = Number(data.row);
             if (!Number.isInteger(column) || !Number.isInteger(row)) return;
-            const symbols = this._normalizeSymbols(record.symbols)
-                .filter(symbol => symbol.column !== column || symbol.row !== row);
-            record = { ...record, symbols, updatedAt: Date.now(), updatedBy: user.id };
+            const symbols = this._normalizeSymbols(record.symbols);
+            const occupant = symbols.find(symbol => symbol.column === column && symbol.row === row);
+            // Nothing there is not a failure; it is the state the caller wanted.
+            if (occupant && !this.canRemoveEntry(record, occupant, user)) return;
+            record = {
+                ...record,
+                symbols: symbols.filter(symbol => symbol.column !== column || symbol.row !== row),
+                updatedAt: Date.now(),
+                updatedBy: user.id
+            };
             this._cacheRecord(record);
         } else if (data.action === 'set-floor') {
             const type = String(data.type ?? '');
@@ -2262,7 +2471,7 @@ class MappingManager {
         });
     }
 
-    async _persistMapDeletion(sceneId, actorId) {
+    async _persistMapDeletion(sceneId, ownerKey) {
         const scene = game.scenes?.get(sceneId);
         if (!scene || !game.user.isGM) return;
         this._saveQueue = this._saveQueue
@@ -2271,7 +2480,7 @@ class MappingManager {
                 const maps = Number(stored?.version) >= STATE_VERSION && stored?.maps
                     ? foundry.utils.deepClone(stored.maps)
                     : {};
-                delete maps[actorId];
+                delete maps[ownerKey];
                 const container = { version: STATE_VERSION, maps };
                 // Unlike a write, this says what the scene now holds rather
                 // than what one map now says -- an absence cannot be sent as a
