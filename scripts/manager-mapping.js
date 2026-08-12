@@ -98,6 +98,27 @@ function ownerKeyFor(raw) {
     return typeof raw?.actorId === 'string' && raw.actorId ? raw.actorId : null;
 }
 
+/**
+ * What a map is called: the scene, and nothing else.
+ *
+ * Who mapped it is already said by the row it sits in and by the heading above
+ * that row, so a title carrying it as well said the same thing three times and
+ * left no room for the one thing the title is for.
+ *
+ * Titles this module generated under the old scheme are rewritten on the way in.
+ * Matched exactly against the owner names it would have used, so a name somebody
+ * chose for themselves is never touched -- a rename survives, which is the whole
+ * reason renaming exists.
+ */
+function mapDisplayName(raw, sceneName, ownerNames = []) {
+    const stored = String(raw?.name ?? '').trim();
+    if (!stored) return sceneName;
+    for (const owner of ownerNames) {
+        if (owner && stored === `${owner} — ${sceneName}`) return sceneName;
+    }
+    return stored;
+}
+
 /** Compact "column,row" for diagnostic output. */
 function formatCell(position) {
     return position ? `${position.column},${position.row}` : '-';
@@ -271,7 +292,7 @@ class MappingManager {
             actorName: actor?.name ?? '',
             sceneId,
             sceneName: scene?.name ?? '',
-            name: actor && scene ? `${actor.name} — ${scene.name}` : '',
+            name: scene?.name ?? '',
             gridType: 'square',
             columns: 0,
             rows: 0,
@@ -628,7 +649,12 @@ class MappingManager {
             actorName,
             sceneId,
             sceneName,
-            name: String(raw.name || `${actorName || 'Map'} — ${sceneName}`),
+            name: mapDisplayName(raw, sceneName, [
+                actorName,
+                'Map',
+                kind === 'party' ? this.partyName() : null,
+                kind === 'official' ? game.i18n.localize(`${MODULE.ID}.mapping.officialFallbackName`) : null
+            ]),
             explored: Array.isArray(raw.explored) ? raw.explored : [],
             gridDistance: 5,
             createdAt: Number(raw.createdAt) || Number(raw.updatedAt) || 0,
@@ -769,7 +795,12 @@ class MappingManager {
             actorName: String(raw.actorName || actor?.name || ''),
             sceneId,
             sceneName: String(raw.sceneName || scene?.name || ''),
-            name: String(raw.name || `${raw.actorName || actor?.name || 'Map'} — ${raw.sceneName || scene?.name || ''}`),
+            name: mapDisplayName(raw, String(raw.sceneName || scene?.name || ''), [
+                String(raw.actorName || actor?.name || ''),
+                'Map',
+                kind === 'party' ? this.partyName() : null,
+                kind === 'official' ? game.i18n.localize(`${MODULE.ID}.mapping.officialFallbackName`) : null
+            ]),
             gridType: 'square',
             columns: Math.max(0, Number(raw.columns) || 0),
             rows: Math.max(0, Number(raw.rows) || 0),
@@ -858,10 +889,7 @@ class MappingManager {
         record.officialId = kind === 'official'
             ? (String(officialId || '') || foundry.utils.randomID())
             : null;
-        const fallback = kind === 'party'
-            ? this.partyName()
-            : game.i18n.localize(`${MODULE.ID}.mapping.officialFallbackName`);
-        record.name = String(name || '').trim() || `${fallback} — ${record.sceneName}`;
+        record.name = String(name || '').trim() || record.sceneName;
         const ownerKey = ownerKeyFor(record);
         record.id = ownerKey && record.sceneId ? this._recordId(ownerKey, record.sceneId) : null;
 
@@ -918,7 +946,7 @@ class MappingManager {
     async createOfficialMap() {
         const scene = canvas?.scene;
         if (!scene || !game.user.isGM) return false;
-        const suggested = `${game.i18n.localize(`${MODULE.ID}.mapping.officialFallbackName`)} — ${scene.name}`;
+        const suggested = scene.name;
         const result = await foundry.applications.api.DialogV2.input({
             window: { title: game.i18n.localize(`${MODULE.ID}.mapping.officialCreateTitle`) },
             content: `<div class="form-group"><label>${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.mapName`))}</label><div class="form-fields"><input type="text" name="name" value="${foundry.utils.escapeHTML(suggested)}" required></div></div>`,

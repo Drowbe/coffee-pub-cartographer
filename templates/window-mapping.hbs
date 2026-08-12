@@ -58,7 +58,7 @@
             </div>
             <div class="cartographer-mapping-list-copy">
                 <strong>{{#if isOfficial}}<i class="fa-solid fa-star cartographer-mapping-official-star" data-tooltip="{{kindLabel}}"></i> {{/if}}{{name}}</strong>
-                <span>{{subtitle}}{{#unless isPlayer}} · {{kindLabel}}{{/unless}}</span>
+                {{#if subtitle}}<span>{{subtitle}}</span>{{/if}}
                 <small>{{feetMapped}} {{../../feetMappedLabel}}{{#if updated}} · {{updated}}{{/if}}</small>
             </div>
             {{#if canManage}}

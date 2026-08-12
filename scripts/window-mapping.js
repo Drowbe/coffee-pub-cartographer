@@ -644,9 +644,15 @@ export class MappingWindow extends ToolWindowBase {
                 groups.set(key, { key, name: key, isHere: key === here, maps: [], updated: 0 });
             }
             const group = groups.get(key);
+            // Whatever the heading has not already said. Grouped by scene the
+            // row says who mapped it; grouped by character the heading says
+            // that and the title says the scene, so the row has nothing left
+            // to add but the kind -- and for an ordinary player map, nothing
+            // at all, which is better than repeating the line above it.
             group.maps.push({
                 ...map,
-                subtitle: byScene ? (map.ownerLabel || map.actorName) : map.sceneName
+                subtitle: [byScene ? (map.ownerLabel || map.actorName) : '', map.isPlayer ? '' : map.kindLabel]
+                    .filter(Boolean).join(' · ')
             });
             group.updated = Math.max(group.updated, map.updatedAt ?? 0);
         }
