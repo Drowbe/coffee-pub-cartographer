@@ -11,6 +11,7 @@ import {
     mergeMapInto,
     propagateFloors,
     sameFloorRegion,
+    sceneInteriorRegion,
     visibleRevealKeys,
     wallFringe
 } from './utils-mapping.js';
@@ -816,7 +817,7 @@ class MappingManager {
      * build from. An official map is given an id of its own here, because
      * several may describe one scene and nothing else would tell them apart.
      */
-    _newOwnerlessRecord(kind, scene, { name = '' } = {}) {
+    _newOwnerlessRecord(kind, scene, { name = '', officialId = '' } = {}) {
         const record = this._emptyRecord({ scene });
         const dimensions = this._sceneGridDimensions(scene);
         record.kind = kind;
@@ -824,13 +825,33 @@ class MappingManager {
         record.rows = dimensions.rows;
         record.sceneId = scene?.id ?? null;
         record.sceneName = scene?.name ?? '';
-        record.officialId = kind === 'official' ? foundry.utils.randomID() : null;
+        // Given by whoever asked for the map where possible, so the asking
+        // client knows the id of the thing it just made and can open it. Only
+        // a fallback generates one here, where nobody would learn of it.
+        record.officialId = kind === 'official'
+            ? (String(officialId || '') || foundry.utils.randomID())
+            : null;
         const fallback = kind === 'party'
             ? this.partyName()
             : game.i18n.localize(`${MODULE.ID}.mapping.officialFallbackName`);
         record.name = String(name || '').trim() || `${fallback} — ${record.sceneName}`;
         const ownerKey = ownerKeyFor(record);
         record.id = ownerKey && record.sceneId ? this._recordId(ownerKey, record.sceneId) : null;
+
+        // An artifact shows the place, not a visit to it, so it arrives with the
+        // whole scene already on it -- everywhere there is, rather than anywhere
+        // anyone went. The architecture was settled once when the atlas was
+        // built, so there is nothing here to discover and nothing to walk.
+        //
+        // The party map is the opposite and stays empty: it is only ever what
+        // its members have chosen to give it.
+        if (kind === 'official') {
+            const seeded = sceneInteriorRegion(
+                this.atlasFor(record.sceneId), record.columns, record.rows
+            );
+            record.explored = seeded.explored;
+            record.sides = seeded.sides;
+        }
         return record;
     }
 
@@ -879,12 +900,32 @@ class MappingManager {
             modal: true
         });
         if (result === null || result === undefined) return false;
+        // Named here so the map can be opened the moment it exists. Made
+        // GM-side, the id would be a thing only the GM's own client learned.
+        const officialId = foundry.utils.randomID();
         await this._requestMutation({
             action: 'create-owned',
             kind: 'official',
             sceneId: scene.id,
+            officialId,
             name: String(result.name ?? '').trim().slice(0, 100)
         });
+        // Straight into it: an artifact is made in order to be drawn, and
+        // leaving the GM in the list to find it is a step with one answer.
+        const id = this._recordId(`${OFFICIAL_KEY_PREFIX}${officialId}`, scene.id);
+        this.selectMap(id);
+        this.window?.showMap?.();
+        // Seeding finds the inside by flooding in from the edge of the scene, so
+        // a scene whose rooms are not sealed has no inside to find and the map
+        // arrives blank. That is the honest answer rather than a failure, but it
+        // is not what anyone expected, so it has to be said -- otherwise the GM
+        // is left looking at an empty grid wondering what went wrong.
+        if (!this.getRecord(id)?.explored?.length) {
+            notify(game.i18n.localize(`${MODULE.ID}.mapping.officialEmptyTitle`), {
+                subtitle: game.i18n.localize(`${MODULE.ID}.mapping.officialEmptyHint`),
+                type: 'warn'
+            });
+        }
         return true;
     }
 
@@ -2380,7 +2421,10 @@ class MappingManager {
             // exists: an official map is the GM's to author, the party map is
             // any member's to start.
             if (!this.canManageRecord({ kind, officialId: 'pending' }, user)) return;
-            const next = this._newOwnerlessRecord(kind, scene, { name: data.name });
+            const next = this._newOwnerlessRecord(kind, scene, {
+                name: data.name,
+                officialId: data.officialId
+            });
             // One party map to a scene. Asking again opens the one there is.
             if (kind === 'party' && this.getRecord(next.id)) return;
             if (!next.id) return;

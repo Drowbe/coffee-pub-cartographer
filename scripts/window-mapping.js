@@ -641,6 +641,21 @@ export class MappingWindow extends ToolWindowBase {
         }).map(group => ({ ...group, count: group.maps.length }));
     }
 
+    /**
+     * Whether an empty map should offer blank ground to draw on rather than a
+     * message saying there is nothing here.
+     *
+     * The question is whether anyone is ever going to walk this map. A player
+     * map fills itself in as its token moves, so an empty one is genuinely
+     * waiting for something and should say so. The party's map and an artifact
+     * are never recorded into by anybody, so an empty one is not waiting -- it
+     * is a blank sheet, and the person who can edit it is holding the pencil.
+     */
+    _canAuthorBlank() {
+        const kind = this.manager.state.kind ?? 'player';
+        return kind !== 'player' && this.manager.canManageRecord();
+    }
+
     _buildMapModel() {
         const explored = new Set(this.manager.state.explored);
         const placedSymbols = new Map(
@@ -711,6 +726,35 @@ export class MappingWindow extends ToolWindowBase {
         if (!explored.size) {
             this._hasBuiltMap = true;
             this._renderedExplored = explored;
+            // A map that is authored rather than explored begins with nothing on
+            // it, and the only way to put anything on it is to right-click a
+            // square -- so there has to be a grid to right-click. The empty
+            // message is the right answer for a map somebody is going to walk;
+            // for one somebody is going to draw it is a dead end, because
+            // _squareAt finds no grid and every menu it would open is
+            // unreachable. So a blank lattice is laid out over the scene
+            // instead: no cells, no hatching, nothing but ruled ground waiting
+            // to be told what it is.
+            if (this._canAuthorBlank()) {
+                return {
+                    ...common,
+                    empty: false,
+                    cells: [],
+                    hatchCells: [],
+                    floorLayers: [],
+                    // The scene's own extent, since there is no explored square
+                    // to take bounds from, and origin zero so a square's grid
+                    // position is its scene position.
+                    columnCount: Math.max(1, Number(this.manager.state.columns) || 1),
+                    rowCount: Math.max(1, Number(this.manager.state.rows) || 1),
+                    originColumn: 0,
+                    originRow: 0,
+                    showParty: false,
+                    isBlankCanvas: true,
+                    blankCanvasHint: game.i18n.localize(`${MODULE.ID}.mapping.blankCanvasHint`),
+                    feetMapped: 0
+                };
+            }
             return {
                 ...common,
                 empty: true,

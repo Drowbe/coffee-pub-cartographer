@@ -431,6 +431,92 @@ function propagateFloors(exploredKeys, atlas, floors, addedKeys, sides) {
 }
 
 /**
+ * The whole of a scene's inside, as if a token had walked every part of it.
+ *
+ * Which is what an official map is: not somewhere anyone went, but everywhere
+ * there is. The architecture is already settled in the atlas, so nothing has to
+ * be discovered -- the only real question is which squares are *inside*, and
+ * walls answer that if the question is asked from the right end.
+ *
+ * Asked from the outside in. Flooding outward from the scene's edge reaches
+ * every square that is not sealed off from it, and a dungeon's walls are exactly
+ * what seals its rooms from the open ground around them. So whatever the flood
+ * cannot reach is inside, and that is the map. Doors block the flood as walls do
+ * -- otherwise it pours through the front door and the dungeon is "outside" too.
+ *
+ * The reverse -- flooding from some square known to be indoors -- needs a
+ * starting square nobody can name, which is the whole difficulty. This needs no
+ * seed at all: the edge of the scene is always outside.
+ *
+ * Returns the squares and the side each one's floor was seen from, in the same
+ * shape the reveal records, so the renderer cannot tell the difference.
+ */
+function sceneInteriorRegion(atlas, columns, rows) {
+    const width = Math.max(0, Number(columns) || 0);
+    const height = Math.max(0, Number(rows) || 0);
+    if (!width || !height) return { explored: [], sides: {} };
+
+    const inBounds = (column, row) => column >= 0 && row >= 0 && column < width && row < height;
+    const outside = new Set();
+    const queue = [];
+    const openEdge = (column, row) => {
+        const key = `${column},${row}`;
+        if (outside.has(key)) return;
+        outside.add(key);
+        queue.push({ column, row });
+    };
+    // Every square along the border is reachable from beyond it: there is no
+    // wall at the edge of the world.
+    for (let column = 0; column < width; column++) {
+        openEdge(column, 0);
+        openEdge(column, height - 1);
+    }
+    for (let row = 0; row < height; row++) {
+        openEdge(0, row);
+        openEdge(width - 1, row);
+    }
+
+    while (queue.length) {
+        const current = queue.shift();
+        const currentKey = `${current.column},${current.row}`;
+        for (const [columnOffset, rowOffset] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+            const next = { column: current.column + columnOffset, row: current.row + rowOffset };
+            if (!inBounds(next.column, next.row)) continue;
+            const nextKey = `${next.column},${next.row}`;
+            if (outside.has(nextKey)) continue;
+            if (boundaryBlocks(atlas, currentKey, current, next)) continue;
+            outside.add(nextKey);
+            queue.push(next);
+        }
+    }
+
+    // Whatever the open ground could not reach.
+    const seen = new Set();
+    const everything = new Set();
+    for (let row = 0; row < height; row++) {
+        for (let column = 0; column < width; column++) {
+            const key = `${column},${row}`;
+            everything.add(key);
+            if (!outside.has(key)) seen.add(key);
+        }
+    }
+
+    const sides = {};
+    // A square whose middle is inside the room has its floor under that middle.
+    for (const key of seen) sides[key] = [50, 50];
+    // And the half-squares the walls cut, taken on exactly as the reveal takes
+    // them: from whichever inside square they touch, which is what says which
+    // half of them is floor.
+    const fringe = wallFringe(atlas, seen, everything);
+    for (const [key, at] of fringe) {
+        seen.add(key);
+        sides[key] ??= at;
+    }
+
+    return { explored: [...seen], sides };
+}
+
+/**
  * Fold one map into another, taking nothing away.
  *
  * What a donation is: a player hands the party the parts of a place they walked,
@@ -491,6 +577,7 @@ export {
     oppositeDirection,
     propagateFloors,
     sameFloorRegion,
+    sceneInteriorRegion,
     visibleFromToken,
     visibleRevealKeys,
     wallFringe

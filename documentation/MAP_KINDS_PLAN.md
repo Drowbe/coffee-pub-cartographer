@@ -99,12 +99,30 @@ back only their own additions.
 
 ### One-click create
 
-Seeding from the scene's atlas is close to free, since the atlas already settles
-the whole architecture in one pass. The open question is what "every square"
-should mean: marking the entire grid explored would leave nothing unexplored for
-the rock hatching to describe, and the map would read as one filled rectangle
-with walls drawn across it. Some notion of *inside* is wanted, and the atlas
-knows walls rather than rooms. Worth settling when the button is built, not now.
+The GM names it and the whole scene arrives already mapped, as though a token had
+walked every part of it. No token is involved and none is wanted: the
+architecture was settled once when the atlas was built, so there is nothing to
+discover and nothing to walk.
+
+The question that needed answering was what "every square" means, since marking
+the entire grid explored would leave nothing unexplored for the rock hatching to
+describe and the map would read as one filled rectangle. The atlas knows walls
+rather than rooms, so *inside* has to be derived — and it falls out if the
+question is asked from the other end. **Flood inward from the edge of the scene:
+whatever the open ground cannot reach is inside.** A dungeon's walls are exactly
+what seals its rooms from the ground around them, and the edge of the scene is
+always outside, so this needs no starting square — which is the difficulty that
+sinks flooding outward from somewhere known to be indoors.
+
+Doors block the flood as walls do, or it pours in through the front door and the
+dungeon is "outside" too. Squares the walls cut through are taken on afterwards
+by `wallFringe`, exactly as the reveal takes them, so the sides recorded are the
+ones the renderer already expects and a seeded map is indistinguishable from a
+walked one.
+
+A scene whose rooms are not sealed has no inside to find, and the map arrives
+blank. That is the honest answer rather than a failure, but it is said out loud,
+because an empty grid with no explanation reads as a bug.
 
 Party membership comes from `getParty().members` (Actor ids). It is
 GM-configured via `defaultPartySize` and `partyMember1..N` and **may be unset**,
@@ -212,9 +230,7 @@ the module into Foundry's Item documents.
 2. ~~**The `shared` flag and the list filter.**~~ Done.
 3. ~~**The party map** — one per scene, plus editing by any member.~~ Done.
 4. ~~**Donation.**~~ Done — `mergeMapInto`, additive only.
-5. ~~**Official maps and the create button.**~~ Done, authored empty. Seeding one
-   from the scene's atlas is still open, and still needs the question above
-   answered about what counts as *inside*.
+5. ~~**Official maps and the create button.**~~ Done, seeded from the scene.
 6. **Export as an Item**, with the generated description.
 7. **Filing a found map**, as a new mutation action.
 

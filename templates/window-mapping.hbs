@@ -198,6 +198,16 @@
             </div>
             {{/each}}
         </div>
+        {{#if isBlankCanvas}}
+        {{! Blank ruled ground has nothing on it to suggest what to do with it,
+            and the answer -- right-click a square -- is not guessable. Says so
+            once, and goes as soon as the first square is drawn. Never takes the
+            pointer: the whole point is that the ground beneath it is clickable. }}
+        <div class="cartographer-mapping-canvas-hint" aria-hidden="true">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+            <span>{{blankCanvasHint}}</span>
+        </div>
+        {{/if}}
         {{#if showParty}}
         {{! Pinned twin of the party marker. While following, the viewport shows
             this one and hides the in-grid marker, so the party stays exactly at

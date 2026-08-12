@@ -1165,3 +1165,30 @@
 .cartographer-mapping-list-item.is-official-create .cartographer-mapping-list-icon {
     color: var(--blacksmith-tool-text-muted);
 }
+
+/* Said over blank ruled ground, where there is nothing to suggest what to do
+   and the answer is not guessable. Never takes the pointer: the ground beneath
+   it is the thing being pointed at. */
+.cartographer-mapping-canvas-hint {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    box-sizing: border-box;
+    max-width: min(420px, 80%);
+    padding: 12px 16px;
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--blacksmith-tool-field-border);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--blacksmith-tool-scrim) 92%, transparent);
+    color: var(--blacksmith-tool-text);
+    text-align: left;
+    pointer-events: none;
+}
+
+.cartographer-mapping-canvas-hint i {
+    flex: 0 0 auto;
+    color: var(--cartographer-map-party);
+}
