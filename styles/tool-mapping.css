@@ -19,7 +19,12 @@
     --cartographer-map-void: rgba(112, 85, 49, 0.08);
     --cartographer-map-void-grid: rgba(112, 85, 49, 0.16);
     --cartographer-map-hatch: rgba(23, 19, 16, 0.92);
-    --cartographer-map-floor-fill: rgba(23, 19, 16, 0.34);
+    /* A surface is the faintest thing on the paper, and deliberately fainter
+       than the grid it sits under: it says what a room is made of, which the
+       walls and the grid have already finished saying more urgently. At the 0.34
+       it started at it was heavier than the grid line itself and the eye read it
+       as linework. One place to tune all seven patterns. */
+    --cartographer-map-floor-fill: rgba(23, 19, 16, 0.18);
 
     /* The plain shades, which carry no pattern. Three steps of the same ink the
        patterns use, so a shaded room and a surfaced one read as the same pen.
@@ -41,7 +46,7 @@
     --cartographer-map-void: rgba(0, 0, 0, 0.25);
     --cartographer-map-void-grid: rgba(236, 227, 208, 0.08);
     --cartographer-map-hatch: rgba(236, 227, 208, 0.72);
-    --cartographer-map-floor-fill: rgba(236, 227, 208, 0.26);
+    --cartographer-map-floor-fill: rgba(236, 227, 208, 0.15);
     --cartographer-map-floor-tint-light: rgba(236, 227, 208, 0.06);
     --cartographer-map-floor-tint-medium: rgba(236, 227, 208, 0.13);
     --cartographer-map-floor-tint-dark: rgba(236, 227, 208, 0.22);
@@ -59,7 +64,7 @@
     --cartographer-map-void: transparent;
     --cartographer-map-void-grid: rgba(255, 255, 255, 0.07);
     --cartographer-map-hatch: rgba(242, 234, 217, 0.62);
-    --cartographer-map-floor-fill: rgba(242, 234, 217, 0.24);
+    --cartographer-map-floor-fill: rgba(242, 234, 217, 0.14);
     --cartographer-map-floor-tint-light: rgba(242, 234, 217, 0.06);
     --cartographer-map-floor-tint-medium: rgba(242, 234, 217, 0.12);
     --cartographer-map-floor-tint-dark: rgba(242, 234, 217, 0.20);
@@ -322,12 +327,22 @@
 }
 
 /* Boulders in assorted sizes, four to a tile rather than seven: at map scale the
-   denser cluster lost its gaps and read as a grey wash. */
+   denser cluster lost its gaps and read as a grey wash.
+
+   Boulders are drawn as angular outlines rather than circles, because a circle
+   reads as a ball and a boulder is a lump: it is the uneven facets that say
+   stone. Three to a 44px tile, the largest about a third of a square across, so
+   a boulder is a thing the eye lands on rather than stippling. The corners are
+   rounded off at the joins so they read as weathered rock and not as crystals.
+
+   Seven points per boulder rather than one circle costs nothing now: the tile is
+   rasterised once for the whole layer, not once per square, so pattern detail
+   stopped being a performance question when the per-square masks went. */
 .cartographer-mapping-floor.is-floor-rock {
-    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='38' height='38' viewBox='0 0 38 38'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Ccircle cx='9' cy='10' r='3.6'/%3E%3Ccircle cx='15.6' cy='15.2' r='1.7'/%3E%3Ccircle cx='27' cy='27' r='4'/%3E%3Ccircle cx='31' cy='9' r='2'/%3E%3C/g%3E%3C/svg%3E");
-    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='38' height='38' viewBox='0 0 38 38'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'%3E%3Ccircle cx='9' cy='10' r='3.6'/%3E%3Ccircle cx='15.6' cy='15.2' r='1.7'/%3E%3Ccircle cx='27' cy='27' r='4'/%3E%3Ccircle cx='31' cy='9' r='2'/%3E%3C/g%3E%3C/svg%3E");
-    -webkit-mask-size: 38px 38px;
-    mask-size: 38px 38px;
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 44 44'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 13 L9 7 L15 5 L20 9 L19 16 L13 19 L7 17 Z'/%3E%3Cpath d='M28 20 L33 17 L38 20 L39 26 L34 29 L29 26 Z'/%3E%3Cpath d='M11 31 L16 29 L20 32 L19 37 L14 38 L10 35 Z'/%3E%3C/g%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 44 44'%3E%3Cg fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 13 L9 7 L15 5 L20 9 L19 16 L13 19 L7 17 Z'/%3E%3Cpath d='M28 20 L33 17 L38 20 L39 26 L34 29 L29 26 Z'/%3E%3Cpath d='M11 31 L16 29 L20 32 L19 37 L14 38 L10 35 Z'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-size: 44px 44px;
+    mask-size: 44px 44px;
 }
 
 /* Cobbles set the way cobbles actually are: assorted sizes, each turned a
