@@ -669,8 +669,12 @@ export class MappingWindow extends ToolWindowBase {
      * is a blank sheet, and the person who can edit it is holding the pencil.
      */
     _canAuthorBlank() {
-        const kind = this.manager.state.kind ?? 'player';
-        return kind !== 'player' && this.manager.canManageRecord();
+        // The artifact alone. A player map fills in as its token moves, and the
+        // party map fills in from donations and from members recording into it
+        // -- both are waiting for something, so both should say so rather than
+        // offering a pencil. Only an artifact is a blank sheet by nature.
+        return (this.manager.state.kind ?? 'player') === 'official'
+            && this.manager.canManageRecord();
     }
 
     _buildMapModel() {
@@ -707,13 +711,16 @@ export class MappingWindow extends ToolWindowBase {
             drawingLabel: game.i18n.localize(`${MODULE.ID}.mapping.drawing`),
             zoom: this.zoom,
             // Following and recording both track a token on this scene, so a
-            // map belonging to another scene can only be viewed -- and so can a
-            // map no token could be recording into. Pressing Record on the party
-            // map or an artifact used to quietly switch the window to the
-            // token's own map instead, which reads as the button doing nothing.
+            // map belonging to another scene can only be viewed. An artifact can
+            // only be viewed too: nobody walks it, it is drawn.
+            //
+            // The party map *is* recordable, and recording it is the second way
+            // to add to it -- what the character walks goes to the party's map
+            // and to their own at once, which is donating as you go rather than
+            // afterwards.
             modes: MAPPING_MODE_BUTTONS.filter(mode => mode.id === 'view'
                 || (this.manager.state.sceneId === canvas?.scene?.id
-                    && (this.manager.state.kind ?? 'player') === 'player')).map(mode => {
+                    && (this.manager.state.kind ?? 'player') !== 'official')).map(mode => {
                 // Recording doubles as its own off switch: pressing it while
                 // recording stops, so it says so rather than sitting there
                 // named after a mode you are already in.
@@ -775,7 +782,14 @@ export class MappingWindow extends ToolWindowBase {
             return {
                 ...common,
                 empty: true,
-                emptyMessage: game.i18n.localize(`${MODULE.ID}.mapping.emptyMap`),
+                // The party map is filled a different way from a character's, so
+                // an empty one has different advice: donate what you have, or
+                // record into it and give as you go.
+                emptyMessage: game.i18n.localize(
+                    (this.manager.state.kind ?? 'player') === 'party'
+                        ? `${MODULE.ID}.mapping.emptyPartyMap`
+                        : `${MODULE.ID}.mapping.emptyMap`
+                ),
                 feetMapped: 0
             };
         }

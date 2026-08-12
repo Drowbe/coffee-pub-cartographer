@@ -113,6 +113,7 @@
 	"mapping.markRock": "This is not a floor",
 	"mapping.markRockArea": "This whole area is not floor",
 	"mapping.blankCanvasHint": "Right-click any square and choose Fix Things → This is a floor to start drawing.",
+	"mapping.emptyPartyMap": "Nothing here yet. Donate a map you have already recorded, or press Record to map with your token and give the party everything you walk.",
 	"mapping.kindPlayer": "Player Map",
 	"mapping.kindParty": "Party Map",
 	"mapping.kindOfficial": "Official Map",

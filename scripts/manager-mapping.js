@@ -116,6 +116,7 @@ class MappingManager {
         this.trackedTokenId = null;
         this.currentMapId = null;
         this.lastGridKey = null;
+        this.contributeToParty = false;
         this.state = this._emptyRecord();
         // The explored squares of a record, as a set, worked out once per record.
         // Keyed on the record object rather than its id, so it cannot go stale:
@@ -1046,9 +1047,19 @@ class MappingManager {
         return actorId && canvas?.scene?.id ? this._recordId(actorId, canvas.scene.id) : null;
     }
 
+    /**
+     * Point the window at the map this token records into.
+     *
+     * Which is always the character's own: a token records what its character
+     * saw, and that is the one map it can be said to be a record of. Recording
+     * while looking at the party map leaves the window there and gives the party
+     * everything as it is walked -- the character's map still fills in exactly
+     * as it would have, because it is the same reveal writing to both.
+     */
     _selectMapForToken(token) {
         const actor = token?.actor;
         if (!actor || !canvas?.scene) return false;
+        if (this.contributeToParty && this.currentMapId === this.partyMapId(canvas.scene.id)) return true;
         const id = this._recordId(actor.id, canvas.scene.id);
         this.currentMapId = id;
         this.state = this.getRecord(id) ?? this._newRecord(actor, canvas.scene);
@@ -1129,6 +1140,15 @@ class MappingManager {
             return false;
         }
 
+        // Pressing Record while looking at the party map is how somebody says
+        // they are mapping *for the party*: everything they walk goes to the
+        // party's map as they walk it, and to their own exactly as it always
+        // would. Settled once, here, so a change of view mid-session cannot
+        // start or stop the giving halfway along a corridor.
+        this.contributeToParty = this._isPartyMember()
+            && this.currentMapId === this.partyMapId(canvas?.scene?.id)
+            && Boolean(this.getRecord(this.currentMapId));
+
         this.mode = 'record';
         this.paused = false;
         this.refreshMenubarTool();
@@ -1174,6 +1194,8 @@ class MappingManager {
         this.mode = 'view';
         this.paused = false;
         this.lastGridKey = null;
+        // Giving to the party lasts as long as the session that started it.
+        this.contributeToParty = false;
         this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
         this.refreshMenubarTool();
         if (closeWindow && this.window?.rendered) {
@@ -1767,7 +1789,11 @@ class MappingManager {
             sceneId: canvas.scene.id,
             tokenId: tokenDocument.id,
             actorId: tokenDocument.actor?.id ?? tokenDocument.actorId,
-            path: steps
+            path: steps,
+            // Donating as it is walked rather than afterwards. The character
+            // still gets their own map of everywhere they went -- this is the
+            // same gift made continuously instead of in one go.
+            contribute: this.contributeToParty === true
         };
         this._outgoingRevealQueue = this._outgoingRevealQueue
             .catch(error => console.error(`${MODULE.NAME}: Failed to send an earlier map step`, error))
@@ -1960,10 +1986,52 @@ class MappingManager {
             updatedBy: data.userId
         };
         this._cacheRecord(next);
-        this.currentMapId = id;
-        this.state = next;
+        // Only follow the reveal onto the party map when the window is not
+        // already showing it: somebody mapping *for* the party is looking at the
+        // party's map, and yanking the view onto their own would undo the thing
+        // they asked for.
+        if (!data.contribute) {
+            this.currentMapId = id;
+            this.state = next;
+        }
         void this.renderWindow();
         await this._persistMapRecord(next);
+        if (data.contribute) await this._contributeReveal(next, data.userId);
+    }
+
+    /**
+     * Give the party map what a character has just walked.
+     *
+     * The same donation the button makes, made continuously instead of once --
+     * so it is the same merge, and every rule of it holds: additive only, the
+     * party's own answers stand where it has them, and nothing the character
+     * strikes off their map is struck off the party's.
+     *
+     * The character's own record is written first and separately. This adds a
+     * second map to the walk rather than diverting the walk into it, which is
+     * what "the character always gets a map of what they record" means.
+     */
+    async _contributeReveal(donation, userId) {
+        const target = this.getRecord(this.partyMapId(donation.sceneId));
+        // Nothing to give to. Not an error -- the party map may have been
+        // deleted mid-session, and the character's own map is unaffected.
+        if (!target || mapKind(target.kind) !== 'party') return;
+        const contributors = new Set(target.contributors ?? []);
+        if (donation.actorId) contributors.add(donation.actorId);
+        const merged = {
+            ...target,
+            ...mergeMapInto(target, donation),
+            contributors: [...contributors],
+            // The marker belongs wherever the party was last seen, which while
+            // somebody is giving as they walk is wherever they are.
+            lastPosition: donation.lastPosition ?? target.lastPosition,
+            updatedAt: Date.now(),
+            updatedBy: userId
+        };
+        this._cacheRecord(merged);
+        if (this.currentMapId === merged.id) this.state = merged;
+        void this.renderWindow();
+        await this._persistMapRecord(merged);
     }
 
     /**

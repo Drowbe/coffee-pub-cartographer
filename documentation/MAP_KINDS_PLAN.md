@@ -69,12 +69,26 @@ removing, which is a distinction the current code does not draw anywhere.
 `createdBy`. Anything that arrived with the map, or that another player added,
 is not removable — a typo of one's own still is.
 
-**Nothing records into the party map, and nothing needs to.** Recording is bound
-to a token — `_mapIdForToken` resolves the record from `token.actor.id` — so
-every recording is already "record as some Actor". A GM seeding a party map
-therefore records as any token they control, a party member or a scout NPC, and
-donates the result. Writing a `party`-targeted recording path would buy nothing
-and would add a special case to the one place the permission rules are simple.
+### Two ways in, and only two
+
+The party map is added to by **donating** a map already recorded, or by
+**recording while looking at it** — which gives the party everything as it is
+walked. There is no third way, and in particular it is not drawn by hand: an
+empty party map is waiting to be given to, not asking for a pencil.
+
+**Recording into the party map does not divert the recording into it.** The
+character always gets a map of what they record; contributing adds a second map
+to the same walk. So the two ways in are the same act at different moments —
+donate afterwards, or donate continuously — and they are the same merge either
+way, with every rule of it holding: additive only, the party's own answers stand
+where it has them, and nothing a character strikes off their own map is struck
+off the party's.
+
+That is why recording is bound to a token and always will be: `_mapIdForToken`
+resolves the record from `token.actor.id`, so a recording is always "record as
+some Actor". Contributing is a flag on that recording session, settled when
+Record is pressed, so a change of view mid-session cannot start or stop the
+giving halfway along a corridor.
 
 ## Official Maps Are Authored, Not Explored
 
