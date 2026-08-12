@@ -301,7 +301,13 @@ function contiguousFloorRegion(exploredKeys, atlas, start, sides, limit = 4000) 
     return region;
 }
 
-function boundaryBlocks(atlas, fromKey, from, to) {
+/**
+ * Whether anything recorded on the boundary between two squares is in the way.
+ *
+ * Split from the curve test below because a square a wall cuts through has to be
+ * asked only half of the question. See propagateFloors.
+ */
+function featureBlocks(atlas, fromKey, from, to) {
     const direction = directionBetween(from, to);
     if (!direction) return true;
     const features = atlas?.features;
@@ -309,10 +315,18 @@ function boundaryBlocks(atlas, fromKey, from, to) {
     const here = features?.[fromKey] ?? [];
     const there = features?.[`${to.column},${to.row}`] ?? [];
     if (here.some(code => code.endsWith(`:${direction}`))) return true;
-    if (there.some(code => code.endsWith(`:${opposite}`))) return true;
-    // Curves and angled walls do not sit on the lattice, so they say they are
-    // in the way separately. Without this a room's flooring ran out through
-    // every curved wall it had.
+    return there.some(code => code.endsWith(`:${opposite}`));
+}
+
+/**
+ * Whether a curved or angled wall runs between two squares.
+ *
+ * These do not sit on the lattice, so they say they are in the way separately.
+ * Without this a room's flooring ran out through every curved wall it had.
+ */
+function barrierBlocks(atlas, from, to) {
+    const direction = directionBetween(from, to);
+    if (!direction) return true;
     const step = {
         east: `e:${from.column},${from.row}`,
         west: `e:${to.column},${to.row}`,
@@ -320,6 +334,45 @@ function boundaryBlocks(atlas, fromKey, from, to) {
         north: `s:${to.column},${to.row}`
     }[direction];
     return Boolean(atlas?.barriers?.has(step));
+}
+
+function boundaryBlocks(atlas, fromKey, from, to) {
+    return featureBlocks(atlas, fromKey, from, to) || barrierBlocks(atlas, from, to);
+}
+
+/**
+ * Every explored square carrying the same surface as the starting square,
+ * reached neighbour to neighbour without regard for walls.
+ *
+ * The surface itself is the boundary here, which is the point: this answers
+ * "where does this material run to", and it is used only for taking a surface
+ * away. Walls are deliberately not consulted, because a wall that has been
+ * edited since the surface was laid is exactly what strands part of it.
+ */
+function sameFloorRegion(exploredKeys, floors, start, limit = 20000) {
+    const explored = exploredKeys instanceof Set ? exploredKeys : new Set(exploredKeys ?? []);
+    const startKey = `${start.column},${start.row}`;
+    const surface = floors?.[startKey];
+    // Nothing to take away. Not an error: a right-click on bare paper can ask
+    // for Default as readily as anywhere else can.
+    if (!surface || !explored.has(startKey)) return [];
+
+    const region = [startKey];
+    const seen = new Set([startKey]);
+    const queue = [start];
+    while (queue.length && region.length < limit) {
+        const current = queue.shift();
+        for (const [columnOffset, rowOffset] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+            const next = { column: current.column + columnOffset, row: current.row + rowOffset };
+            const nextKey = `${next.column},${next.row}`;
+            if (seen.has(nextKey) || !explored.has(nextKey)) continue;
+            if (floors?.[nextKey] !== surface) continue;
+            seen.add(nextKey);
+            region.push(nextKey);
+            queue.push(next);
+        }
+    }
+    return region;
 }
 
 /**
@@ -353,8 +406,20 @@ function propagateFloors(exploredKeys, atlas, floors, addedKeys, sides) {
                 // A half-square takes the surface of the room it edges even
                 // though nothing can walk to the middle of it -- but only the
                 // room its floor actually faces.
+                //
+                // Half of the boundary question, not none of it. The curve that
+                // cuts such a square is the very wall it lies against, so asking
+                // whether a curve is in the way would stop it from ever taking a
+                // surface at all -- which is why the test used to be skipped
+                // outright. But a doorway is not the wall cutting the square: it
+                // is a boundary the party recorded, and it has to block here as
+                // everywhere else. Skipping it let a surface cross a doorway
+                // whenever that doorway's square happened to be cut by a curve
+                // as well, and then carry on into the next room through the run
+                // of newly revealed squares behind it.
                 const cut = atlas?.split?.has(key);
-                if (!cut && boundaryBlocks(atlas, key, cell, neighbour)) continue;
+                if (featureBlocks(atlas, key, cell, neighbour)) continue;
+                if (!cut && barrierBlocks(atlas, cell, neighbour)) continue;
                 if (cut && !floorFaces(sides, key, columnOffset, rowOffset)) continue;
                 next[key] = next[neighbourKey];
                 changed = true;
@@ -373,6 +438,7 @@ export {
     normalizeFeatures,
     oppositeDirection,
     propagateFloors,
+    sameFloorRegion,
     visibleFromToken,
     visibleRevealKeys,
     wallFringe

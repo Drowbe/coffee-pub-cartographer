@@ -9,6 +9,7 @@ import {
     contiguousFloorRegion,
     gridTravelPath,
     propagateFloors,
+    sameFloorRegion,
     visibleRevealKeys,
     wallFringe
 } from './utils-mapping.js';
@@ -45,6 +46,8 @@ const MAPPING_MODES = ['view', 'follow', 'record'];
 /** Mutations any party member may make, rather than only the Actor's owner. */
 const ANNOTATION_ACTIONS = ['place-symbol', 'remove-symbol'];
 const MENUBAR_TOOL_ID = `${MODULE.ID}-mapping-menubar`;
+/** Shared stand-in for "no squares". Only ever read, never added to. */
+const EMPTY_KEY_SET = Object.freeze(new Set());
 /** How still a token must be before its move is reported, in milliseconds. */
 const MOVE_SETTLE_MS = 220;
 // How long the marker will wait for the map to confirm a move before giving up
@@ -70,6 +73,12 @@ class MappingManager {
         this.currentMapId = null;
         this.lastGridKey = null;
         this.state = this._emptyRecord();
+        // The explored squares of a record, as a set, worked out once per record.
+        // Keyed on the record object rather than its id, so it cannot go stale:
+        // every write replaces the record wholesale, and a new object simply has
+        // no entry yet. Weak so a record that falls out of the cache takes its
+        // set with it.
+        this._exploredSets = new WeakMap();
         // Maps validated in full, materialized on first use. See _index for
         // why almost none of them are.
         this.records = new Map();
@@ -1067,7 +1076,7 @@ class MappingManager {
         if (!this.following || this.active || this.paused) return;
         if (this._unexploredPromptSuppressed || this._unexploredPromptOpen) return;
         if (!this.currentMapId || !this._normalizePosition(position)) return;
-        if (this.state.explored?.includes(`${position.column},${position.row}`)) return;
+        if (this.exploredSet().has(`${position.column},${position.row}`)) return;
         if (!this.canRecordCurrentMap()) return;
 
         this._unexploredPromptOpen = true;
@@ -1814,7 +1823,7 @@ class MappingManager {
         if (!MAPPING_SYMBOL_TYPES.has(type)) return false;
         const record = this.getRecord(this.currentMapId);
         const cellKey = `${Number(column)},${Number(row)}`;
-        if (!record || !record.explored.includes(cellKey) || !this.canAnnotateRecord(record)) return false;
+        if (!record || !this.exploredSet(record).has(cellKey) || !this.canAnnotateRecord(record)) return false;
 
         let text = '';
         if (MAPPING_ANNOTATED_SYMBOLS.has(type)) {
@@ -1843,7 +1852,7 @@ class MappingManager {
     }
 
     getMapNote(column, row) {
-        return this.state.symbols
+        return this.currentRecord.symbols
             ?.find(symbol => symbol.column === Number(column)
                 && symbol.row === Number(row)
                 && symbol.type === 'note') ?? null;
@@ -1904,9 +1913,40 @@ class MappingManager {
         return true;
     }
 
+    /**
+     * The record every question about "the map on screen" is answered from.
+     *
+     * The cache is the primary source because that is what every mutation
+     * validates against; `state` is the fallback for the moments it is ahead of
+     * the cache -- starting a recording sets a fresh state object for the marker's
+     * benefit without writing it back. Asking one place means a menu cannot
+     * offer a tick that the mutation behind it then disagrees with.
+     */
+    get currentRecord() {
+        return this.getRecord(this.currentMapId) ?? this.state;
+    }
+
+    /**
+     * The explored squares of a record, as a set.
+     *
+     * Stored as an array because that is what a scene flag can hold, but every
+     * question asked of it is "is this square on the map?" -- and on a
+     * well-explored scene that meant scanning a six-figure array, once for every
+     * context menu opened and once for every mutation validated.
+     */
+    exploredSet(record = this.currentRecord) {
+        if (!record) return EMPTY_KEY_SET;
+        let keys = this._exploredSets.get(record);
+        if (!keys) {
+            keys = new Set(record.explored ?? []);
+            this._exploredSets.set(record, keys);
+        }
+        return keys;
+    }
+
     /** Whether a square is on the map as floor. */
     isFloor(column, row) {
-        return Boolean(this.state.explored?.includes(`${Number(column)},${Number(row)}`));
+        return this.exploredSet().has(`${Number(column)},${Number(row)}`);
     }
 
     async setFloorType(type, column, row) {
@@ -1914,7 +1954,7 @@ class MappingManager {
         const record = this.getRecord(this.currentMapId);
         const cellKey = `${Number(column)},${Number(row)}`;
         // A surface restyles a whole area, so it stays with the Actor's owner.
-        if (!record || !record.explored.includes(cellKey) || !this.canManageRecord(record)) return false;
+        if (!record || !this.exploredSet(record).has(cellKey) || !this.canManageRecord(record)) return false;
         await this._requestMutation({
             action: 'set-floor',
             mapId: record.id,
@@ -1926,11 +1966,12 @@ class MappingManager {
     }
 
     getFloorType(column, row) {
-        return this.state.floors?.[`${Number(column)},${Number(row)}`] ?? 'default';
+        return this.currentRecord.floors?.[`${Number(column)},${Number(row)}`] ?? 'default';
     }
 
     hasMapSymbol(column, row) {
-        return this.state.symbols.some(symbol => symbol.column === Number(column) && symbol.row === Number(row));
+        return Boolean(this.currentRecord.symbols
+            ?.some(symbol => symbol.column === Number(column) && symbol.row === Number(row)));
     }
 
     async _requestMutation(mutation) {
@@ -2029,7 +2070,7 @@ class MappingManager {
             if (!MAPPING_SYMBOL_TYPES.has(type)
                 || !Number.isInteger(column)
                 || !Number.isInteger(row)
-                || !record.explored.includes(cellKey)) return;
+                || !this.exploredSet(record).has(cellKey)) return;
             const symbols = this._normalizeSymbols(record.symbols)
                 .filter(symbol => symbol.column !== column || symbol.row !== row);
             symbols.push({
@@ -2059,17 +2100,31 @@ class MappingManager {
             if (!MAPPING_FLOOR_TYPE_IDS.has(type)
                 || !Number.isInteger(column)
                 || !Number.isInteger(row)
-                || !record.explored.includes(cellKey)) return;
-            // One click surfaces the whole room. The region comes from the
-            // party's own record, so it can never spread past a boundary they
-            // have not discovered.
-            const region = contiguousFloorRegion(
-                new Set(record.explored),
-                this.atlasFor(record.sceneId),
-                { column, row },
-                this._normalizeSides(record.sides)
-            );
+                || !this.exploredSet(record).has(cellKey)) return;
             const floors = { ...this._normalizeFloors(record.floors) };
+            // Laying a surface down and taking one away are not the same
+            // question, so they are not asked the same way.
+            //
+            // Laying one down means "this room": the area bounded by whatever
+            // the party has discovered, which is what makes one click surface a
+            // chamber and stop at its doorways.
+            //
+            // Taking one away means "this material, wherever it runs". Bounding
+            // that by the walls as they stand now is what left a floor half
+            // cleared: a scene whose walls a GM has edited since, or a square
+            // struck off by hand, can split what was one area into two, and the
+            // half the click did not land in had no way to be reached at all
+            // except one square at a time. Two adjacent rooms of the same
+            // material do clear together -- they read as one expanse of stone,
+            // so clearing them as one is the honest reading of the click.
+            const region = type === 'default'
+                ? sameFloorRegion(this.exploredSet(record), floors, { column, row })
+                : contiguousFloorRegion(
+                    this.exploredSet(record),
+                    this.atlasFor(record.sceneId),
+                    { column, row },
+                    this._normalizeSides(record.sides)
+                );
             for (const key of region) {
                 if (type === 'default') delete floors[key];
                 else floors[key] = type;
