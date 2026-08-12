@@ -133,6 +133,16 @@ export class MappingWindow extends ToolWindowBase {
         'set-mode': (_event, target, app) => void app.manager.setMode(target.dataset.mode),
         'toggle-list': (_event, _target, app) => void app.toggleList(),
         'add-map': (_event, _target, app) => void app.manager.createMapForSelection(),
+        'add-party-map': (_event, _target, app) => void app.manager.createPartyMap(),
+        'add-official-map': (_event, _target, app) => void app.manager.createOfficialMap(),
+        'toggle-shared': (event, target, app) => {
+            event.stopPropagation();
+            void app.manager.setMapShared(target.dataset.mapId, target.dataset.shared !== 'true');
+        },
+        'donate-map': (event, target, app) => {
+            event.stopPropagation();
+            void app.manager.donateToPartyMap(target.dataset.mapId);
+        },
         'set-grouping': (_event, target, app) => void app.setListGrouping(target.dataset.grouping),
         'select-map': (_event, target, app) => void app.selectMap(target.dataset.mapId),
         'rename-map': (event, target, app) => {
@@ -186,12 +196,27 @@ export class MappingWindow extends ToolWindowBase {
         return window;
     }
 
+    /**
+     * The window's contents, and the chrome that frames them.
+     *
+     * Everything below asks the **model** which view this is, never
+     * `this.viewMode`. The two are the same thing only until the await on the
+     * next line: rendering the body yields, and anything that runs in the gap
+     * can switch the window's view -- starting the party map does exactly that,
+     * because it selects the new map and shows it once the write comes back. The
+     * chrome would then be built for the map view against a model describing the
+     * list, and read a field that view never fills in.
+     *
+     * The model is the snapshot the body was rendered from, so it is also the
+     * only honest answer to what the chrome is framing. A fresh render follows
+     * the view change and puts both right.
+     */
     async getData() {
         const model = this._buildModel();
         const bodyContent = await foundry.applications.handlebars.renderTemplate(
             `modules/${MODULE.ID}/templates/window-mapping.hbs`, model
         );
-        const statusKey = this.viewMode === 'list'
+        const statusKey = model.isListView
             ? 'mapping.statusMaps'
             : (this.manager.paused
                 ? 'mapping.statusPaused'
@@ -215,8 +240,8 @@ export class MappingWindow extends ToolWindowBase {
     }
 
     /** Who is being mapped, at the left of the status bar. */
-    _buildStatusIdentity() {
-        if (this.viewMode === 'list') {
+    _buildStatusIdentity(model) {
+        if (model.isListView) {
             return `<span class="cartographer-mapping-status-text">${foundry.utils.escapeHTML(
                 game.i18n.localize(`${MODULE.ID}.mapping.recordedMaps`)
             )}</span>`;
@@ -233,15 +258,15 @@ export class MappingWindow extends ToolWindowBase {
 
     /** How much has been mapped, at the right of the status bar. */
     _buildStatusMeasure(model) {
-        const text = this.viewMode === 'list'
+        const text = model.isListView
             ? game.i18n.format(`${MODULE.ID}.mapping.mapCount`, { count: model.maps.length })
             : `${model.feetMapped} ${game.i18n.localize(`${MODULE.ID}.mapping.feetMapped`)}`;
-        const icon = this.viewMode === 'list' ? 'fa-solid fa-layer-group' : 'fa-solid fa-ruler';
+        const icon = model.isListView ? 'fa-solid fa-layer-group' : 'fa-solid fa-ruler';
         return `<span class="cartographer-mapping-measure"><i class="${icon}"></i><span>${foundry.utils.escapeHTML(text)}</span></span>`;
     }
 
     _buildTopActions(model) {
-        if (this.viewMode === 'list') {
+        if (model.isListView) {
             // The same shape as the map view: the view switch alone, then a
             // divider, then the controls for what is being looked at. Making a
             // map is not among them -- that is what the card at the head of the
@@ -390,25 +415,59 @@ export class MappingWindow extends ToolWindowBase {
         // them, since a custom property resolves against the element that
         // declares it and not against the one that uses it.
         const gridClass = ` is-grid-${this.gridWeight}`;
-        const maps = this.manager.getMapList().map(record => ({
-            id: record.id,
-            name: record.name,
-            actorId: record.actorId,
-            actorName: record.actorName,
-            sceneName: record.sceneName,
-            updated: record.updatedAt ? new Date(record.updatedAt).toLocaleString() : '',
-            updatedAt: record.updatedAt ?? 0,
-            feetMapped: record.explored.length * (record.gridDistance || 5),
-            isCurrent: record.id === this.manager.currentMapId,
-            canManage: this.manager.canManageRecord(record),
-            canRecord: record.sceneId === canvas?.scene?.id && this.manager.canManageRecord(record),
-            thumbnail: isList ? this._mapThumbnail(record) : null
-        }));
+        const localize = key => game.i18n.localize(`${MODULE.ID}.${key}`);
+        const maps = this.manager.getMapList().map(record => {
+            const kind = record.kind === 'party' || record.kind === 'official' ? record.kind : 'player';
+            const isPlayerMap = kind === 'player';
+            return {
+                id: record.id,
+                name: record.name,
+                kind,
+                isPlayer: isPlayerMap,
+                // Who a map belongs to, in the one place the list can say it.
+                // An ownerless map has no actorName to fall back on.
+                ownerLabel: isPlayerMap
+                    ? record.actorName
+                    : (kind === 'party' ? this.manager.partyName() : localize('mapping.officialFallbackName')),
+                kindLabel: localize(`mapping.kind${kind === 'party' ? 'Party' : kind === 'official' ? 'Official' : 'Player'}`),
+                actorId: record.actorId,
+                actorName: record.actorName,
+                sceneName: record.sceneName,
+                updated: record.updatedAt ? new Date(record.updatedAt).toLocaleString() : '',
+                updatedAt: record.updatedAt ?? 0,
+                feetMapped: record.explored.length * (record.gridDistance || 5),
+                isCurrent: record.id === this.manager.currentMapId,
+                canManage: this.manager.canManageRecord(record),
+                canDelete: this.manager.canDeleteRecord(record),
+                // Only a player map can be hidden, and only its owner may say so.
+                canShare: isPlayerMap && this.manager.canManageRecord(record),
+                isShared: record.shared === true,
+                shareLabel: localize(record.shared === true ? 'mapping.unshareMap' : 'mapping.shareMap'),
+                // Offered only where there is a party map of this scene to give
+                // it to, and only to the person whose map it is.
+                canDonate: isPlayerMap
+                    && this.manager.canManageRecord(record)
+                    && this.manager._isPartyMember()
+                    && Boolean(this.manager.getRecord(this.manager.partyMapId(record.sceneId))),
+                // Recording is bound to a token, so only a player map is ever
+                // a thing to record into.
+                canRecord: isPlayerMap
+                    && record.sceneId === canvas?.scene?.id
+                    && this.manager.canManageRecord(record),
+                thumbnail: isList ? this._mapThumbnail(record) : null
+            };
+        });
         if (this.viewMode === 'list') {
             const grouping = this.listGrouping;
             const mine = grouping === 'mine';
             const own = mine ? this._ownActorIds() : null;
-            const visible = mine ? maps.filter(map => own.has(map.actorId)) : maps;
+            // "Just mine" means the maps this reader has a stake in: their own
+            // characters', and the one the party holds together. An artifact
+            // belongs to nobody, so it is not theirs to be shown among them.
+            const visible = mine
+                ? maps.filter(map => (map.kind === 'player' && own.has(map.actorId))
+                    || (map.kind === 'party' && this.manager._isPartyMember()))
+                : maps;
             // An empty list has to say why, since the reader has just pressed
             // the thing that emptied it. A GM's own maps are whichever token is
             // selected, so for them it is usually that nothing is.
@@ -438,9 +497,24 @@ export class MappingWindow extends ToolWindowBase {
                 createHint: game.i18n.format(`${MODULE.ID}.mapping.createForSceneHint`, {
                     scene: canvas?.scene?.name ?? game.i18n.localize(`${MODULE.ID}.mapping.thisScene`)
                 }),
+                // Offered only where it could be acted on: this scene, to
+                // somebody who is in the party. There is one party map to a
+                // scene, so the card goes once it exists.
+                showPartyCard: Boolean(canvas?.scene)
+                    && this.manager._isPartyMember()
+                    && !this.manager.getRecord(this.manager.partyMapId()),
+                partyTitle: localize('mapping.createParty'),
+                partyHint: game.i18n.format(`${MODULE.ID}.mapping.createPartyHint`, {
+                    party: this.manager.partyName()
+                }),
+                // Several artifacts may describe one scene, so this one stays.
+                showOfficialCard: Boolean(canvas?.scene) && Boolean(game.user?.isGM),
+                officialTitle: localize('mapping.createOfficial'),
+                officialHint: localize('mapping.createOfficialHint'),
                 viewMapLabel: game.i18n.localize(`${MODULE.ID}.mapping.viewMap`),
                 renameLabel: game.i18n.localize(`${MODULE.ID}.mapping.rename`),
                 deleteLabel: game.i18n.localize(`${MODULE.ID}.mapping.deleteMap`),
+                donateLabel: localize('mapping.donateMap'),
                 feetMappedLabel: game.i18n.localize(`${MODULE.ID}.mapping.feetMapped`),
                 feetMapped: this.manager.state.explored.length * (this.manager.state.gridDistance || 5)
             };
@@ -545,12 +619,18 @@ export class MappingWindow extends ToolWindowBase {
 
         const groups = new Map();
         for (const map of maps) {
-            const key = byScene ? map.sceneName : map.actorName;
+            // Grouping by character has no character to group an ownerless map
+            // under, so each kind says what it belongs to instead: the party
+            // map to the party, an artifact to the artifacts.
+            const key = byScene ? map.sceneName : (map.ownerLabel || map.actorName);
             if (!groups.has(key)) {
                 groups.set(key, { key, name: key, isHere: key === here, maps: [], updated: 0 });
             }
             const group = groups.get(key);
-            group.maps.push({ ...map, subtitle: byScene ? map.actorName : map.sceneName });
+            group.maps.push({
+                ...map,
+                subtitle: byScene ? (map.ownerLabel || map.actorName) : map.sceneName
+            });
             group.updated = Math.max(group.updated, map.updatedAt ?? 0);
         }
 
@@ -595,9 +675,13 @@ export class MappingWindow extends ToolWindowBase {
             drawingLabel: game.i18n.localize(`${MODULE.ID}.mapping.drawing`),
             zoom: this.zoom,
             // Following and recording both track a token on this scene, so a
-            // map belonging to another scene can only be viewed.
+            // map belonging to another scene can only be viewed -- and so can a
+            // map no token could be recording into. Pressing Record on the party
+            // map or an artifact used to quietly switch the window to the
+            // token's own map instead, which reads as the button doing nothing.
             modes: MAPPING_MODE_BUTTONS.filter(mode => mode.id === 'view'
-                || this.manager.state.sceneId === canvas?.scene?.id).map(mode => {
+                || (this.manager.state.sceneId === canvas?.scene?.id
+                    && (this.manager.state.kind ?? 'player') === 'player')).map(mode => {
                 // Recording doubles as its own off switch: pressing it while
                 // recording stops, so it says so rather than sitting there
                 // named after a mode you are already in.

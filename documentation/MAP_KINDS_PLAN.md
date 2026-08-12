@@ -197,21 +197,37 @@ is needed: every mutation already routes through the active GM via
 'mutation-request')`, so filing is one more action in that switch. The list
 already handles maps belonging to other scenes.
 
+## Status
+
+Built: the record kind and keyed storage, the permission matrix, privacy and
+sharing, creating a party map and an official map, and donation. Not built:
+export as an Item and filing a found map, which are the two that reach outside
+the module into Foundry's Item documents.
+
 ## Order of Work
 
-1. **`kind` on the record**, keyed storage, and the permission matrix. Nothing
-   else can be built first, and on its own it changes no behaviour: every
-   existing record reads as `player` and keeps its current permissions.
-2. **The `shared` flag and the list filter.** Small, and independent of the rest.
-3. **The party map** — declare one per scene, plus editing by any member.
-4. **Donation.** Needs 3, and is where the merge rules above land.
-5. **Official maps and the create button.** Independent of 3 and 4: it needs only
-   step 1's permissions, since the authoring tools already exist.
+1. ~~**`kind` on the record**, keyed storage, and the permission matrix.~~ Done.
+   Changed no behaviour on its own: every existing record reads as `player` and
+   keeps the permissions it had.
+2. ~~**The `shared` flag and the list filter.**~~ Done.
+3. ~~**The party map** — one per scene, plus editing by any member.~~ Done.
+4. ~~**Donation.**~~ Done — `mergeMapInto`, additive only.
+5. ~~**Official maps and the create button.**~~ Done, authored empty. Seeding one
+   from the scene's atlas is still open, and still needs the question above
+   answered about what counts as *inside*.
 6. **Export as an Item**, with the generated description.
 7. **Filing a found map**, as a new mutation action.
 
-Steps 1 and 2 are worth landing and playing with before 3 onward is designed in
-detail: they are where the assumptions get tested.
+### Still to decide for 6 and 7
+
+- The Item type is `loot` (dnd5e). Guard the create so a system without that
+  type fails loudly rather than making a broken Item.
+- Whether a found map arrives as `official` (annotations only, its contents
+  fixed) or as something a party may edit freely. `official` is the reading that
+  matches the fiction and needs no new kind.
+- Whether filing the same map twice should produce a second copy or recognise
+  the one already there. An official map's key is a random id, so nothing
+  currently stops a duplicate.
 
 ## Open Questions
 

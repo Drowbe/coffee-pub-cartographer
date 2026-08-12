@@ -1146,3 +1146,22 @@
     font-family: inherit;
     line-height: 1.4;
 }
+
+/* A shared map reads as shared at a glance: the eye is open and inked, rather
+   than the reader having to hover the button to find out. Unshared is the
+   default state and stays quiet. */
+.cartographer-mapping-item-actions button.cartographer-mapping-share.is-shared {
+    border-color: var(--cartographer-map-party);
+    color: var(--cartographer-map-party);
+}
+
+/* The two create cards that make a map nobody's character owns. Marked apart
+   from the ordinary one so the list does not read as three identical rows: the
+   party's map is the party's colour, an artifact is drawn in the map's own ink. */
+.cartographer-mapping-list-item.is-party-create .cartographer-mapping-list-icon {
+    color: var(--cartographer-map-party);
+}
+
+.cartographer-mapping-list-item.is-official-create .cartographer-mapping-list-icon {
+    color: var(--blacksmith-tool-text-muted);
+}

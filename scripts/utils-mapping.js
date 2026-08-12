@@ -430,9 +430,61 @@ function propagateFloors(exploredKeys, atlas, floors, addedKeys, sides) {
     return next;
 }
 
+/**
+ * Fold one map into another, taking nothing away.
+ *
+ * What a donation is: a player hands the party the parts of a place they walked,
+ * and the party map grows by exactly that much. Every rule here follows from the
+ * merge being additive, and the reason it must be is that the two maps are
+ * different people's knowledge of the same place -- neither is entitled to
+ * overrule the other, and only one of them is being offered.
+ *
+ * So: squares are unioned; a square the donor struck off by hand is *not* struck
+ * off for the party, because somebody else may have walked it and said it was
+ * floor, and their exploration is not the donor's to erase; the side a square's
+ * floor was seen from is kept where the party already has one, since whatever was
+ * settled first stands; a surface fills only where the party has none; and a
+ * symbol lands only on a square the party has left free.
+ *
+ * Donating twice does nothing the second time, which falls out of all of the
+ * above rather than being checked for.
+ */
+function mergeMapInto(target, donation) {
+    const explored = new Set(target.explored ?? []);
+    for (const key of donation.explored ?? []) explored.add(key);
+
+    const sides = { ...(donation.sides ?? {}), ...(target.sides ?? {}) };
+    const floors = { ...(donation.floors ?? {}), ...(target.floors ?? {}) };
+    const secrets = new Set([...(target.secrets ?? []), ...(donation.secrets ?? [])]);
+
+    // The party's own struck-off squares still stand -- it is only the donor's
+    // that carry no authority here.
+    const hidden = new Set(target.hidden ?? []);
+    for (const key of hidden) explored.delete(key);
+
+    const occupied = new Set((target.symbols ?? []).map(symbol => `${symbol.column},${symbol.row}`));
+    const symbols = [...(target.symbols ?? [])];
+    for (const symbol of donation.symbols ?? []) {
+        const key = `${symbol.column},${symbol.row}`;
+        if (occupied.has(key) || !explored.has(key)) continue;
+        occupied.add(key);
+        symbols.push(symbol);
+    }
+
+    return {
+        explored: [...explored],
+        sides,
+        floors,
+        secrets: [...secrets],
+        hidden: [...hidden],
+        symbols
+    };
+}
+
 export {
     clipSegmentToCell,
     contiguousFloorRegion,
+    mergeMapInto,
     directionBetween,
     gridTravelPath,
     normalizeFeatures,

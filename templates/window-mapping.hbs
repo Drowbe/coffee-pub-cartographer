@@ -16,6 +16,28 @@
             </div>
         </article>
         {{/if}}
+        {{! The map the party holds together, which is donated to rather than
+            recorded into. Only ever one to a scene. }}
+        {{#if showPartyCard}}
+        <article class="cartographer-mapping-list-item is-create is-party-create" data-action="add-party-map">
+            <div class="cartographer-mapping-list-icon"><i class="fa-solid fa-users"></i></div>
+            <div class="cartographer-mapping-list-copy">
+                <strong>{{partyTitle}}</strong>
+                <span>{{partyHint}}</span>
+            </div>
+        </article>
+        {{/if}}
+        {{! An artifact, authored rather than explored: no token is involved and
+            none is wanted. }}
+        {{#if showOfficialCard}}
+        <article class="cartographer-mapping-list-item is-create is-official-create" data-action="add-official-map">
+            <div class="cartographer-mapping-list-icon"><i class="fa-solid fa-scroll"></i></div>
+            <div class="cartographer-mapping-list-copy">
+                <strong>{{officialTitle}}</strong>
+                <span>{{officialHint}}</span>
+            </div>
+        </article>
+        {{/if}}
         {{#if listEmpty}}
         <div class="cartographer-mapping-empty">
             <i class="fa-solid fa-map"></i>
@@ -36,17 +58,34 @@
             </div>
             <div class="cartographer-mapping-list-copy">
                 <strong>{{name}}</strong>
-                <span>{{subtitle}}</span>
+                <span>{{subtitle}}{{#unless isPlayer}} · {{kindLabel}}{{/unless}}</span>
                 <small>{{feetMapped}} {{../../feetMappedLabel}}{{#if updated}} · {{updated}}{{/if}}</small>
             </div>
             {{#if canManage}}
             <div class="cartographer-mapping-item-actions">
+                {{! Whether the rest of the party sees this map at all. Shown
+                    only on a player map, which is the only kind that can be
+                    kept back. }}
+                {{! Hand what this map knows to the party's. Adds only, so it can
+                    be pressed again after exploring further. }}
+                {{#if canDonate}}
+                <button type="button" data-action="donate-map" data-map-id="{{id}}" data-tooltip="{{../../donateLabel}}" aria-label="{{../../donateLabel}}">
+                    <i class="fa-solid fa-hand-holding-heart"></i>
+                </button>
+                {{/if}}
+                {{#if canShare}}
+                <button type="button" class="cartographer-mapping-share{{#if isShared}} is-shared{{/if}}" data-action="toggle-shared" data-map-id="{{id}}" data-shared="{{isShared}}" data-tooltip="{{shareLabel}}" aria-label="{{shareLabel}}" aria-pressed="{{isShared}}">
+                    <i class="fa-solid {{#if isShared}}fa-eye{{else}}fa-eye-slash{{/if}}"></i>
+                </button>
+                {{/if}}
                 <button type="button" data-action="rename-map" data-map-id="{{id}}" data-tooltip="{{../../renameLabel}}" aria-label="{{../../renameLabel}}">
                     <i class="fa-solid fa-pen"></i>
                 </button>
+                {{#if canDelete}}
                 <button type="button" class="is-critical" data-action="delete-map" data-map-id="{{id}}" data-tooltip="{{../../deleteLabel}}" aria-label="{{../../deleteLabel}}">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
+                {{/if}}
             </div>
             {{/if}}
         </article>

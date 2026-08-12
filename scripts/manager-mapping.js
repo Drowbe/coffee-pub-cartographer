@@ -8,6 +8,7 @@ import { socketManager } from './manager-sockets.js';
 import {
     contiguousFloorRegion,
     gridTravelPath,
+    mergeMapInto,
     propagateFloors,
     sameFloorRegion,
     visibleRevealKeys,
@@ -262,6 +263,8 @@ class MappingManager {
             shared: false,
             // Identifies an official map, which has no Actor to be known by.
             officialId: null,
+            // Whose maps went into this one, for a party map to say who built it.
+            contributors: [],
             actorId,
             actorName: actor?.name ?? '',
             sceneId,
@@ -757,6 +760,9 @@ class MappingManager {
             kind,
             shared: raw.shared === true,
             officialId,
+            contributors: Array.isArray(raw.contributors)
+                ? [...new Set(raw.contributors.filter(id => typeof id === 'string' && id))]
+                : [],
             actorId,
             actorName: String(raw.actorName || actor?.name || ''),
             sceneId,
@@ -791,6 +797,97 @@ class MappingManager {
         return record;
     }
 
+    /** The id the party's map for a scene would have, whether or not it exists. */
+    partyMapId(sceneId = canvas?.scene?.id) {
+        return sceneId ? this._recordId(PARTY_OWNER_KEY, sceneId) : null;
+    }
+
+    /** What the party is called, for naming the map they share. */
+    partyName() {
+        const name = game.modules.get('coffee-pub-blacksmith')?.api?.campaign?.getParty?.()?.name;
+        return String(name || '').trim() || game.i18n.localize(`${MODULE.ID}.mapping.partyFallbackName`);
+    }
+
+    /**
+     * A map that no Actor owns: the party's, or an artifact.
+     *
+     * Everything an Actor would have supplied has to be given instead -- the
+     * name most of all, since `${actorName} — ${sceneName}` has no actor to
+     * build from. An official map is given an id of its own here, because
+     * several may describe one scene and nothing else would tell them apart.
+     */
+    _newOwnerlessRecord(kind, scene, { name = '' } = {}) {
+        const record = this._emptyRecord({ scene });
+        const dimensions = this._sceneGridDimensions(scene);
+        record.kind = kind;
+        record.columns = dimensions.columns;
+        record.rows = dimensions.rows;
+        record.sceneId = scene?.id ?? null;
+        record.sceneName = scene?.name ?? '';
+        record.officialId = kind === 'official' ? foundry.utils.randomID() : null;
+        const fallback = kind === 'party'
+            ? this.partyName()
+            : game.i18n.localize(`${MODULE.ID}.mapping.officialFallbackName`);
+        record.name = String(name || '').trim() || `${fallback} — ${record.sceneName}`;
+        const ownerKey = ownerKeyFor(record);
+        record.id = ownerKey && record.sceneId ? this._recordId(ownerKey, record.sceneId) : null;
+        return record;
+    }
+
+    /**
+     * Start the map the party shares for this scene, or open the one that
+     * already exists. There is only ever one, which is what makes it *the*
+     * party map rather than another map that happens to be shared.
+     */
+    async createPartyMap() {
+        const scene = canvas?.scene;
+        if (!scene) return false;
+        if (!this._isPartyMember()) {
+            notify(game.i18n.localize(`${MODULE.ID}.mapping.notPartyMember`), { type: 'warn' });
+            return false;
+        }
+        const id = this.partyMapId(scene.id);
+        const existing = this.getRecord(id);
+        if (existing) {
+            this.selectMap(id);
+            this.window?.showMap?.();
+            return true;
+        }
+        await this._requestMutation({ action: 'create-owned', kind: 'party', sceneId: scene.id });
+        this.selectMap(id);
+        this.window?.showMap?.();
+        return true;
+    }
+
+    /**
+     * Author a new map from nothing, with no token anywhere in it.
+     *
+     * A token was only ever a proxy for somebody having been somewhere, and an
+     * artifact makes no such claim -- so the GM simply says what the map shows,
+     * using the same Fix Things and Floor Type menus every other map is marked
+     * up with. Several may describe one scene, so each is named on the way in.
+     */
+    async createOfficialMap() {
+        const scene = canvas?.scene;
+        if (!scene || !game.user.isGM) return false;
+        const suggested = `${game.i18n.localize(`${MODULE.ID}.mapping.officialFallbackName`)} — ${scene.name}`;
+        const result = await foundry.applications.api.DialogV2.input({
+            window: { title: game.i18n.localize(`${MODULE.ID}.mapping.officialCreateTitle`) },
+            content: `<div class="form-group"><label>${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.mapName`))}</label><div class="form-fields"><input type="text" name="name" value="${foundry.utils.escapeHTML(suggested)}" required></div></div>`,
+            ok: { label: game.i18n.localize(`${MODULE.ID}.mapping.officialCreateSave`) },
+            rejectClose: false,
+            modal: true
+        });
+        if (result === null || result === undefined) return false;
+        await this._requestMutation({
+            action: 'create-owned',
+            kind: 'official',
+            sceneId: scene.id,
+            name: String(result.name ?? '').trim().slice(0, 100)
+        });
+        return true;
+    }
+
     _sceneGridDimensions(scene) {
         const size = Number(scene?.grid?.size) || Number(canvas?.grid?.size) || 100;
         const width = scene?.id === canvas?.scene?.id ? canvas.dimensions?.width : scene?.width;
@@ -801,8 +898,65 @@ class MappingManager {
         };
     }
 
+    /**
+     * Show a player map to the rest of the party, or take it back.
+     *
+     * Worth being plain about what this does: the record travels to every client
+     * in the scene flag either way, exactly as the walls themselves do. This
+     * decides whose list a map appears in, not who could reach it with a console
+     * open. For a table of people playing a game together that is the useful
+     * meaning of private, and the honest one to claim.
+     */
+    /**
+     * Give the party map what this map knows.
+     *
+     * Contributing is the donor's decision and is never implied by exploring:
+     * a player may keep their own map to themselves for their own reasons, so
+     * nothing accrues to the party until somebody says so. Repeatable -- explore
+     * more, donate again -- and because the merge only ever adds, donating twice
+     * changes nothing the second time.
+     */
+    async donateToPartyMap(mapId) {
+        const record = this.getRecord(mapId);
+        if (!record || mapKind(record.kind) !== 'player') return false;
+        // The donor's own map is theirs to give. Nobody else may give it.
+        if (!this.canManageRecord(record)) return false;
+        if (!this._isPartyMember()) {
+            notify(game.i18n.localize(`${MODULE.ID}.mapping.notPartyMember`), { type: 'warn' });
+            return false;
+        }
+        const target = this.getRecord(this.partyMapId(record.sceneId));
+        if (!target) {
+            notify(game.i18n.localize(`${MODULE.ID}.mapping.noPartyMapYet`), { type: 'warn' });
+            return false;
+        }
+        await this._requestMutation({
+            action: 'donate',
+            mapId: target.id,
+            fromMapId: record.id
+        });
+        notify(game.i18n.format(`${MODULE.ID}.mapping.donated`, { map: target.name }), { type: 'info' });
+        return true;
+    }
+
+    async setMapShared(mapId, shared) {
+        const record = this.getRecord(mapId);
+        if (!record || mapKind(record.kind) !== 'player') return false;
+        if (!this.canManageRecord(record)) return false;
+        if (record.shared === Boolean(shared)) return true;
+        await this._requestMutation({
+            action: 'set-shared',
+            mapId: record.id,
+            shared: Boolean(shared)
+        });
+        return true;
+    }
+
     getMapList() {
-        return [...this._index.values()].sort((left, right) => {
+        return [...this._index.values()]
+            // A map its owner has not shared is not in anybody else's list.
+            .filter(entry => this.canViewRecord(entry))
+            .sort((left, right) => {
             if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
             return left.name.localeCompare(right.name);
         });
@@ -2214,6 +2368,32 @@ class MappingManager {
             return;
         }
 
+        // A map nobody's Actor owns: the party's, or an artifact. Kept apart
+        // from 'create' because that one is inseparable from a token's Actor,
+        // and these have none by definition.
+        if (data.action === 'create-owned') {
+            const kind = mapKind(data.kind);
+            if (kind === 'player') return;
+            const scene = game.scenes?.get(data.sceneId);
+            if (!scene) return;
+            // The same gate the map will apply afterwards, asked before it
+            // exists: an official map is the GM's to author, the party map is
+            // any member's to start.
+            if (!this.canManageRecord({ kind, officialId: 'pending' }, user)) return;
+            const next = this._newOwnerlessRecord(kind, scene, { name: data.name });
+            // One party map to a scene. Asking again opens the one there is.
+            if (kind === 'party' && this.getRecord(next.id)) return;
+            if (!next.id) return;
+            this._deletedMapIds.delete(next.id);
+            const now = Date.now();
+            record = { ...next, createdAt: now, updatedAt: now, updatedBy: user.id };
+            this._cacheRecord(record);
+            if (this.currentMapId === record.id) this.state = record;
+            void this.renderWindow();
+            await this._persistMapRecord(record);
+            return;
+        }
+
         if (data.action === 'create') {
             if (data.sceneId !== canvas?.scene?.id) return;
             const actor = game.actors?.get(data.actorId) ?? canvas.tokens?.placeables
@@ -2264,6 +2444,34 @@ class MappingManager {
             const name = String(data.name ?? '').trim().slice(0, 100);
             if (!name) return;
             record = { ...record, name, updatedAt: Date.now(), updatedBy: user.id };
+            this._cacheRecord(record);
+        } else if (data.action === 'donate') {
+            if (mapKind(record.kind) !== 'party') return;
+            const donation = this.getRecord(data.fromMapId);
+            // The donor must own what they are giving, and it must describe the
+            // same place: a map of somewhere else has nothing to say about this
+            // one. Checked here rather than trusted from the asking client.
+            if (!donation
+                || mapKind(donation.kind) !== 'player'
+                || donation.sceneId !== record.sceneId
+                || !this.canManageRecord(donation, user)
+                || !this._isPartyMember(user)) return;
+            const merged = mergeMapInto(record, donation);
+            const contributors = new Set(record.contributors ?? []);
+            if (donation.actorId) contributors.add(donation.actorId);
+            record = {
+                ...record,
+                ...merged,
+                contributors: [...contributors],
+                updatedAt: Date.now(),
+                updatedBy: user.id
+            };
+            this._cacheRecord(record);
+        } else if (data.action === 'set-shared') {
+            // Only a player map can be hidden; the other kinds are shared by
+            // what they are, and toggling them would mean nothing.
+            if (mapKind(record.kind) !== 'player') return;
+            record = { ...record, shared: data.shared === true, updatedAt: Date.now(), updatedBy: user.id };
             this._cacheRecord(record);
         } else if (data.action === 'place-symbol') {
             const type = String(data.type ?? '');
