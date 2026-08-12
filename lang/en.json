@@ -130,6 +130,8 @@
 	"mapping.donateMap": "Donate to the party map",
 	"mapping.donated": "Donated to {map}.",
 	"mapping.noPartyMapYet": "There is no party map of this scene yet.",
+	"mapping.revealOfficial": "Hidden from the players — click to reveal",
+	"mapping.hideOfficial": "Revealed to the players — click to hide",
 	"mapping.shareMap": "Share with the party",
 	"mapping.unshareMap": "Shared with the party — click to keep private",
 	"mapping.gridLines": "Grid",

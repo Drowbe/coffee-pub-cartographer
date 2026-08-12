@@ -424,6 +424,9 @@ export class MappingWindow extends ToolWindowBase {
                 name: record.name,
                 kind,
                 isPlayer: isPlayerMap,
+                // An artifact is a different sort of thing from a map somebody
+                // walked, and the list should say so without being read.
+                isOfficial: kind === 'official',
                 // Who a map belongs to, in the one place the list can say it.
                 // An ownerless map has no actorName to fall back on.
                 ownerLabel: isPlayerMap
@@ -439,10 +442,16 @@ export class MappingWindow extends ToolWindowBase {
                 isCurrent: record.id === this.manager.currentMapId,
                 canManage: this.manager.canManageRecord(record),
                 canDelete: this.manager.canDeleteRecord(record),
-                // Only a player map can be hidden, and only its owner may say so.
-                canShare: isPlayerMap && this.manager.canManageRecord(record),
+                // The party's map has nobody to hide it from. The other two do:
+                // a player map from the rest of the party, an artifact from the
+                // players until the GM reveals it.
+                canShare: kind !== 'party' && this.manager.canManageRecord(record),
                 isShared: record.shared === true,
-                shareLabel: localize(record.shared === true ? 'mapping.unshareMap' : 'mapping.shareMap'),
+                // Sharing your own map and revealing the GM's are the same
+                // switch and not the same act, so they are not the same words.
+                shareLabel: localize(kind === 'official'
+                    ? (record.shared === true ? 'mapping.hideOfficial' : 'mapping.revealOfficial')
+                    : (record.shared === true ? 'mapping.unshareMap' : 'mapping.shareMap')),
                 // Offered only where there is a party map of this scene to give
                 // it to, and only to the person whose map it is.
                 canDonate: isPlayerMap
@@ -492,23 +501,31 @@ export class MappingWindow extends ToolWindowBase {
                 // no map the reader could record into, which meant a GM -- who
                 // can record into anyone's -- never saw it once one map
                 // existed, and had no way to start a second.
-                showCreateCard: true,
+                // Each card goes once the thing it would make exists. A
+                // character gets one map of a scene, the party gets one, and a
+                // scene gets one artifact -- so a card offering a second is
+                // offering nothing.
+                //
+                // The character's card asks about the *selected token*, not
+                // about the reader. Asking about the reader is what broke this
+                // before: a GM can record into anybody's map, so once any map
+                // existed they were told they had one and could never start
+                // another.
+                showCreateCard: !this.manager.hasMapForSelectedToken(),
                 createTitle: game.i18n.localize(`${MODULE.ID}.mapping.createForScene`),
                 createHint: game.i18n.format(`${MODULE.ID}.mapping.createForSceneHint`, {
                     scene: canvas?.scene?.name ?? game.i18n.localize(`${MODULE.ID}.mapping.thisScene`)
                 }),
-                // Offered only where it could be acted on: this scene, to
-                // somebody who is in the party. There is one party map to a
-                // scene, so the card goes once it exists.
                 showPartyCard: Boolean(canvas?.scene)
                     && this.manager._isPartyMember()
-                    && !this.manager.getRecord(this.manager.partyMapId()),
+                    && !this.manager.hasMapOfKind('party'),
                 partyTitle: localize('mapping.createParty'),
                 partyHint: game.i18n.format(`${MODULE.ID}.mapping.createPartyHint`, {
                     party: this.manager.partyName()
                 }),
-                // Several artifacts may describe one scene, so this one stays.
-                showOfficialCard: Boolean(canvas?.scene) && Boolean(game.user?.isGM),
+                showOfficialCard: Boolean(canvas?.scene)
+                    && Boolean(game.user?.isGM)
+                    && !this.manager.hasMapOfKind('official'),
                 officialTitle: localize('mapping.createOfficial'),
                 officialHint: localize('mapping.createOfficialHint'),
                 viewMapLabel: game.i18n.localize(`${MODULE.ID}.mapping.viewMap`),

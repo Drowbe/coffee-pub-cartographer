@@ -142,7 +142,7 @@ console.log('\nan unexplored square refuses a symbol');
 console.log('\nofficial map: a player may add, but not overwrite or remove what is there');
 {
     const official = baseRecord({
-        id: 'official:x1::s1', kind: 'official', officialId: 'x1', actorId: null,
+        id: 'official:x1::s1', kind: 'official', officialId: 'x1', actorId: null, shared: true,
         symbols: [{ id: 's-orig', type: 'trap', column: 1, row: 1, text: '', createdAt: 1, createdBy: 'u-gm' }]
     });
     const m = makeManager(official);
@@ -312,6 +312,31 @@ console.log('\nan area strike stops at a wall, as surfacing does');
     m.atlasFor = () => atlas;
     await m._processMutationRequest({ action: 'mark-rock', mapId: split.id, column: 1, row: 1, area: true, userId: 'u-gm' }, { allowLocalGM: true });
     check('the far side of the wall survives', m.saved.explored, ['2,1']);
+}
+
+
+console.log('\na hidden artifact cannot be written on by the players at all');
+{
+    // Default for an official map: unseen until the GM reveals it. Enforced
+    // GM-side, not merely hidden from the list -- annotating is open to the
+    // party, and "the party" cannot include somebody the map is hidden from.
+    const hidden = baseRecord({
+        id: 'official:x2::s1', kind: 'official', officialId: 'x2', actorId: null, shared: false
+    });
+    const m = makeManager(hidden);
+    await m._processMutationRequest({ action: 'place-symbol', mapId: hidden.id, type: 'note', column: 1, row: 1, userId: 'u-alice' }, { allowLocalGM: true });
+    check('a player cannot annotate it', m.saved, null);
+
+    await m._processMutationRequest({ action: 'place-symbol', mapId: hidden.id, type: 'note', column: 1, row: 1, userId: 'u-gm' }, { allowLocalGM: true });
+    check('the GM still can', at(m.saved, 1, 1).length, 1);
+
+    // Revealed, and the party may mark it up as any other map they can see.
+    const shown = baseRecord({
+        id: 'official:x3::s1', kind: 'official', officialId: 'x3', actorId: null, shared: true
+    });
+    const m2 = makeManager(shown);
+    await m2._processMutationRequest({ action: 'place-symbol', mapId: shown.id, type: 'note', column: 2, row: 2, userId: 'u-alice' }, { allowLocalGM: true });
+    check('once revealed a player may annotate', at(m2.saved, 2, 2).length, 1);
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');

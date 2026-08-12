@@ -9,7 +9,7 @@ world that can be found and carried.
 | --- | --- | --- |
 | **Player map** | one Actor | recorded, annotated, edited, reset, deleted by that Actor's owners. **Private unless shared.** |
 | **Party map** | the party | **donated to** by any member; annotated and edited by any member. Not recorded into. One per scene. |
-| **Official map** | the GM — it is an artifact | **authored by the GM** with no token involved. For everyone else, **annotations only**: nothing already on it can be removed or changed. |
+| **Official map** | the GM — it is an artifact | **authored by the GM** with no token involved, and **hidden from the players until revealed**. Once revealed, everyone else gets **annotations only**: nothing already on it can be removed or changed. |
 
 The party map is *the merge of the parts people chose to donate*, not an
 automatic union. A player may keep their own map to themselves for their own
@@ -128,6 +128,26 @@ Party membership comes from `getParty().members` (Actor ids). It is
 GM-configured via `defaultPartySize` and `partyMember1..N` and **may be unset**,
 which would silently make a party map GM-only. Fallback: any user who owns at
 least one character Actor.
+
+### Revealing one
+
+An artifact starts unseen. A plan of a dungeon is the sort of thing a party is
+meant to *find*, so it is hidden the moment it is authored and becomes visible
+two ways: the GM flips it, or the party turns up the Item carrying it — which is
+the same `set-shared` mutation either way, so the Item work has nothing new to
+build for it.
+
+The same flag serves the player map and the artifact, because the mechanism is
+identical and only the reading differs: a player map is *private until shared*,
+an artifact is *unseen until revealed*. The party map is the one kind with nobody
+to hide it from.
+
+This is also what finally made annotation permission real GM-side. `place-symbol`
+and `remove-symbol` sit in `ANNOTATION_ACTIONS`, which skips the manage check by
+design — but it skipped *every* check, so the rule that marking up is open to the
+party was enforced only by the client that asked. A map somebody cannot see is
+not a map they may write on, and with artifacts staying hidden that stopped being
+a theoretical distinction.
 
 ## Privacy: What "Private" Can Honestly Mean
 

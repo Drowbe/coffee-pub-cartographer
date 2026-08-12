@@ -57,7 +57,7 @@
                 {{#if thumbnail}}<img src="{{thumbnail}}" alt="" draggable="false">{{else}}<i class="fa-solid fa-map"></i>{{/if}}
             </div>
             <div class="cartographer-mapping-list-copy">
-                <strong>{{name}}</strong>
+                <strong>{{#if isOfficial}}<i class="fa-solid fa-star cartographer-mapping-official-star" data-tooltip="{{kindLabel}}"></i> {{/if}}{{name}}</strong>
                 <span>{{subtitle}}{{#unless isPlayer}} · {{kindLabel}}{{/unless}}</span>
                 <small>{{feetMapped}} {{../../feetMappedLabel}}{{#if updated}} · {{updated}}{{/if}}</small>
             </div>

@@ -1192,3 +1192,12 @@
     flex: 0 0 auto;
     color: var(--cartographer-map-party);
 }
+
+/* An artifact, marked so the list can be read at a glance rather than by its
+   subtitles. Sized down from the name it sits beside: it is a mark on the map's
+   name, not a heading of its own. */
+.cartographer-mapping-official-star {
+    font-size: 0.8em;
+    color: var(--cartographer-map-party);
+    vertical-align: baseline;
+}

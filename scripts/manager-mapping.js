@@ -798,6 +798,32 @@ class MappingManager {
         return record;
     }
 
+    /** Whether a map of this kind already describes a scene. */
+    hasMapOfKind(kind, sceneId = canvas?.scene?.id) {
+        if (!sceneId) return false;
+        for (const entry of this._index.values()) {
+            if (entry.sceneId === sceneId && mapKind(entry.kind) === kind) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Whether the token in hand already has a map of this scene.
+     *
+     * Asked of the selected token rather than of the reader, because that is
+     * what pressing the card would map. Asking whether the *reader* has a map
+     * here is what went wrong before: a GM can record into anybody's, so once
+     * one map existed they were told they had one and could never start a
+     * second. With no token selected the answer is no, and the card stays --
+     * pressing it then says which token to pick, which is the useful reply.
+     */
+    hasMapForSelectedToken() {
+        const actorId = this._getSingleControlledToken()?.actor?.id;
+        const sceneId = canvas?.scene?.id;
+        if (!actorId || !sceneId) return false;
+        return Boolean(this.getRecord(this._recordId(actorId, sceneId)));
+    }
+
     /** The id the party's map for a scene would have, whether or not it exists. */
     partyMapId(sceneId = canvas?.scene?.id) {
         return sceneId ? this._recordId(PARTY_OWNER_KEY, sceneId) : null;
@@ -982,7 +1008,9 @@ class MappingManager {
 
     async setMapShared(mapId, shared) {
         const record = this.getRecord(mapId);
-        if (!record || mapKind(record.kind) !== 'player') return false;
+        if (!record || mapKind(record.kind) === 'party') return false;
+        // A player map is its owner's to share; an artifact is the GM's to
+        // reveal. canManageRecord already draws that line.
         if (!this.canManageRecord(record)) return false;
         if (record.shared === Boolean(shared)) return true;
         await this._requestMutation({
@@ -2024,8 +2052,15 @@ class MappingManager {
     canViewRecord(record = this.state, user = game.user) {
         if (!user) return false;
         if (user.isGM) return true;
-        if (mapKind(record?.kind) !== 'player') return true;
+        const kind = mapKind(record?.kind);
+        // The party's map is the party's. There is nobody to hide it from.
+        if (kind === 'party') return true;
         if (record?.shared === true) return true;
+        // An artifact is the GM's until they reveal it -- a plan of the dungeon
+        // is the sort of thing a party is meant to *find*, so it starts unseen
+        // and stays that way until the GM says otherwise or the party turns up
+        // the item carrying it.
+        if (kind === 'official') return false;
         return this._canManageActor(game.actors?.get(record?.actorId), user);
     }
 
@@ -2497,6 +2532,11 @@ class MappingManager {
         // or official map the Actor is not who owns it -- for a player map the
         // two questions are the same one.
         if (!ANNOTATION_ACTIONS.includes(data.action) && !this.canManageRecord(record, user)) return;
+        // Marking up is open to the party, but "open to the party" was until now
+        // enforced only by the client that asked. A map somebody cannot see is
+        // not a map they may write on, and with an artifact staying hidden until
+        // the GM reveals it, that is no longer a theoretical distinction.
+        if (ANNOTATION_ACTIONS.includes(data.action) && !this.canAnnotateRecord(record, user)) return;
         // Emptying or discarding a shared map is the GM's call even where editing
         // it is not.
         if (data.action === 'reset' && !this.canDeleteRecord(record, user)) return;
@@ -2528,9 +2568,10 @@ class MappingManager {
             };
             this._cacheRecord(record);
         } else if (data.action === 'set-shared') {
-            // Only a player map can be hidden; the other kinds are shared by
-            // what they are, and toggling them would mean nothing.
-            if (mapKind(record.kind) !== 'player') return;
+            // A player map is private until its owner shares it; an artifact is
+            // unseen until the GM reveals it. The party's map is the one kind
+            // with nobody to hide it from, so toggling it would mean nothing.
+            if (mapKind(record.kind) === 'party') return;
             record = { ...record, shared: data.shared === true, updatedAt: Date.now(), updatedBy: user.id };
             this._cacheRecord(record);
         } else if (data.action === 'place-symbol') {
@@ -2728,7 +2769,10 @@ class MappingManager {
         const maps = {};
         for (const entry of this._index.values()) {
             if (entry.sceneId !== sceneId) continue;
-            maps[entry.actorId] = foundry.utils.deepClone(this.records.get(entry.id) ?? entry.raw);
+            // Filed under what owns it, which is an Actor only for a player map.
+            const ownerKey = ownerKeyFor(entry);
+            if (!ownerKey) continue;
+            maps[ownerKey] = foundry.utils.deepClone(this.records.get(entry.id) ?? entry.raw);
         }
         return { ...maps, ...overrides };
     }
@@ -2794,7 +2838,12 @@ class MappingManager {
      */
     async _persistMapRecord(record) {
         const scene = game.scenes?.get(record?.sceneId);
-        if (!scene || !record?.actorId || !game.user.isGM) return;
+        // What this map is filed under. Asking for an Actor here is what kept
+        // the party map and every artifact out of the database entirely: they
+        // have none, so the write returned before doing anything and the map
+        // lived only until the page was reloaded.
+        const ownerKey = ownerKeyFor(record);
+        if (!scene || !ownerKey || !game.user.isGM) return;
         const payload = foundry.utils.deepClone(record);
         this._saveQueue = this._saveQueue
             .then(async () => {
@@ -2811,9 +2860,7 @@ class MappingManager {
                     // scene that already holds someone else's -- and a plain
                     // key is equally correct there, since an insert has nothing
                     // to merge into.
-                    const key = record.actorId in stored.maps
-                        ? `==${record.actorId}`
-                        : record.actorId;
+                    const key = ownerKey in stored.maps ? `==${ownerKey}` : ownerKey;
                     await scene.update({
                         [`flags.${MODULE.ID}.${FLAG_KEY}.maps.${key}`]: payload
                     });
@@ -2822,7 +2869,7 @@ class MappingManager {
                     // cannot read. Lay a whole one down for later writes.
                     await this._writeSceneContainer(scene, {
                         version: STATE_VERSION,
-                        maps: this._sceneMaps(scene.id, { [record.actorId]: payload })
+                        maps: this._sceneMaps(scene.id, { [ownerKey]: payload })
                     });
                 }
                 await socketManager.broadcast('mapping', 'registry-updated', {
