@@ -680,7 +680,14 @@ export class MappingWindow extends ToolWindowBase {
                     className: `is-${symbol.type}`,
                     markup: symbolDefinition.markup,
                     // A note's own text is more use than its type name.
-                    label: symbol.text || game.i18n.localize(`${MODULE.ID}.${symbolDefinition.labelKey}`)
+                    label: symbol.text || game.i18n.localize(`${MODULE.ID}.${symbolDefinition.labelKey}`),
+                    // A note can run to a few sentences and carries the author's
+                    // own line breaks, which a tooltip collapses to nothing
+                    // unless told otherwise. Foundry puts the tooltip in its own
+                    // element at the end of the body, so it cannot be reached by
+                    // a selector rooted in this window -- naming a class is the
+                    // way in. Only notes ask for it; a door's label is two words.
+                    tooltipClass: symbol.text ? 'cartographer-mapping-note-tip' : null
                 } : null,
                 isParty
             };

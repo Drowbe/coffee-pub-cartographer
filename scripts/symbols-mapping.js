@@ -187,8 +187,16 @@ export const MAPPING_MARKERS = Object.freeze({
     icon: 'fa-solid fa-bookmark',
     types: ['point-of-interest', 'mystery', 'quest', 'codex']
 });
-/** Longest note text kept on a symbol. */
-export const MAPPING_SYMBOL_TEXT_LIMIT = 240;
+/**
+ * Longest note text kept on a symbol.
+ *
+ * Room for a few sentences about a room rather than a label for it. Not
+ * unbounded: a note rides along in the map record, which is written to a scene
+ * flag and broadcast whole on every change, so this is a paragraph or two and
+ * deliberately not an essay. Anything longer wants a journal entry, which
+ * Foundry already does better than a pencil map should try to.
+ */
+export const MAPPING_SYMBOL_TEXT_LIMIT = 1000;
 
 /**
  * Floor surfaces, applied to a whole contiguous area rather than one square.

@@ -151,7 +151,7 @@
                 </svg>
                 {{/if}}
                 {{#if symbol}}
-                <svg class="cartographer-mapping-placeable {{symbol.className}}" viewBox="0 0 100 100" role="img" data-tooltip="{{symbol.label}}" aria-label="{{symbol.label}}">
+                <svg class="cartographer-mapping-placeable {{symbol.className}}" viewBox="0 0 100 100" role="img" data-tooltip="{{symbol.label}}"{{#if symbol.tooltipClass}} data-tooltip-class="{{symbol.tooltipClass}}"{{/if}} aria-label="{{symbol.label}}">
                     {{{symbol.markup}}}
                 </svg>
                 {{/if}}

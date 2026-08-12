@@ -1110,3 +1110,39 @@
 .cartographer-mapping-list-copy small {
     color: var(--blacksmith-tool-text-muted);
 }
+
+/* A note's tooltip, which is a few sentences rather than a label.
+
+   Both of these are outside the mapping window in the DOM -- Foundry's tooltip
+   lives in its own element at the end of the body, and a DialogV2 is its own
+   application -- so neither can be reached by a selector rooted in the window.
+   That is why they are named by class here rather than nested with everything
+   else. */
+#tooltip.cartographer-mapping-note-tip,
+.cartographer-mapping-note-tip {
+    /* The author's line breaks are the difference between a few readable
+       sentences and a wall of text. Collapsed runs of space still collapse. */
+    white-space: pre-line;
+    max-width: 320px;
+    text-align: left;
+}
+
+/* The note editor: one field, the whole width of the dialog. Tall enough to
+   invite more than a label, and resizable only in the axis that helps, since a
+   dialog cannot grow sideways without the field overflowing it. */
+.cartographer-mapping-note-field {
+    display: block;
+}
+
+.cartographer-mapping-note-field textarea {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    /* em, not lh: the lh unit only reached Chromium well after the version
+       Foundry 13 ships against, and an unsupported unit drops the declaration.
+       About eight lines at the line-height below, which is what rows says too. */
+    min-height: 11em;
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.4;
+}

@@ -1827,16 +1827,31 @@ class MappingManager {
 
         let text = '';
         if (MAPPING_ANNOTATED_SYMBOLS.has(type)) {
-            const existing = this.state.symbols
+            const existing = this.currentRecord.symbols
                 ?.find(symbol => symbol.column === Number(column) && symbol.row === Number(row));
+            // A textarea rather than a single line. A note is what the party
+            // wrote down about a room, and a room is worth a few sentences: the
+            // one-line field made anything past a label feel like a misuse of
+            // the box it was typed into. Still only text, which is the whole
+            // convention -- these are maps drawn in pencil, not documents.
+            //
+            // No visible label, and no form-group either. A window titled "Map
+            // Note" containing one field does not need that field captioned
+            // "Note", and Foundry's form-group spends a column of the dialog
+            // saying it -- which is what squeezed the writing space into the
+            // right-hand half. The name survives as the accessible one, so the
+            // field is still announced to anyone who cannot see the title.
+            const label = foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.noteText`));
             const result = await foundry.applications.api.DialogV2.input({
                 window: { title: game.i18n.localize(`${MODULE.ID}.mapping.noteTitle`) },
-                content: `<div class="form-group"><label>${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.mapping.noteText`))}</label><div class="form-fields"><input type="text" name="text" maxlength="${MAPPING_SYMBOL_TEXT_LIMIT}" value="${foundry.utils.escapeHTML(existing?.text ?? '')}"></div></div>`,
+                content: `<div class="cartographer-mapping-note-field"><textarea name="text" rows="8" maxlength="${MAPPING_SYMBOL_TEXT_LIMIT}" spellcheck="true" aria-label="${label}">${foundry.utils.escapeHTML(existing?.text ?? '')}</textarea></div>`,
                 ok: { label: game.i18n.localize(`${MODULE.ID}.mapping.noteSave`) },
                 rejectClose: false,
                 modal: true
             });
             if (result === null || result === undefined) return false;
+            // Trimmed at the ends only. The line breaks inside are the author's,
+            // and are what makes a few sentences readable rather than a wall.
             text = String(result.text ?? '').trim().slice(0, MAPPING_SYMBOL_TEXT_LIMIT);
         }
 
