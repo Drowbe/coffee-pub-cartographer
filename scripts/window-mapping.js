@@ -48,6 +48,15 @@ const GLYPH_TRANSFORMS = {
 };
 /** Edge of the square map silhouette drawn for the list view, in pixels. */
 const THUMBNAIL_SIZE = 96;
+/**
+ * Smallest a square may be drawn in a thumbnail, in tile pixels.
+ *
+ * The tile is painted at THUMBNAIL_SIZE and shown at roughly half that, so five
+ * pixels here is under three on screen -- about the least that still reads as a
+ * square rather than as grain. A map too large to fit at this size is cropped
+ * rather than shrunk, which is the point: see _mapThumbnail.
+ */
+const MIN_THUMBNAIL_SQUARE = 5;
 /** How many generated thumbnails to retain before evicting the oldest. */
 const THUMBNAIL_CACHE_LIMIT = 40;
 /** Silhouette ink per theme, so a thumbnail reads on light and dark alike. */
@@ -92,6 +101,9 @@ const MAPPING_GRID_WEIGHTS = [
     { id: 'medium', weight: 1, labelKey: 'mapping.gridMedium', icon: 'fa-solid fa-table-cells' },
     { id: 'dark', weight: 1.8, labelKey: 'mapping.gridDark', icon: 'fa-solid fa-border-all' }
 ];
+
+/** Where each kind sits within a group. Lower comes first. */
+const MAP_KIND_ORDER = Object.freeze({ official: 0, party: 1, player: 2 });
 
 const COMPACT_CHROME_WIDTH = 460;
 /** Rings of hatching drawn outward from the explored edge. Must fit the margin. */
@@ -314,19 +326,26 @@ export class MappingWindow extends ToolWindowBase {
     /** Zoom and centring, right-aligned in the top bar. */
     _buildViewControls(model) {
         if (this.viewMode !== 'map') return '';
+        // Fitting the map is always offered: every map can be fitted, and it is
+        // the way back when the view has been panned somewhere unrecognisable.
+        // It used to trade places with centring, so the moment recording began
+        // the one control that recovers a lost view disappeared.
+        //
+        // Centring on the party is the one that comes and goes, because it is
+        // the one that can be meaningless: an artifact has nobody standing on
+        // it, and neither does a map of a scene nobody is in.
         const buttons = [
             this._chromeButton({ action: 'zoom-out', icon: 'fa-solid fa-minus', label: model.zoomOutLabel }),
-            this.manager.mode === 'view'
-                ? this._chromeButton({
-                    action: 'fit-map',
-                    icon: 'fa-solid fa-maximize',
-                    label: game.i18n.localize(`${MODULE.ID}.mapping.fitMap`)
-                })
-                : this._chromeButton({
-                    action: 'center-view',
-                    icon: 'fa-solid fa-crosshairs',
-                    label: model.centerPartyLabel
-                }),
+            this._chromeButton({
+                action: 'fit-map',
+                icon: 'fa-solid fa-maximize',
+                label: game.i18n.localize(`${MODULE.ID}.mapping.fitMap`)
+            }),
+            ...(model.showParty ? [this._chromeButton({
+                action: 'center-view',
+                icon: 'fa-solid fa-crosshairs',
+                label: model.centerPartyLabel
+            })] : []),
             this._chromeButton({ action: 'zoom-in', icon: 'fa-solid fa-plus', label: model.zoomInLabel })
         ];
         return `<span class="cartographer-mapping-zoom-readout">${Math.round(this.zoom * 100)}%</span>`
@@ -364,6 +383,8 @@ export class MappingWindow extends ToolWindowBase {
         let minRow = Infinity;
         let maxColumn = -Infinity;
         let maxRow = -Infinity;
+        let sumColumn = 0;
+        let sumRow = 0;
         const cells = [];
         for (const key of explored) {
             const [column, row] = key.split(',').map(Number);
@@ -372,6 +393,8 @@ export class MappingWindow extends ToolWindowBase {
             minRow = Math.min(minRow, row);
             maxColumn = Math.max(maxColumn, column);
             maxRow = Math.max(maxRow, row);
+            sumColumn += column;
+            sumRow += row;
             cells.push([column, row]);
         }
         if (!cells.length) return null;
@@ -383,20 +406,44 @@ export class MappingWindow extends ToolWindowBase {
         if (!context) return null;
         const columns = maxColumn - minColumn + 1;
         const rows = maxRow - minRow + 1;
-        const scale = Math.min(THUMBNAIL_SIZE / columns, THUMBNAIL_SIZE / rows);
-        const offsetX = (THUMBNAIL_SIZE - (columns * scale)) / 2;
-        const offsetY = (THUMBNAIL_SIZE - (rows * scale)) / 2;
+        // Fitting a whole dungeon into a thumbnail is what made them grey: at
+        // that scale several squares share a pixel, so what survives is their
+        // average rather than a drawing, and every map ends up the same blob.
+        // Worse, the tile is painted at 96px but shown at 54, which halves
+        // whatever detail did survive.
+        //
+        // So the map is allowed to overflow the tile. Squares are held to a size
+        // that still reads as a square once the tile is scaled down, and the
+        // thumbnail shows as much as fits at that size -- a room and its
+        // corridors rather than the whole level. It is decoration: telling one
+        // map from another at a glance is the whole job, and a legible corner
+        // does that where a faithful smudge does not.
+        const fitScale = Math.min(THUMBNAIL_SIZE / columns, THUMBNAIL_SIZE / rows);
+        const scale = Math.max(fitScale, MIN_THUMBNAIL_SQUARE);
+        const windowSize = THUMBNAIL_SIZE / scale;
+
+        // Centred on where the squares actually are, not on the middle of their
+        // bounding box: one long corridor off to a side drags the box's middle
+        // into empty ground, and the thumbnail comes back blank.
+        const centreOn = (total, extent, low, high) => (extent <= windowSize
+            ? low - ((windowSize - extent) / 2)
+            : Math.min(
+                Math.max((total / cells.length) - (windowSize / 2), low),
+                (high + 1) - windowSize
+            ));
+        const startColumn = centreOn(sumColumn, columns, minColumn, maxColumn);
+        const startRow = centreOn(sumRow, rows, minRow, maxRow);
+
         // Themed here rather than read from CSS, so a thumbnail generated
         // before the window has been laid out is still the right colour.
         context.fillStyle = THUMBNAIL_INK[this.toolTheme] ?? THUMBNAIL_INK.light;
-        const side = Math.max(1, scale);
         for (const [column, row] of cells) {
-            context.fillRect(
-                offsetX + ((column - minColumn) * scale),
-                offsetY + ((row - minRow) * scale),
-                side,
-                side
-            );
+            const x = (column - startColumn) * scale;
+            const y = (row - startRow) * scale;
+            // Most of a large map is outside the tile now, so skipping early
+            // keeps this the same work it always was.
+            if (x <= -scale || y <= -scale || x >= THUMBNAIL_SIZE || y >= THUMBNAIL_SIZE) continue;
+            context.fillRect(x, y, scale, scale);
         }
 
         const url = canvasElement.toDataURL('image/png');
@@ -667,7 +714,17 @@ export class MappingWindow extends ToolWindowBase {
             if (left.isHere !== right.isHere) return left.isHere ? -1 : 1;
             if (left.updated !== right.updated) return right.updated - left.updated;
             return left.name.localeCompare(right.name);
-        }).map(group => ({ ...group, count: group.maps.length }));
+        }).map(group => ({
+            ...group,
+            // The shared maps lead: the artifact of the place first, then the
+            // one the party holds together, then everybody's own. Recency is
+            // the right order among a group of personal maps and the wrong one
+            // for these two, which are the same maps every time somebody opens
+            // the list and should not move about in it. Sorting is stable, so
+            // the personal maps keep the recency order they arrived in.
+            maps: [...group.maps].sort((left, right) => MAP_KIND_ORDER[left.kind] - MAP_KIND_ORDER[right.kind]),
+            count: group.maps.length
+        }));
     }
 
     /**
