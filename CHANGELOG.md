@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [13.2.2]
 
+### FIXED
+
+- **Opening the mapper twice at once built two windows, and the second broke the first**: Nothing said a window was on its way. The manager's reference to it is assigned only once opening has finished, and Foundry registers an application during its first render rather than when it is constructed, so for the length of that render both guards read empty and a second ask started a second window. Two windows sharing an id are not two windows: `_insertElement` replaces whatever it finds under that id, so the second took the first's place in the document and left the first holding an element with no parent — still believing itself rendered, because nothing had closed it. Anything that then measured it read a width off nothing. That surfaced as `Cannot read properties of null (reading 'offsetWidth')` from a `requestAnimationFrame` a frame later, with no part of this module in the stack and the window looking fine. Opening is now serialized: a second ask joins the open already in flight and receives the same window. The window also declines to position itself when it has no frame, which costs nothing — there is nothing to position — and keeps a stray measurement from throwing rather than passing quietly.
+
+### CHANGED
+
+- **The map window's base class is imported rather than read from `module.api`**: `extends` is evaluated when the file holding it is, so a base class resolved from `game.modules.get(...)` at the top of that file depends on `game` already existing — and a module that throws while evaluating is cached as failed rather than retried, so it would stay dead for the session. Cartographer was not exposed to that, because the map window is only ever imported when the window is first opened, long after `init`. It was still the wrong shape, and Blacksmith now publishes the base classes from its API bridge, which is a real ES module and resolves at evaluation time, so that is where the class comes from. `module.api` remains right for anything resolved after `init`, which is where the window registration continues to read it.
+- **Requires Blacksmith 13.19.1 or later**, which is the release that made the window base classes importable from the API bridge.
+
+
 ## [13.2.1]
 
 ### NEW FEATURES

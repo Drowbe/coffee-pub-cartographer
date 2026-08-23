@@ -150,6 +150,9 @@ class MappingManager {
         this.records = new Map();
         this._index = new Map();
         this.window = null;
+        // The open in flight, so a second ask joins it rather than building a
+        // second window. See openWindow.
+        this._windowOpening = null;
         this._hooks = [];
         this._saveQueue = Promise.resolve();
         this._renderQueue = Promise.resolve();
@@ -351,6 +354,7 @@ class MappingManager {
         this.records.clear();
         this._index.clear();
         this.window = null;
+        this._windowOpening = null;
     }
 
     _registerWindow() {
@@ -1259,7 +1263,36 @@ class MappingManager {
         });
     }
 
+    /**
+     * Open the mapper, or bring it forward if it is already up.
+     *
+     * Opening is serialized, because asking twice while the first open is still
+     * in flight used to build two windows. Neither guard could catch the second
+     * ask: `this.window` is assigned only once the first open has finished, and
+     * Foundry registers an application in `foundry.applications.instances`
+     * during its first render rather than when it is constructed, so for the
+     * length of that render there is nothing anywhere that says a window is on
+     * its way.
+     *
+     * Two windows sharing an id is not two windows. `_insertElement` replaces
+     * whatever it finds under the same id, so the second one adopts the first
+     * one's place in the document and the first is left holding an element with
+     * no parent -- still believing itself rendered, because nothing closed it.
+     * Anything that measures it then reads `parentElement.offsetWidth` off
+     * nothing, which is the crash, and it surfaces from a requestAnimationFrame
+     * a frame later with none of this in the stack.
+     *
+     * Sharing the in-flight promise means the second ask waits for the window
+     * the first is already opening and gets that one.
+     */
     async openWindow() {
+        if (this._windowOpening) return this._windowOpening;
+        this._windowOpening = this._openWindow()
+            .finally(() => { this._windowOpening = null; });
+        return this._windowOpening;
+    }
+
+    async _openWindow() {
         if (!this.active) {
             this.trackedTokenId = this._getSingleControlledToken()?.id ?? null;
             this.loadMapRecords();

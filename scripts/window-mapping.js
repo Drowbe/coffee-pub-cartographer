@@ -2248,6 +2248,25 @@ export class MappingWindow extends BlacksmithToolWindowBaseV2 {
     }
 
     /**
+     * Positioning a window that has no frame is a no-op, not a crash.
+     *
+     * Foundry's _updatePosition reads offsetWidth straight off the element, so
+     * being asked to position a window with none throws. Two callers can ask:
+     * the tool base restores a saved position from a requestAnimationFrame,
+     * which fires a frame after it was scheduled and cannot know the window is
+     * still there, and Foundry positions once more as a render completes. Both
+     * are outside this module and neither checks.
+     *
+     * There is nothing to position without a frame and nothing worth saving
+     * about where it is not, so this simply declines. It hides no state: the
+     * position is restored on the next render either way.
+     */
+    setPosition(position = {}) {
+        if (!this.element) return this.position;
+        return super.setPosition(position);
+    }
+
+    /**
      * Without the menubar button the window is the only way to stop recording,
      * so closing it ends the session -- and that is worth confirming rather
      * than doing silently.
