@@ -11,10 +11,17 @@ import {
     MAPPING_SYMBOL_CATEGORIES
 } from './symbols-mapping.js';
 
-const ToolWindowBase = game.modules.get('coffee-pub-blacksmith')?.api?.BlacksmithToolWindowBaseV2 ?? class {
-    static DEFAULT_OPTIONS = {};
-    constructor() { throw new Error('Coffee Pub Blacksmith Tool Window API is unavailable'); }
-};
+// Imported from Blacksmith's bridge rather than read off module.api.
+//
+// `extends` is evaluated when this file is, which is long before `game` exists.
+// The previous `game.modules.get(...)` here therefore risked throwing at module
+// evaluation -- and a module that throws while evaluating is cached as failed,
+// so it would have stayed dead for the whole session rather than retrying. The
+// bridge is a real ES module and resolves at evaluation time, which is what
+// makes it usable in an extends clause. module.api is still correct for
+// anything resolved after init, which is why the registration check in
+// manager-mapping.js reads it there.
+import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 const APP_ID = `${MODULE.ID}-mapper`;
 /** Fallback cell edge in pixels, used until --cartographer-map-cell-size is read. */
 const MAP_CELL_SIZE = 36;
@@ -122,7 +129,7 @@ const HATCH_NEIGHBOURS = [
     [-1, 1], [0, 1], [1, 1]
 ];
 
-export class MappingWindow extends ToolWindowBase {
+export class MappingWindow extends BlacksmithToolWindowBaseV2 {
     static DEFAULT_OPTIONS = foundry.utils.mergeObject(
         foundry.utils.mergeObject({}, super.DEFAULT_OPTIONS ?? {}),
         {

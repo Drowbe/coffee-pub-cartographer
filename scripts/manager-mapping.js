@@ -354,8 +354,11 @@ class MappingManager {
     }
 
     _registerWindow() {
+        // Read from module.api, which is correct here: this runs after init.
+        // The base class is not asked for -- it is imported from Blacksmith's
+        // bridge, because an extends clause is evaluated before `game` exists.
         const api = game.modules.get('coffee-pub-blacksmith')?.api;
-        if (!api?.registerWindow || !api?.BlacksmithToolWindowBaseV2) {
+        if (!api?.registerWindow) {
             console.warn(`${MODULE.NAME}: Blacksmith Window API unavailable; Mapper window not registered`);
             return false;
         }
