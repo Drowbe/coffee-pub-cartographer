@@ -13,6 +13,10 @@
 - [ ] **Fill ground the party has walked all the way round.** Moving room to room leaves gaps — a square behind furniture, a corner the sightlines skipped — that are plainly floor because the map has them surrounded. A version of this was built and reverted: it over-filled badly on a real dungeon, and could not be reproduced across four synthetic layouts (separate rooms, a cascading walk, inner-face-only tracing, and diagonal walls, which were checked and do seal). Do not re-land it without a case that reproduces. The **Fix Things** menu covers the same ground by hand in the meantime, and pointing at one square that filled wrongly is what would crack it.
 - [ ] Clicking the party marker opens the square's menu, since the marker sits inside its square. Harmless, and a one-line exclusion if it becomes annoying in play.
 
+### Play session (2026-08-27)
+
+- [ ] **Map Foundry region lines, not only walls.** Outdoor maps use topographic-style region lines: they may or may not block vision, but they still need to be on the map. Walls are the wrong source — they snap to the grid; these should stay **curved and free of the grid**, the same way cave curves already do. The deferred outdoor-terrain item below said contour lines cannot be detected because Foundry had no canonical hill; regions are a real document now, so this is the way in. Do not fold them into the wall-snap path.
+
 ### Next
 
 - [ ] Search the Recorded Maps list by name. It is now read three ways -- by scene, by character, or just the reader's own -- which handles a campaign's worth of maps, but there is still no way to find one by typing part of its name.
