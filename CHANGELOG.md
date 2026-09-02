@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [13.2.3]
+
+### FIXED
+
+- **An official map's row said its kind twice** (`scripts/window-mapping.js`, `_groupMaps`). A row's subtitle is built from who owns the map and what kind it is, joined with a separator -- but an artifact is owned by nobody and therefore takes its kind as its owner label, so the two halves were the same words and the row read "Official Map - Official Map". The subtitle is now built through a Set, so a value cannot appear twice however the two halves are derived. Nothing in the source suggested it: both fields were correct, and only seeing them side by side showed they were the same string. **Verified** by `tests/test-list-order.mjs`, which covers an artifact, a party map, and a player map grouped both ways, and by the screenshot in `documentation/assets/cartographer-maps.webp` that surfaced it.
+
+### CHANGED
+
+- **The documentation follows the suite-wide standard.** Thirteen files at the root of `documentation/` became `architecture/`, `plans/`, `userguides/` and `assets/`, with the verification backlog moved to `testing/` at the repository root; filenames are lowercase and prefixed by folder, because a filename becomes a wiki page name. Four files were deleted rather than filed: a forked copy of Blacksmith's API notes, two starter-template documents about how to build a Coffee Pub module rather than how this one works, and a resolved support ticket whose central claim had been false since April. **Verified** by `node tools/check-docs-structure.mjs`.
+- **The documentation publishes to the wiki.** The five publisher files are copied from Blacksmith unchanged, and every commit to `main` touching `documentation/` now builds and pushes the wiki. **Verified** by `node tools/wiki-sync.mjs build` producing the pages, the sidebar and the Home page, with asset paths rewritten to absolute URLs.
+- **Eight user guides, where there were none.** Getting started, sketching, recording a map, marking up a map, kinds of map, a player guide, a GM guide, and every setting by its on-screen name. They are written from source and from four product screenshots; nothing in them has been walked in a running world yet, and `documentation/TODO.md` records which claims are unverified and which guide is likeliest to be wrong.
+- **`TODO.md` holds work, and `known-issues.md` holds defects.** Two entries that described shipped defects rather than planned work moved to the new `known-issues.md`, completed entries were deleted, and the list is prose rather than checkboxes.
+
+
 ## [13.2.2]
 
 ### FIXED
