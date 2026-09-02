@@ -14,8 +14,8 @@ cartographer.js (Main Orchestrator)
 ```
 cartographer.js (Main Orchestrator)
   ├── manager-drawing.js (Drawing Tool)
-  ├── manager-notes.js (Group Notes Tool)      🔲 Future
-  └── manager-marching-orders.js (Marching Orders) 🔲 Future
+  ├── manager-notes.js (Group Notes Tool)      Future
+  └── manager-marching-orders.js (Marching Orders) Future
 ```
 
 ---
@@ -47,15 +47,15 @@ const toolInterface = {
 ```
 
 **Pros**:
-- ✅ Clear separation of concerns
-- ✅ Tools are independent
-- ✅ Easy to add/remove tools
-- ✅ Standard interface ensures consistency
-- ✅ Tools can be conditionally loaded
+- Clear separation of concerns
+- Tools are independent
+- Easy to add/remove tools
+- Standard interface ensures consistency
+- Tools can be conditionally loaded
 
 **Cons**:
-- ⚠️ Requires discipline to maintain interface
-- ⚠️ Slightly more complex initialization
+- Requires discipline to maintain interface
+- Slightly more complex initialization
 
 ---
 
@@ -79,14 +79,14 @@ import { CartographerServices } from './cartographer.js';
 ```
 
 **Pros**:
-- ✅ Centralized resource management
-- ✅ Single point of access for shared resources
-- ✅ Easy to coordinate between tools
+- Centralized resource management
+- Single point of access for shared resources
+- Easy to coordinate between tools
 
 **Cons**:
-- ⚠️ Creates dependency on cartographer.js
-- ⚠️ Tools become less independent
-- ⚠️ Harder to test tools in isolation
+- Creates dependency on cartographer.js
+- Tools become less independent
+- Harder to test tools in isolation
 
 ---
 
@@ -104,14 +104,14 @@ eventBus.dispatchEvent(new CustomEvent('tool-activated', { detail: { tool: 'draw
 ```
 
 **Pros**:
-- ✅ Maximum decoupling
-- ✅ Tools don't know about each other
-- ✅ Easy to add cross-tool features
+- Maximum decoupling
+- Tools don't know about each other
+- Easy to add cross-tool features
 
 **Cons**:
-- ⚠️ Can be harder to debug
-- ⚠️ Event flow can be unclear
-- ⚠️ May be overkill for this use case
+- Can be harder to debug
+- Event flow can be unclear
+- May be overkill for this use case
 
 ---
 
@@ -202,9 +202,9 @@ async function initializeTools() {
             if (tool) {
                 try {
                     await tool.initialize(CartographerServices);
-                    console.log(`✅ ${MODULE.NAME}: ${tool.displayName} initialized`);
+                    console.log(`${MODULE.NAME}: ${tool.displayName} initialized`);
                 } catch (error) {
-                    console.error(`❌ ${MODULE.NAME}: Failed to initialize ${toolName}:`, error);
+                    console.error(`${MODULE.NAME}: Failed to initialize ${toolName}:`, error);
                 }
             }
         }
@@ -283,23 +283,23 @@ export { drawingTool };
 
 ```
 scripts/
-├── const.js                    ✅ Module constants
-├── settings.js                 ✅ Shared settings (if any)
-├── cartographer.js             ✅ Main orchestrator + shared services
+├── const.js                    Module constants
+├── settings.js                 Shared settings (if any)
+├── cartographer.js             Main orchestrator + shared services
 │
-├── manager-drawing.js          ✅ Drawing tool
-├── manager-notes.js            🔲 Notes tool (future)
-└── manager-marching-orders.js  🔲 Marching orders tool (future)
+├── manager-drawing.js          Drawing tool
+├── manager-notes.js            Not built: Notes tool (future)
+└── manager-marching-orders.js  Not built: Marching orders tool (future)
 │
-└── utils/                      🔲 Shared utilities (if needed)
+└── utils/                      Not built: Shared utilities (if needed)
     ├── canvas-helpers.js
     └── storage-helpers.js
 
 styles/
-├── default.css                 ✅ Main import file (imports all tool CSS)
-├── tool-drawing.css            ✅ Drawing tool styles
-├── tool-notes.css              🔲 Notes tool styles (future)
-└── tool-marching-orders.css    🔲 Marching orders styles (future)
+├── default.css                 Main import file (imports all tool CSS)
+├── tool-drawing.css            Drawing tool styles
+├── tool-notes.css              Not built: Notes tool styles (future)
+└── tool-marching-orders.css    Not built: Marching orders styles (future)
 ```
 
 ---
@@ -581,14 +581,14 @@ await drawingTool.initialize(mockServices);
 ```
 
 **Benefits**:
-- ✅ Single entry point for all styles
-- ✅ Each tool has isolated CSS
-- ✅ Easy to add/remove tool styles
-- ✅ Clear organization
+- Single entry point for all styles
+- Each tool has isolated CSS
+- Easy to add/remove tool styles
+- Clear organization
 
 ## Recommendations
 
-### ✅ DO
+### DO
 
 1. **Use Tool Registration Pattern**: Standard interface, clear separation
 2. **Namespaced Settings**: `tool.settingName` format
@@ -600,7 +600,7 @@ await drawingTool.initialize(mockServices);
 8. **Keep Files Focused**: Single responsibility per file
 9. **Split Large Files**: Extract utilities, break into sub-modules
 
-### ❌ DON'T
+### DON'T
 
 1. **Don't create tool dependencies**: Tools shouldn't require other tools
 2. **Don't share state between tools**: Use events if needed
@@ -620,11 +620,11 @@ await drawingTool.initialize(mockServices);
 - Hooks = Per-tool context
 - State = Per-tool management
 
-**Scalability**: ✅ Can easily add 5+ tools without architectural changes
+**Scalability**: Can easily add 5+ tools without architectural changes
 
-**Maintainability**: ✅ Clear separation, easy to understand
+**Maintainability**: Clear separation, easy to understand
 
-**Testability**: ✅ Tools can be tested independently
+**Testability**: Tools can be tested independently
 
 ---
 

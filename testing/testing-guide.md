@@ -22,20 +22,20 @@ Open the browser console (F12 → Console tab) and look for:
 
 **Expected Success Messages:**
 ```
-✅ CARTOGRAPHER: Registered with Blacksmith successfully
+CARTOGRAPHER: Registered with Blacksmith successfully
 CARTOGRAPHER: Module initialized
-✅ CARTOGRAPHER: Canvas Layer initialized
-✅ CARTOGRAPHER: Drawing Tool initialized
+CARTOGRAPHER: Canvas Layer initialized
+CARTOGRAPHER: Drawing Tool initialized
 ```
 
 **If you see warnings:**
 ```
-⚠️ CARTOGRAPHER: Blacksmith not available
+CARTOGRAPHER: Blacksmith not available
 ```
 → **Issue**: Blacksmith module is not enabled. Enable it and reload.
 
 ```
-⚠️ CARTOGRAPHER: Canvas Layer not available
+CARTOGRAPHER: Canvas Layer not available
 ```
 → **Issue**: Canvas hasn't loaded yet. Wait a moment or switch to a scene.
 
@@ -46,9 +46,9 @@ CARTOGRAPHER: Module initialized
    - **Getting Started** section (with Introduction)
    - **Common Settings** section
    - **Drawing Tool Settings** subsection with:
-     - ✅ **Enable Player Drawing** (checkbox, default: checked)
-     - ✅ **Drawing Timeout (seconds)** (number input, default: 3600)
-     - ✅ **Allow Drawing Persistence** (checkbox, default: checked)
+     - **Enable Player Drawing** (checkbox, default: checked)
+     - **Drawing Timeout (seconds)** (number input, default: 3600)
+     - **Allow Drawing Persistence** (checkbox, default: checked)
 
 ### Step 4: Test Canvas Layer Access
 
@@ -130,7 +130,7 @@ import('/modules/coffee-pub-cartographer/scripts/cartographer.js').then(module =
 
 **Symptoms:**
 ```
-⚠️ CARTOGRAPHER: Blacksmith not available
+CARTOGRAPHER: Blacksmith not available
 ```
 
 **Solutions:**
@@ -143,7 +143,7 @@ import('/modules/coffee-pub-cartographer/scripts/cartographer.js').then(module =
 
 **Symptoms:**
 ```
-⚠️ CARTOGRAPHER: Canvas Layer not available
+CARTOGRAPHER: Canvas Layer not available
 ```
 
 **Solutions:**

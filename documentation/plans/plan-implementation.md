@@ -8,13 +8,13 @@ This document outlines the step-by-step implementation plan for the Coffee Pub C
 
 ## Current State
 
-### ✅ Completed
+### Completed
 - Module structure and setup
 - Blacksmith module registration
 - Basic settings structure
 - API testing code (to be removed)
 
-### 🔲 To Be Implemented
+### To Be Implemented
 - Drawing functionality
 - Canvas Layer integration
 - Toolbar integration
@@ -53,11 +53,11 @@ This document outlines the step-by-step implementation plan for the Coffee Pub C
    - Implement Canvas Layer access pattern
    - Add availability checks
 
-5. **CSS Organization Setup** ✅ **ALREADY DONE**
-   - ✅ `default.css` imports tool CSS files
-   - ✅ `common.css` created for shared styles
-   - ✅ `tool-drawing.css` created for drawing tool styles
-   - ✅ CSS import pattern established for future tools
+5. **CSS Organization Setup** **ALREADY DONE**
+   - `default.css` imports tool CSS files
+   - `common.css` created for shared styles
+   - `tool-drawing.css` created for drawing tool styles
+   - CSS import pattern established for future tools
 
 **Files to Modify**:
 - `scripts/cartographer.js` - Remove test code, add canvasReady hook (main orchestration file)
@@ -273,17 +273,17 @@ This document outlines the step-by-step implementation plan for the Coffee Pub C
 
 ```
 scripts/
-├── const.js                    ✅ Exists
-├── settings.js                 ✅ Exists (needs Cartographer settings)
-├── cartographer.js             ✅ Exists - Main orchestration file
-└── manager-drawing.js          🔲 NEW - Drawing tool module (first tool)
+├── const.js                    Exists
+├── settings.js                 Exists (needs Cartographer settings)
+├── cartographer.js             Exists - Main orchestration file
+└── manager-drawing.js          Not built: NEW - Drawing tool module (first tool)
 
 lang/
-└── en.json                     ✅ Exists (needs Cartographer keys)
+└── en.json                     Exists (needs Cartographer keys)
 
 styles/
-├── default.css                 ✅ Exists - Main import file
-└── tool-drawing.css            🔲 NEW - Drawing tool styles
+├── default.css                 Exists - Main import file
+└── tool-drawing.css            Not built: NEW - Drawing tool styles
 ```
 
 **Note**: 

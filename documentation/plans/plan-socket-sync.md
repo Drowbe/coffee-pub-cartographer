@@ -7,16 +7,16 @@ This document outlines the plan for implementing real-time synchronization of dr
 ## Current State
 
 ### What's Already Implemented
-- ✅ **Broadcasting**: Drawing creation and deletion events are being emitted via `BlacksmithSocketManager.emit()`
-- ✅ **Event Types**: Two event types are being used:
+- **Broadcasting**: Drawing creation and deletion events are being emitted via `BlacksmithSocketManager.emit()`
+- **Event Types**: Two event types are being used:
   - `drawing-created` - When a new drawing is created
   - `drawing-deleted` - When drawings are deleted (all or user-specific)
 
 ### What's Missing
-- ❌ **Socket Registration**: No handlers registered to receive events from other clients
-- ❌ **Remote Drawing Rendering**: Drawings created by other players are not being rendered locally
-- ❌ **API Compliance**: Using old `BlacksmithSocketManager` API instead of new `Blacksmith.socket` API
-- ❌ **Initial Sync**: No mechanism to sync existing drawings when a player joins
+- **Socket Registration**: No handlers registered to receive events from other clients
+- **Remote Drawing Rendering**: Drawings created by other players are not being rendered locally
+- **API Compliance**: Using old `BlacksmithSocketManager` API instead of new `Blacksmith.socket` API
+- **Initial Sync**: No mechanism to sync existing drawings when a player joins
 
 ## Blacksmith Socket API Pattern
 

@@ -18,18 +18,18 @@
 scripts/
 ├── cartographer.js              (orchestrator)
 ├── manager-drawing.js           (drawing tool - NO socket code)
-├── manager-sockets.js           (centralized socket handling) ⭐ NEW
+├── manager-sockets.js           (centralized socket handling)  NEW
 ├── manager-notes.js             (future - NO socket code)
 └── manager-marching-orders.js   (future - NO socket code)
 ```
 
 **Benefits**:
-- ✅ Single responsibility: Socket manager handles ALL socket logic
-- ✅ Tool managers stay focused on their domain logic
-- ✅ Easy to add socket events for new tools
-- ✅ Centralized socket registration and routing
-- ✅ Prevents "god mode" files
-- ✅ Easier to test and maintain
+- Single responsibility: Socket manager handles ALL socket logic
+- Tool managers stay focused on their domain logic
+- Easy to add socket events for new tools
+- Centralized socket registration and routing
+- Prevents "god mode" files
+- Easier to test and maintain
 
 **How It Works**:
 1. `manager-sockets.js` registers ALL socket handlers
@@ -48,10 +48,10 @@ scripts/
 ```
 
 **Drawbacks**:
-- ❌ Duplicate socket registration code in each tool
-- ❌ Socket logic mixed with tool logic
-- ❌ Harder to maintain socket patterns
-- ❌ Files become bloated (3000+ lines)
+- Duplicate socket registration code in each tool
+- Socket logic mixed with tool logic
+- Harder to maintain socket patterns
+- Files become bloated (3000+ lines)
 
 ## Recommended Implementation: Option 1
 
@@ -160,7 +160,7 @@ class NotesTool {
 }
 ```
 
-No socket code duplication! 🎉
+No socket code duplication! 
 
 ## Decision
 

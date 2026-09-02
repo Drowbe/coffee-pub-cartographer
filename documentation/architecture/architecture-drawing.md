@@ -1,8 +1,10 @@
-# Cartographer Module - Drawing on BlacksmithLayer
+# Cartographer Drawing Tool
 
-## Overview
+**Audience:** someone changing Cartographer's drawing tool, and the rest of the suite.
 
-This document outlines the architecture and implementation strategy for the Coffee Pub Cartographer module, which enables temporary player drawings on the canvas for planning purposes. The module leverages **Blacksmith's Canvas Layer** for centralized canvas management across Coffee Pub modules.
+How temporary player drawings are rendered, synchronised and cleaned up, and why they sit on
+Blacksmith's shared canvas layer rather than on a layer of Cartographer's own. The mapping tool is a
+separate subsystem and is not covered here.
 
 ## Architecture
 
@@ -239,25 +241,6 @@ game.settings.register(MODULE.ID, 'allowDrawingPersistence', {
 - **Per-Player Permissions**: Control who can draw
 - **Brush Settings Override**: Set default brush settings for players
 
-## Features to Implement
-
-### Core Features
-- ✅ Multiple brush types (pen, marker, highlighter)
-- ✅ Color picker for players
-- ✅ Brush size slider
-- ✅ Temporary drawing storage (session-based)
-- ✅ Auto-cleanup on scene change
-- ✅ Permission system (GM controls)
-
-### Advanced Features
-- 🔲 Undo/Redo (limited to session, player-specific)
-- 🔲 Grid snapping option
-- 🔲 Draw only in specific layers (tokens, tiles, etc.)
-- 🔲 Export drawing history (GM only)
-- 🔲 Drawing templates/stamps
-- 🔲 Collaborative drawing modes
-- 🔲 Drawing lock (prevent drawing while GM is speaking)
-
 ## Integration with Blacksmith
 
 ### Using Blacksmith APIs
@@ -416,20 +399,9 @@ if (!canvas['blacksmith-utilities-layer']) {
 - Verify user permissions
 - Check GM-only settings
 
-## Future Enhancements
-
-- **Multi-layer Support**: Draw on different canvas layers
-- **Drawing Templates**: Pre-made shapes/stamps
-- **Collaborative Tools**: Multiple players drawing simultaneously
-- **Drawing History**: Undo/redo with session persistence
-- **Export/Import**: Save drawing sessions
-- **Drawing Tools**: Ruler, protractor, etc.
-- **Layer Locking**: Prevent drawing in certain areas
-
 ## Resources
 
 - [FoundryVTT Drawing API](https://foundryvtt.com/api/)
-- [Blacksmith API Documentation](./api-core.md)
-- [Blacksmith Toolbar API](./api-toolbar.md)
+- Blacksmith API reference: https://github.com/Drowbe/coffee-pub-blacksmith/wiki
 - [BlacksmithLayer Implementation](../scripts/canvas-layer.js)
 
