@@ -5,6 +5,8 @@
 The three kinds of map, how to share your own, how the party map gets filled, and how a found map
 reaches the table.
 
+![Recorded Maps, showing an official map, a party map and two personal maps of one scene](../assets/cartographer-maps.webp)
+
 ## Your own map
 
 A **player map** is one character's record of one scene, drawn as their token walks. It is yours: you

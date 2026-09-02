@@ -709,10 +709,15 @@ export class MappingWindow extends BlacksmithToolWindowBaseV2 {
             // that and the title says the scene, so the row has nothing left
             // to add but the kind -- and for an ordinary player map, nothing
             // at all, which is better than repeating the line above it.
+            // Deduplicated, because an artifact is owned by nobody and so takes
+            // its kind as its owner label -- which rendered as "Official Map ·
+            // Official Map" until a screenshot showed it.
             group.maps.push({
                 ...map,
-                subtitle: [byScene ? (map.ownerLabel || map.actorName) : '', map.isPlayer ? '' : map.kindLabel]
-                    .filter(Boolean).join(' · ')
+                subtitle: [...new Set(
+                    [byScene ? (map.ownerLabel || map.actorName) : '', map.isPlayer ? '' : map.kindLabel]
+                        .filter(Boolean)
+                )].join(' · ')
             });
             group.updated = Math.max(group.updated, map.updatedAt ?? 0);
         }

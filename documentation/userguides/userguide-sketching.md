@@ -9,6 +9,8 @@ Sketches are temporary by design. They are for working something out together --
 the door first, where the archers stand -- not for keeping. Nothing you draw here becomes part of the
 scene.
 
+![Routes, circles and arrow stamps drawn over a scene in several colours](../assets/cartographer-drawing.webp)
+
 ## Start drawing
 
 Click **Cartographer** in the scene controls down the left of the canvas, then drag on the map.
@@ -30,12 +32,13 @@ Pick one, then drag on the canvas. The choice is remembered for you between sess
 
 ## Change how it looks
 
-The toolbar carries the controls for the line itself:
+The toolbar groups its controls under headings -- **Drawing Mode**, **Stamp Style**, **Stamp Size**,
+**Line Weight**, **Line Style**, **Color** and **Utilities**:
 
 - **Colour** -- your colour. It defaults to the colour Foundry assigns your user, so several people
   can draw at once and the table can tell who drew what.
-- **Line width** and **line style** -- how heavy the stroke is and whether it is solid or broken.
-- **Stamp style** and **symbol size** -- which marker the stamp drops, and how large.
+- **Line weight** and **line style** -- how heavy the stroke is and whether it is solid or broken.
+- **Stamp style** and **stamp size** -- which marker the stamp drops, and how large.
 
 Each is remembered per person, so your settings are yours and do not change anybody else's.
 

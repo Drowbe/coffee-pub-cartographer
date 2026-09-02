@@ -62,7 +62,7 @@ Some choices are remembered for you where you make them, rather than in Configur
 - **Grid** -- how heavily the squares are ruled. From a right-click on any map square.
 - **How the map list is grouped** -- by scene, by character, or just your own. From the tabs at the
   top of Recorded Maps.
-- **Your drawing colour, line width, line style, stamp style and symbol size**, and whether timed
-  erase applies to your drawings. From the drawing toolbar.
+- **Your drawing colour, line weight, line style, stamp style and stamp size**, and whether timed
+  erase applies to your drawings. From the drawing toolbar, under those headings.
 
 All of these are yours alone and are remembered between sessions.

@@ -8,6 +8,8 @@
 
 Party strategic planning, temporary canvas sketching, and shared old-school mapping.
 
+![Cartographer: the party map beside sketches drawn on the canvas](documentation/assets/cartographer-product.webp)
+
 ## Features
 
 - Temporary multiplayer canvas drawings with shapes, stamps, colors, and timed cleanup.

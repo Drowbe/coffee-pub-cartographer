@@ -63,7 +63,7 @@ Two things follow you rather than the map, and changing them affects nobody else
   ruling down even on a map you do not own.
 - **How the map list is grouped** -- by scene, by character, or just your own.
 
-Your drawing colour, line width, style and stamp choice are also yours and are remembered between
+Your drawing colour, line weight, style and stamp choice are also yours and are remembered between
 sessions.
 
 ## If something is missing

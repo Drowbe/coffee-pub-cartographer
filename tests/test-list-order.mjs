@@ -53,5 +53,26 @@ if (!/zoom-out[\s\S]*fit-map[\s\S]*center-view[\s\S]*zoom-in/.test(controls)) {
     bad++; console.log('  FAIL  the zoom controls no longer bracket the view controls');
 } else console.log('  ok    zoom out, fit, centre, zoom in');
 
+console.log('\nthe row subtitle never repeats itself');
+{
+    // An artifact is owned by nobody, so its owner label IS its kind. Joining
+    // the two rendered "Official Map - Official Map" in a live screenshot.
+    const src2 = fs.readFileSync('scripts/window-mapping.js', 'utf8');
+    const push = src2.slice(src2.indexOf('group.maps.push({'), src2.indexOf('group.updated = Math.max'));
+    if (!push.includes('new Set')) { bad++; console.log('  FAIL  the subtitle is not deduplicated'); }
+    else console.log('  ok    the subtitle is built through a Set');
+    const build = (map, byScene) => [...new Set(
+        [byScene ? (map.ownerLabel || map.actorName) : '', map.isPlayer ? '' : map.kindLabel].filter(Boolean)
+    )].join(' - ');
+    check('an artifact says its kind once',
+        build({ ownerLabel: 'Official Map', kindLabel: 'Official Map', isPlayer: false }, true), 'Official Map');
+    check('a party map still says both',
+        build({ ownerLabel: 'Elegant Eight', kindLabel: 'Party Map', isPlayer: false }, true), 'Elegant Eight - Party Map');
+    check('a player map says only who mapped it',
+        build({ ownerLabel: 'Favia Gita', kindLabel: 'Player Map', isPlayer: true }, true), 'Favia Gita');
+    check('grouped by character it says nothing more',
+        build({ ownerLabel: 'Favia Gita', kindLabel: 'Player Map', isPlayer: true }, false), '');
+}
+
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');
 process.exit(bad ? 1 : 0);

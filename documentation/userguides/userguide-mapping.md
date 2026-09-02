@@ -10,6 +10,8 @@ the party's own record of a place, not a copy of the GM's scene.
 
 The mapping tool needs a square-grid scene. Hex and gridless scenes are not supported.
 
+![The map window recording, beside the scene the token is walking](../assets/cartographer-recording.webp)
+
 ## Start a map
 
 1. Select a token you own.
@@ -27,13 +29,14 @@ on, and a GM must be logged in.
 
 ## The three modes
 
-The buttons across the top of the map window are the modes, and one is always in effect:
+The buttons across the top of the map window are the modes, left to right, and one is always in
+effect:
 
-- **Record** -- track the selected token and map where it goes. Pressing it while recording stops,
-  and the button says so.
+- **View** -- look at the map without following anything.
 - **Follow** -- track the token without adding anything. The view keeps up with the party; the map
   does not grow.
-- **View** -- neither. Look at the map without following anything.
+- **Record** -- track the selected token and map where it goes. While it is running the button reads
+  **Stop Recording**, and pressing it stops.
 
 Record and Follow appear only on a map a token could be recording into, and only on the scene you are
 in. An official map is drawn rather than walked, so it offers View alone.
@@ -45,7 +48,7 @@ in. An official map is drawn rather than walked, so it offers View alone.
 - **Fit the map** frames the whole thing. It is always available, and it is the way back when you
   have panned somewhere unrecognisable.
 - **Centre on the party** jumps to the tracked token. It appears only when there is a token to centre
-  on.
+  on, so a map you are merely viewing shows three buttons and one you are recording shows four.
 
 While following, the party marker stays pinned at the centre and the map slides beneath it.
 

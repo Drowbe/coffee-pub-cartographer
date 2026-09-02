@@ -13,6 +13,8 @@ someone kept on graph paper, with walls, doors, floor surfaces and hand-placed s
 Nothing on either is guessed. The map holds only what a token experienced, so it can show the party
 a corridor they walked without showing them the room beyond the door they never opened.
 
+![Cartographer: the party map beside sketches drawn on the canvas](assets/cartographer-product.webp)
+
 ## Using it
 
 - [Getting started](userguides/userguide-getting-started.md) -- what appears when you enable it, and
