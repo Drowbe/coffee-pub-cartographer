@@ -5,7 +5,8 @@
 The first five minutes: what appears on screen, and one thing to try with each of the two tools.
 Each tool has its own guide for everything past that.
 
-Cartographer needs Coffee Pub Blacksmith installed and active.
+Cartographer runs on Foundry 13 and 14, and needs Coffee Pub Blacksmith 14.1.0 or later installed
+and active.
 
 ## What appears when you enable it
 

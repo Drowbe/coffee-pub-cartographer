@@ -1178,16 +1178,22 @@ class DrawingTool {
         
         this.state.active = true;
         
-        // Disable Foundry's default drawing controls to prevent conflicts
+        // Step off Foundry's own drawing layer so its tools and ours cannot both
+        // claim a drag. Switching the active layer is what actually does that.
         if (canvas.drawings) {
-            // Hide drawing controls
+            // On v14 `canvas.drawings.controls` does not exist -- `controls`
+            // belongs to an individual placeable and to SceneControls, not to a
+            // layer -- so this is inert there, and the guard is why it is inert
+            // rather than an error. Whether it ever did anything on v13 is not
+            // established, and v13 is still supported, so it stays: a guarded
+            // no-op costs nothing, and removing it would be a silent behaviour
+            // change on a version we cannot currently test. See TODO.
             if (canvas.drawings.controls) {
                 canvas.drawings.controls.visible = false;
                 canvas.drawings.controls.active = false;
             }
-            
-            // Switch away from drawing layer if active
-            if (canvas.activeLayer && canvas.activeLayer.name === "drawings") {
+
+            if (canvas.activeLayer?.name === "drawings") {
                 canvas.tokens.activate();
             }
         }
@@ -1224,11 +1230,12 @@ class DrawingTool {
             this.cancelDrawing();
         }
         
-        // Re-enable Foundry's default drawing controls
+        // Re-enable Foundry's default drawing controls. Inert on v14, where the
+        // member does not exist; see the note where they are hidden.
         if (canvas.drawings && canvas.drawings.controls) {
             canvas.drawings.controls.visible = true;
         }
-        
+
         if (!keyBased) {
             console.log(`${MODULE.NAME}: ${this.displayName} deactivated`);
         }

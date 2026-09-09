@@ -48,6 +48,18 @@ live contribution both rest on. Much of it is currently in `plans/plan-map-kinds
 `plans/plan-mapping-tool.md`, which are scaffolding and are supposed to be dismantled into exactly
 this.
 
+## Foundry v14
+
+**Settle whether `canvas.drawings.controls` ever existed** (`scripts/manager-drawing.js`, around
+1180 and 1230). It is absent on v14, so the two guarded blocks that set `visible` and `active` on it
+are inert there. Whether v13 had it, and therefore whether those blocks ever suppressed anything, is
+unknown -- there is no v13 install on this machine to check, and grepping the local `foundry.mjs`
+answers for v14 only. They are kept because v13 is still supported and a guarded no-op is cheaper
+than a silent behaviour change on a version nobody can test. Settle it against a v13 client or
+Foundry's changelog, then either delete both blocks or replace them with whatever v14 calls the same
+thing. Verified when sketch mode is activated on both versions with Foundry's Drawings layer active
+and neither leaves Foundry's controls on screen.
+
 ## Drawing tools
 
 **Copy a drawing to the clipboard** for use outside Foundry. Verify by drawing, copying, and pasting

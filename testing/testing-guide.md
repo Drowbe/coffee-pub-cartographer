@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-1. **FoundryVTT v13** installed and running
+1. **FoundryVTT v13 or v14** installed and running
 2. **Coffee Pub Blacksmith** module installed and enabled
 3. **Coffee Pub Cartographer** module in your `Data/modules/` folder
 
@@ -149,7 +149,7 @@ CARTOGRAPHER: Canvas Layer not available
 **Solutions:**
 1. Wait for canvas to load (switch to a scene)
 2. Check that Blacksmith is enabled and working
-3. Verify you're using FoundryVTT v13
+3. Verify you're using FoundryVTT v13 or v14
 4. Check console for Blacksmith errors
 
 ### Issue: Settings Not Appearing
@@ -241,7 +241,7 @@ console.log('Constants:', typeof BlacksmithConstants);
 
 If you encounter issues, report:
 
-1. **FoundryVTT Version**: (e.g., v13.0.0)
+1. **FoundryVTT Version**: (e.g., v14.367)
 2. **Blacksmith Version**: Check in module list
 3. **Console Errors**: Copy any error messages
 4. **Console Logs**: Copy relevant log messages

@@ -2,6 +2,7 @@
 
 ![Latest Release](https://img.shields.io/github/v/release/Drowbe/coffee-pub-cartographer)
 ![Foundry v13](https://img.shields.io/badge/foundry-v13-yellow)
+![Foundry v14](https://img.shields.io/badge/foundry-v14-green)
 ![MIT License](https://img.shields.io/badge/license-MIT-blue)
 
 ## Description
@@ -18,8 +19,8 @@ Party strategic planning, temporary canvas sketching, and shared old-school mapp
 
 ## Requirements
 
-- **FoundryVTT**: Version 13.x
-- **Coffee Pub Blacksmith**: Required dependency - provides shared services and functionality
+- **FoundryVTT**: Version 13 or 14
+- **Coffee Pub Blacksmith**: 14.1.0 or later. Required dependency - provides shared services and functionality
 
 ## Installation
 

@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [14.0.0]
+
+### CHANGED
+
+- **Foundry v14 is verified; v13 is still supported** (`module.json`, `README.md`). `compatibility` moves to `verified: "14"` with `minimum` held at 13, so this release runs on both. The Blacksmith requirement gained a floor of 14.1.0, where before it carried an empty `compatibility` object and therefore asserted nothing. README carries a green v14 badge beside the yellow v13 one, and the requirements in `README.md`, `documentation/home.md`, `documentation/userguides/userguide-getting-started.md` and `testing/testing-guide.md` say 13 or 14. **Verified** on the author's 14.367.0 client: PIXI reports 7.4.3 with `canvas.app.stage`, `.renderer` and `.view` intact, so the drawing tool's twenty-two PIXI call sites are unaffected; `CONFIG.Canvas.polygonBackends.sight` is still `ClockwiseSweepPolygon` with `testCollision` present; `CONFIG.Token.movement.actions` is unchanged in shape; `foundry.applications.instances` and `ApplicationV2.prototype._insertElement` are unchanged, so the serialized-window-open guard added in 13.2.2 is still required.
+- **The sense-type constant is read by its current name** (`scripts/atlas-mapping.js:145`). `CONST.WALL_SENSE_TYPES` is deprecated as of v14 and is removed in v16, and reading it logs a deprecation warning against this module on every scene load. The atlas now reads `CONST.EDGE_SENSE_TYPES ?? CONST.WALL_SENSE_TYPES ?? {}`, preferring the current name and falling back to the old one, so it stops warning on v14 and still resolves on 13 whichever name that version supplies. **Verified** by the 17 test suites, which exercise the atlas through the seeding and region tests. Not yet confirmed on a running world: the warning was observed on 14.367.0 before the change and has not been re-checked since, so that it is gone is expected rather than measured.
+- **`canvas.drawings.controls` does not exist on v14**, so the two guarded blocks in `scripts/manager-drawing.js` that set `visible` and `active` on it are inert there. They are guarded, so nothing throws and sketch mode is unaffected. Whether v13 had that member -- and therefore whether those blocks ever suppressed anything -- is not established, because no v13 install was available to check; a grep of the local `foundry.mjs` answers for v14 only. They are kept rather than deleted: v13 is still supported, a guarded no-op costs nothing, and removing them would be a silent behaviour change on a version that cannot currently be tested. Tracked in `documentation/TODO.md`.
+
+### FIXED
+
+- **A teleporting token no longer risks drawing a corridor it did not walk.** No code changed: the check reads `CONFIG.Token.movement.actions[action]?.teleport === true`, which is data-driven, and v14 marks both jumping actions -- `blink` and `displace` -- as `teleport: true` while the eight travelling actions are false. Recorded here because it was a specific migration risk and the answer is that the existing shape is correct, including for module-contributed actions. **Verified** by enumerating all ten actions and their `teleport` values on the 14.367.0 client.
+
+
 ## [13.2.3]
 
 ### FIXED

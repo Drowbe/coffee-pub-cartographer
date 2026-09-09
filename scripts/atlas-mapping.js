@@ -137,7 +137,12 @@ function classifyWall(document) {
     if (!source) return null;
 
     const doorTypes = CONST.WALL_DOOR_TYPES ?? {};
-    const senseTypes = CONST.WALL_SENSE_TYPES ?? {};
+    // EDGE_SENSE_TYPES is the current name; WALL_SENSE_TYPES is deprecated as of
+    // v14 and goes in v16. Both exist in v13 and v14, so the new name is
+    // preferred and the old one kept as the fallback rather than the other way
+    // round -- that way this stops reading the deprecated constant today and
+    // still works on the oldest version we support.
+    const senseTypes = CONST.EDGE_SENSE_TYPES ?? CONST.WALL_SENSE_TYPES ?? {};
     const movementTypes = CONST.WALL_MOVEMENT_TYPES ?? {};
     const door = Number(source.door ?? doorTypes.NONE ?? 0);
     const move = Number(source.move);

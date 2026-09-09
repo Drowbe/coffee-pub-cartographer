@@ -38,9 +38,9 @@ a corridor they walked without showing them the room beyond the door they never 
 
 ## Requirements
 
-Cartographer needs [Coffee Pub Blacksmith](https://github.com/Drowbe/coffee-pub-blacksmith), which
-provides the shared canvas layer, the socket transport, the toolbar and the window shell. The
-mapping tool needs a square-grid scene; hex and gridless scenes are not supported.
+Foundry version 13 or 14, and [Coffee Pub Blacksmith](https://github.com/Drowbe/coffee-pub-blacksmith)
+14.1.0 or later, which provides the shared canvas layer, the socket transport, the toolbar and the
+window shell. The mapping tool needs a square-grid scene; hex and gridless scenes are not supported.
 
 ## The Coffee Pub suite
 
