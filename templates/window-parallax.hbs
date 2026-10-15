@@ -1,15 +1,29 @@
 {{! Styled from the --blacksmith-tool-* variables so it follows Light, Dark and
     Glass. Sliders carry data-field (and data-layer-id for a layer); the window
-    previews on input and writes the scene on change. }}
+    previews on input and writes the scene on change.
 
+    Two modes share this template: setup, which builds the stack, and control,
+    which keeps only what is needed while the scene is running. }}
+
+{{! A layer in setup mode. Collapsed, it is one line: what it is, how fast,
+    and the buttons. Expanded, its sliders follow. }}
 {{#*inline "layerRow"}}
-<div class="cartographer-parallax-layer{{#unless visible}} is-hidden{{/unless}}{{#if overhead}} is-overhead{{/if}}">
+<div class="cartographer-parallax-layer{{#unless visible}} is-hidden{{/unless}}{{#if overhead}} is-overhead{{/if}}{{#if collapsed}} is-collapsed{{/if}}">
     <div class="cartographer-parallax-layer-header">
+        <button type="button" class="cartographer-parallax-button cartographer-parallax-collapse" data-action="toggle-collapse" data-layer-id="{{id}}"
+            data-tooltip="{{localize (ifThen collapsed "coffee-pub-cartographer.parallax.expand" "coffee-pub-cartographer.parallax.collapse")}}"><i class="fa-solid {{#if collapsed}}fa-chevron-right{{else}}fa-chevron-down{{/if}}"></i></button>
         <button type="button" class="cartographer-parallax-thumb" data-action="replace-layer" data-layer-id="{{id}}"
             data-tooltip="{{localize "coffee-pub-cartographer.parallax.replaceImage"}}">
             {{#if isVideo}}<i class="fa-solid fa-film"></i>{{else}}<img src="{{src}}" alt="">{{/if}}
         </button>
-        <span class="cartographer-parallax-layer-name" data-tooltip="{{src}}">{{name}}</span>
+        <div class="cartographer-parallax-layer-title">
+            <span class="cartographer-parallax-layer-name" data-tooltip="{{src}}">{{name}}</span>
+            {{#if collapsed}}
+            <span class="cartographer-parallax-layer-summary">
+                {{speed}} px/s{{#if band}} · {{localize "coffee-pub-cartographer.parallax.band"}}{{/if}}{{#unless visible}} · {{localize "coffee-pub-cartographer.parallax.hidden"}}{{/unless}}
+            </span>
+            {{/if}}
+        </div>
         <div class="cartographer-parallax-layer-actions">
             <button type="button" class="cartographer-parallax-button{{#if overhead}} is-active{{/if}}" data-action="toggle-overhead" data-layer-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleOverhead"}}"><i class="fa-solid fa-cloud"></i></button>
@@ -24,6 +38,7 @@
         </div>
     </div>
 
+    {{#unless collapsed}}
     <label class="cartographer-parallax-field">
         <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.speed"}}</span>
         <input type="range" data-field="speed" data-layer-id="{{id}}" value="{{speed}}"
@@ -54,24 +69,65 @@
         </label>
         {{/if}}
     </div>
+    {{/unless}}
 </div>
 {{/inline}}
 
-<div class="cartographer-parallax-root">
+{{! A layer in control mode: its name and whether it is showing, nothing more. }}
+{{#*inline "controlRow"}}
+<div class="cartographer-parallax-control-row{{#unless visible}} is-hidden{{/unless}}">
+    <span class="cartographer-parallax-layer-name" data-tooltip="{{src}}">{{name}}</span>
+    <button type="button" class="cartographer-parallax-button{{#if visible}} is-active{{/if}}" data-action="toggle-visible" data-layer-id="{{id}}"
+        data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleVisible"}}"><i class="fa-solid {{#if visible}}fa-eye{{else}}fa-eye-slash{{/if}}"></i></button>
+</div>
+{{/inline}}
+
+{{#*inline "tokenLine"}}
+<div class="cartographer-parallax-token-line" data-tooltip="{{localize "coffee-pub-cartographer.parallax.tokenLineHint"}}">
+    <span><i class="fa-solid fa-chess-pawn"></i> {{localize "coffee-pub-cartographer.parallax.tokenLine"}}</span>
+</div>
+{{/inline}}
+
+<div class="cartographer-parallax-root{{#if isControl}} is-control{{/if}}">
     {{#unless hasScene}}
     <div class="cartographer-parallax-empty">{{localize "coffee-pub-cartographer.parallax.noScene"}}</div>
     {{else}}
 
+    {{! Centred on zero: right runs forward, left runs in reverse, middle stops. }}
+    {{! The arrows at either end point the way the scenery will run on that side
+        of zero, turned to the current angle. }}
     <div class="cartographer-parallax-master">
+        <div class="cartographer-parallax-master-track">
+            <i class="fa-solid fa-arrow-right cartographer-parallax-arrow" data-arrow="reverse" style="transform: rotate({{reverseAngle}}deg)"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.reverse"}}"></i>
+            <label class="cartographer-parallax-field cartographer-parallax-master-slider">
+                <input type="range" data-field="masterSpeed" value="{{state.masterSpeed}}" list="cartographer-parallax-zero"
+                    min="{{ranges.masterSpeed.min}}" max="{{ranges.masterSpeed.max}}" step="{{ranges.masterSpeed.step}}"
+                    aria-label="{{localize "coffee-pub-cartographer.parallax.masterSpeed"}}">
+                <span class="cartographer-parallax-value" data-tooltip="{{localize "coffee-pub-cartographer.parallax.masterSpeed"}}">{{masterLabel}}</span>
+            </label>
+            <i class="fa-solid fa-arrow-right cartographer-parallax-arrow" data-arrow="forward" style="transform: rotate({{state.angle}}deg)"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.forward"}}"></i>
+        </div>
+        <datalist id="cartographer-parallax-zero"><option value="0"></option></datalist>
+        {{#unless isControl}}
         <label class="cartographer-parallax-field">
-            <span class="cartographer-parallax-label"><i class="fa-solid fa-gauge-high"></i> {{localize "coffee-pub-cartographer.parallax.masterSpeed"}}</span>
-            <input type="range" data-field="masterSpeed" value="{{state.masterSpeed}}"
-                min="{{ranges.masterSpeed.min}}" max="{{ranges.masterSpeed.max}}" step="{{ranges.masterSpeed.step}}">
-            <span class="cartographer-parallax-value">{{state.masterSpeed}}</span>
+            <span class="cartographer-parallax-label"><i class="fa-solid fa-compass"></i> {{localize "coffee-pub-cartographer.parallax.angle"}}</span>
+            <input type="range" data-field="angle" value="{{state.angle}}"
+                min="{{ranges.angle.min}}" max="{{ranges.angle.max}}" step="{{ranges.angle.step}}">
+            <span class="cartographer-parallax-value">{{state.angle}}°</span>
         </label>
+        {{/unless}}
     </div>
 
     {{#if hasLayers}}
+    {{#if isControl}}
+    <div class="cartographer-parallax-control-layers">
+        {{#each overheadLayers}}{{> controlRow}}{{/each}}
+        {{> tokenLine}}
+        {{#each groundLayers}}{{> controlRow}}{{/each}}
+    </div>
+    {{else}}
     <div class="cartographer-parallax-section-header">
         <i class="fa-solid fa-layer-group"></i>
         <span>{{localize "coffee-pub-cartographer.parallax.layersNearestFirst"}}</span>
@@ -79,13 +135,10 @@
     <div class="cartographer-parallax-layers">
         {{! Overhead layers draw above tokens, so they are listed above the line. }}
         {{#each overheadLayers}}{{> layerRow}}{{/each}}
-
-        <div class="cartographer-parallax-token-line" data-tooltip="{{localize "coffee-pub-cartographer.parallax.tokenLineHint"}}">
-            <span><i class="fa-solid fa-chess-pawn"></i> {{localize "coffee-pub-cartographer.parallax.tokenLine"}}</span>
-        </div>
-
+        {{> tokenLine}}
         {{#each groundLayers}}{{> layerRow}}{{/each}}
     </div>
+    {{/if}}
     {{else}}
     <div class="cartographer-parallax-empty">{{localize "coffee-pub-cartographer.parallax.noLayers"}}</div>
     {{/if}}

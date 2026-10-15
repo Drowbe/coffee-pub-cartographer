@@ -222,3 +222,111 @@
 .cartographer-parallax-window .cartographer-parallax-layer.is-overhead {
     border-style: dashed;
 }
+
+
+/* --- Master speed ------------------ */
+/* Zero sits in the middle of the track; the arrows either end show which way
+   the scenery runs on that side, turned to the current angle. */
+.cartographer-parallax-window .cartographer-parallax-master {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-master-track {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-master-slider {
+    flex: 1 1 auto;
+    grid-template-columns: 1fr 52px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-master-slider .cartographer-parallax-value {
+    font-weight: bold;
+}
+
+.cartographer-parallax-window .cartographer-parallax-arrow {
+    flex: 0 0 auto;
+    width: 16px;
+    text-align: center;
+    color: var(--blacksmith-tool-accent);
+    transition: transform 120ms ease-out;
+}
+
+.cartographer-parallax-window .cartographer-parallax-arrow[data-arrow="reverse"] {
+    color: var(--blacksmith-tool-text-muted);
+}
+
+/* --- Toolbar divider --------------- */
+.cartographer-parallax-window .cartographer-parallax-divider {
+    display: inline-block;
+    width: 1px;
+    height: 18px;
+    margin: 0 4px;
+    background: var(--blacksmith-tool-divider);
+    vertical-align: middle;
+}
+
+/* --- Collapsed layers -------------- */
+.cartographer-parallax-window .cartographer-parallax-collapse {
+    min-width: 20px;
+    padding: 0 2px;
+    border-color: transparent;
+}
+
+.cartographer-parallax-window .cartographer-parallax-layer-title {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.cartographer-parallax-window .cartographer-parallax-layer-summary {
+    color: var(--blacksmith-tool-text-muted);
+    font-size: 0.8em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cartographer-parallax-window .cartographer-parallax-layer.is-collapsed {
+    padding-top: 4px;
+    padding-bottom: 4px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-layer.is-collapsed .cartographer-parallax-thumb {
+    width: 36px;
+    height: 24px;
+}
+
+/* --- Control mode ------------------ */
+.cartographer-parallax-window .cartographer-parallax-control-layers {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-control-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-control-row:hover {
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-parallax-window .cartographer-parallax-control-row .cartographer-parallax-layer-name {
+    flex: 1 1 auto;
+    font-weight: normal;
+}
+
+.cartographer-parallax-window .cartographer-parallax-control-row.is-hidden .cartographer-parallax-layer-name {
+    color: var(--blacksmith-tool-text-muted);
+    text-decoration: line-through;
+}

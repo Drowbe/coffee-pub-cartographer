@@ -10,15 +10,27 @@ const TOOL_ID = `${MODULE.ID}-parallax`;
 const WINDOW_ID = `${MODULE.ID}-parallax`;
 
 /**
- * Which way the scenery travels across the screen. A wagon heading east sees
- * the world go by to the left, so "left" is the usual choice for travel.
+ * Which way the scenery travels, as an angle in degrees on screen: 0 runs it
+ * to the right, 90 down, 180 left, 270 up, and anything between runs it on a
+ * diagonal. A wagon heading east sees the world go by to the left, so 180 is
+ * the usual choice for travel. These are the quick picks the window offers.
  */
 export const PARALLAX_DIRECTIONS = {
-    left: { x: -1, y: 0, icon: 'fa-solid fa-arrow-left' },
-    right: { x: 1, y: 0, icon: 'fa-solid fa-arrow-right' },
-    up: { x: 0, y: -1, icon: 'fa-solid fa-arrow-up' },
-    down: { x: 0, y: 1, icon: 'fa-solid fa-arrow-down' }
+    left: { angle: 180, icon: 'fa-solid fa-arrow-left' },
+    right: { angle: 0, icon: 'fa-solid fa-arrow-right' },
+    up: { angle: 270, icon: 'fa-solid fa-arrow-up' },
+    down: { angle: 90, icon: 'fa-solid fa-arrow-down' }
 };
+
+/** The unit vector for an angle in degrees. */
+export function angleVector(angle) {
+    const radians = (Number(angle) || 0) * Math.PI / 180;
+    return { x: Math.cos(radians), y: Math.sin(radians) };
+}
+
+function normalizeAngle(angle) {
+    return ((Math.round(Number(angle) || 0) % 360) + 360) % 360;
+}
 
 /** A new layer's speed, in scene pixels per second at a master speed of 1. */
 const DEFAULT_LAYER_SPEED = 60;
@@ -38,7 +50,7 @@ function defaultState() {
     return {
         playing: false,
         masterSpeed: 1,
-        direction: 'left',
+        angle: 180,
         anchorAt: 0,
         layers: []
     };
@@ -61,7 +73,11 @@ function defaultLayer(src) {
         // Overhead layers draw above tokens -- clouds, smoke, birds -- instead
         // of beneath them with the ground.
         overhead: false,
-        offset: 0
+        // Where the tiling stood at the state's anchorAt. Kept as x and y
+        // rather than a distance along the scroll, so turning the angle mid-run
+        // carries on from where the layer is instead of jumping.
+        offsetX: 0,
+        offsetY: 0
     };
 }
 
@@ -158,7 +174,7 @@ class ParallaxManager {
             pause: () => this.pause(),
             toggle: () => this.togglePlaying(),
             setSpeed: speed => this.setMasterSpeed(speed),
-            setDirection: direction => this.setDirection(direction),
+            setAngle: angle => this.setAngle(angle),
             open: () => this.openWindow(),
             get state() { return parallaxManager.state; }
         };
@@ -171,24 +187,38 @@ class ParallaxManager {
     _readState(scene = canvas.scene) {
         const stored = scene?.getFlag(MODULE.ID, FLAG_KEY);
         const state = foundry.utils.mergeObject(defaultState(), stored ?? {}, { inplace: false });
+        // Scenes saved before the angle existed stored one of four directions.
+        if (stored && stored.angle === undefined && PARALLAX_DIRECTIONS[stored.direction]) {
+            state.angle = PARALLAX_DIRECTIONS[stored.direction].angle;
+        }
+        delete state.direction;
         state.layers = normalizeOrder(
             (stored?.layers ?? []).map(layer => ({ ...defaultLayer(layer.src ?? ''), ...layer }))
         );
         return state;
     }
 
-    /** Where a layer stands at server time `now`, in scene pixels along the scroll axis. */
+    /**
+     * Where a layer's tiling stands at server time `now`, in scene pixels.
+     * A negative master speed runs it backwards along the same angle.
+     */
     layerOffset(layer, now = game.time.serverTime, state = this.state) {
-        if (!state.playing) return layer.offset;
+        if (!state.playing) return { x: layer.offsetX, y: layer.offsetY };
         const elapsed = Math.max(0, now - state.anchorAt) / 1000;
-        return layer.offset + elapsed * state.masterSpeed * layer.speed;
+        const distance = elapsed * state.masterSpeed * layer.speed;
+        const dir = angleVector(state.angle);
+        return { x: layer.offsetX + dir.x * distance, y: layer.offsetY + dir.y * distance };
     }
 
     /** The current state with travel so far folded into each offset, anchored at now. */
     _rebase() {
         const now = game.time.serverTime;
         const state = foundry.utils.deepClone(this.state);
-        for (const layer of state.layers) layer.offset = this.layerOffset(layer, now);
+        for (const layer of state.layers) {
+            const { x, y } = this.layerOffset(layer, now);
+            layer.offsetX = x;
+            layer.offsetY = y;
+        }
         state.anchorAt = now;
         return state;
     }
@@ -219,12 +249,15 @@ class ParallaxManager {
     setMasterSpeed(speed) {
         const value = Number(speed);
         if (!Number.isFinite(value)) return;
-        return this._commit(s => { s.masterSpeed = Math.max(0, value); });
+        return this._commit(s => { s.masterSpeed = value; });
     }
 
-    setDirection(direction) {
-        if (!PARALLAX_DIRECTIONS[direction]) return;
-        return this._commit(s => { s.direction = direction; });
+    /** Set the scroll angle in degrees, or by name: 'left', 'right', 'up', 'down'. */
+    setAngle(angle) {
+        const preset = PARALLAX_DIRECTIONS[angle];
+        const value = preset ? preset.angle : Number(angle);
+        if (!Number.isFinite(value)) return;
+        return this._commit(s => { s.angle = normalizeAngle(value); });
     }
 
     addLayer(src) {
@@ -279,7 +312,12 @@ class ParallaxManager {
 
     /** Put every layer back at its starting position without changing anything else. */
     resetPositions() {
-        return this._commit(s => { for (const layer of s.layers) layer.offset = 0; });
+        return this._commit(s => {
+            for (const layer of s.layers) {
+                layer.offsetX = 0;
+                layer.offsetY = 0;
+            }
+        });
     }
 
     /**
@@ -416,7 +454,10 @@ class ParallaxManager {
     /** Size and place each layer from its settings. */
     _layout() {
         const rect = canvas.dimensions.sceneRect;
-        const horizontal = PARALLAX_DIRECTIONS[this.state.direction]?.y === 0;
+        // A band lies along whichever axis the scroll mostly follows. On a
+        // diagonal the image still drifts both ways inside the strip.
+        const dir = angleVector(this.state.angle);
+        const horizontal = Math.abs(dir.x) >= Math.abs(dir.y);
         for (const layer of this.state.layers) {
             const sprite = this.sprites.get(layer.id);
             if (!sprite) continue;
@@ -443,7 +484,6 @@ class ParallaxManager {
 
     _tick() {
         if (!this._isBuilt()) return;
-        const dir = PARALLAX_DIRECTIONS[this.state.direction] ?? PARALLAX_DIRECTIONS.left;
         const now = game.time.serverTime;
         for (const layer of this.state.layers) {
             const sprite = this.sprites.get(layer.id);
@@ -451,8 +491,8 @@ class ParallaxManager {
             const offset = this.layerOffset(layer, now);
             const scale = layer.scale > 0 ? layer.scale : 1;
             sprite.tilePosition.set(
-                wrap(dir.x * offset, sprite.texture.width * scale),
-                wrap(dir.y * offset, sprite.texture.height * scale)
+                wrap(offset.x, sprite.texture.width * scale),
+                wrap(offset.y, sprite.texture.height * scale)
             );
         }
     }
