@@ -262,7 +262,10 @@
 	"parallax.bandOffset": "Offset",
 	"parallax.bandOffsetHint": "Distance of the band from the top of the scene (or the left, when scrolling up or down), in pixels.",
 	"parallax.noLayers": "No layers yet. Add images back to front: sky first, nearest scenery last. Use transparent images for every layer but the back one.",
-	"parallax.noScene": "No scene is active."
+	"parallax.noScene": "No scene is active.",
+	"parallax.toggleOverhead": "Overhead: draw above tokens",
+	"parallax.tokenLine": "Tokens",
+	"parallax.tokenLineHint": "Layers above this line draw over tokens (clouds, smoke). Layers below draw under them. Moving a layer past the line moves it across."
 	}
 }
 

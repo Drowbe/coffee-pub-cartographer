@@ -58,8 +58,20 @@ function defaultLayer(src) {
         // horizon does. Off, the image tiles across the whole scene.
         band: false,
         bandOffset: 0,
+        // Overhead layers draw above tokens -- clouds, smoke, birds -- instead
+        // of beneath them with the ground.
+        overhead: false,
         offset: 0
     };
+}
+
+/**
+ * Keep every ground layer ahead of every overhead layer in the array, each
+ * group in its own order. The array is draw order, back to front, so the
+ * boundary between the two groups is the token line the window shows.
+ */
+function normalizeOrder(layers) {
+    return [...layers.filter(l => !l.overhead), ...layers.filter(l => l.overhead)];
 }
 
 /** Wrap a value into [0, size), so tile positions stay small however far we travel. */
@@ -70,7 +82,7 @@ function wrap(value, size) {
 
 class ParallaxManager {
     constructor() {
-        this.container = null;
+        this.containers = []; // [ground, overhead]
         this.sprites = new Map(); // layer id -> PIXI.TilingSprite
         this.state = defaultState();
         this.window = null;
@@ -159,7 +171,9 @@ class ParallaxManager {
     _readState(scene = canvas.scene) {
         const stored = scene?.getFlag(MODULE.ID, FLAG_KEY);
         const state = foundry.utils.mergeObject(defaultState(), stored ?? {}, { inplace: false });
-        state.layers = (stored?.layers ?? []).map(layer => ({ ...defaultLayer(layer.src ?? ''), ...layer }));
+        state.layers = normalizeOrder(
+            (stored?.layers ?? []).map(layer => ({ ...defaultLayer(layer.src ?? ''), ...layer }))
+        );
         return state;
     }
 
@@ -188,6 +202,7 @@ class ParallaxManager {
         if (!game.user.isGM || !canvas.scene) return;
         const state = this._rebase();
         mutate(state);
+        state.layers = normalizeOrder(state.layers);
         this.state = state;
         this._applyState();
         await canvas.scene.setFlag(MODULE.ID, FLAG_KEY, state);
@@ -221,14 +236,37 @@ class ParallaxManager {
         return this._commit(s => { s.layers = s.layers.filter(l => l.id !== id); });
     }
 
-    /** Move a layer one step nearer (+1) or farther (-1). Later layers draw on top. */
+    /**
+     * Move a layer one step nearer (+1) or farther (-1). Later layers draw on
+     * top. A step across the token line does not swap with the neighbour on
+     * the far side; it carries the layer over the line instead, so the nearest
+     * ground layer moved nearer becomes the farthest overhead one, and back.
+     */
     moveLayer(id, step) {
         return this._commit(s => {
             const from = s.layers.findIndex(l => l.id === id);
             const to = from + step;
-            if (from < 0 || to < 0 || to >= s.layers.length) return;
-            const [layer] = s.layers.splice(from, 1);
+            if (from < 0) return;
+            const layer = s.layers[from];
+            const neighbour = s.layers[to];
+            if (!layer.overhead && step > 0 && (!neighbour || neighbour.overhead)) {
+                layer.overhead = true;
+                return;
+            }
+            if (layer.overhead && step < 0 && (!neighbour || !neighbour.overhead)) {
+                layer.overhead = false;
+                return;
+            }
+            if (!neighbour) return;
+            s.layers.splice(from, 1);
             s.layers.splice(to, 0, layer);
+        });
+    }
+
+    toggleOverhead(id) {
+        return this._commit(s => {
+            const layer = s.layers.find(l => l.id === id);
+            if (layer) layer.overhead = !layer.overhead;
         });
     }
 
@@ -289,8 +327,8 @@ class ParallaxManager {
             return;
         }
 
-        const signature = layers.map(l => `${l.id}:${l.src}`).join('|');
-        if (signature !== this._signature || !this.container || this.container.destroyed) {
+        const signature = layers.map(l => `${l.id}:${l.src}:${l.overhead ? 1 : 0}`).join('|');
+        if (signature !== this._signature || !this._isBuilt()) {
             // A slower load from an earlier change must not overwrite a newer one.
             const token = ++this._drawToken;
             const textures = await Promise.all(layers.map(l =>
@@ -304,30 +342,41 @@ class ParallaxManager {
         this._tick();
     }
 
+    _isBuilt() {
+        return this.containers.length > 0 && this.containers.every(c => !c.destroyed);
+    }
+
     _build(layers, textures) {
         this._teardown({ keepSignature: true });
 
         const primary = canvas.primary;
         const background = primary.background;
-        const container = new PIXI.Container();
-        container.name = `${MODULE.ID}.parallax`;
-        // The primary group sorts by elevation, then layer, then sort. Sharing
-        // the scene background's elevation and layer and sorting just above it
-        // puts the parallax over the background image and beneath every tile,
+        const SORT_LAYERS = primary.constructor.SORT_LAYERS ?? { SCENE: 0, WEATHER: 1000 };
+
+        // The primary group sorts by elevation, then sortLayer, then sort.
+        //
+        // Ground layers share the scene background's elevation and layer and
+        // sort just above it: over the background image, beneath every tile,
         // so a vehicle tile drawn on top stays on top.
-        const SORT_LAYERS = primary.constructor.SORT_LAYERS ?? { SCENE: 0 };
-        container.elevation = background?.elevation ?? 0;
-        container.sortLayer = SORT_LAYERS.SCENE;
-        container.sort = (background?.sort ?? 0) + 1;
-        container.zIndex = (background?.zIndex ?? 0) + 1;
-        container.eventMode = 'none';
+        //
+        // Overhead layers sit where Foundry puts its own weather -- infinite
+        // elevation, so a token at any elevation is still beneath them -- one
+        // step under the weather layer, so rain and snow still fall over the
+        // clouds rather than behind them.
+        const ground = this._makeContainer('ground', {
+            elevation: background?.elevation ?? 0,
+            sortLayer: SORT_LAYERS.SCENE,
+            sort: (background?.sort ?? 0) + 1,
+            zIndex: (background?.zIndex ?? 0) + 1
+        });
+        const overhead = this._makeContainer('overhead', {
+            elevation: Infinity,
+            sortLayer: (SORT_LAYERS.WEATHER ?? 1000) - 1,
+            sort: 0,
+            zIndex: 0
+        });
 
         const rect = canvas.dimensions.sceneRect;
-        container.position.set(rect.x, rect.y);
-        const mask = new PIXI.Graphics().beginFill(0xffffff).drawRect(0, 0, rect.width, rect.height).endFill();
-        container.addChild(mask);
-        container.mask = mask;
-
         layers.forEach((layer, index) => {
             const texture = textures[index];
             if (!texture) {
@@ -335,16 +384,33 @@ class ParallaxManager {
                 return;
             }
             const sprite = new PIXI.TilingSprite(texture, rect.width, rect.height);
-            container.addChild(sprite);
+            (layer.overhead ? overhead : ground).addChild(sprite);
             this.sprites.set(layer.id, sprite);
         });
 
-        primary.addChild(container);
+        for (const container of [ground, overhead]) primary.addChild(container);
         primary.sortDirty = true;
-        this.container = container;
+        this.containers = [ground, overhead];
 
         this._ticker = this._tick;
         canvas.app.ticker.add(this._ticker);
+    }
+
+    _makeContainer(kind, { elevation, sortLayer, sort, zIndex }) {
+        const container = new PIXI.Container();
+        container.name = `${MODULE.ID}.parallax.${kind}`;
+        container.elevation = elevation;
+        container.sortLayer = sortLayer;
+        container.sort = sort;
+        container.zIndex = zIndex;
+        container.eventMode = 'none';
+
+        const rect = canvas.dimensions.sceneRect;
+        container.position.set(rect.x, rect.y);
+        const mask = new PIXI.Graphics().beginFill(0xffffff).drawRect(0, 0, rect.width, rect.height).endFill();
+        container.addChild(mask);
+        container.mask = mask;
+        return container;
     }
 
     /** Size and place each layer from its settings. */
@@ -376,7 +442,7 @@ class ParallaxManager {
     }
 
     _tick() {
-        if (!this.container || this.container.destroyed) return;
+        if (!this._isBuilt()) return;
         const dir = PARALLAX_DIRECTIONS[this.state.direction] ?? PARALLAX_DIRECTIONS.left;
         const now = game.time.serverTime;
         for (const layer of this.state.layers) {
@@ -396,11 +462,12 @@ class ParallaxManager {
         this._ticker = null;
         // Textures belong to Foundry's texture cache and are shared, so only
         // the display objects are destroyed.
-        if (this.container && !this.container.destroyed) {
-            this.container.parent?.removeChild(this.container);
-            this.container.destroy({ children: true, texture: false, baseTexture: false });
+        for (const container of this.containers) {
+            if (container.destroyed) continue;
+            container.parent?.removeChild(container);
+            container.destroy({ children: true, texture: false, baseTexture: false });
         }
-        this.container = null;
+        this.containers = [];
         this.sprites.clear();
         if (!keepSignature) this._signature = '';
     }

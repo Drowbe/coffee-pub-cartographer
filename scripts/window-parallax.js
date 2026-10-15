@@ -47,6 +47,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         'remove-layer': (_event, target, app) => void app.manager.removeLayer(target.dataset.layerId),
         'move-up': (_event, target, app) => void app.manager.moveLayer(target.dataset.layerId, 1),
         'move-down': (_event, target, app) => void app.manager.moveLayer(target.dataset.layerId, -1),
+        'toggle-overhead': (_event, target, app) => void app.manager.toggleOverhead(target.dataset.layerId),
         'toggle-visible': (_event, target, app) => {
             const layer = app._layer(target.dataset.layerId);
             if (layer) void app.manager.updateLayer(layer.id, { visible: !layer.visible });
@@ -89,18 +90,22 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const state = this.manager.state;
         const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
         // Listed nearest first, which is how a GM thinks about the stack, even
-        // though the state stores them back to front (the draw order).
+        // though the state stores them back to front (the draw order). The
+        // ends only stop a move at the very top and bottom: a step across the
+        // token line carries the layer over it (see ParallaxManager.moveLayer).
+        const last = state.layers.length - 1;
         const layers = state.layers.map((layer, index) => ({
             ...layer,
-            isFirst: index === state.layers.length - 1,
-            isLast: index === 0,
+            isFirst: index === last && layer.overhead,
+            isLast: index === 0 && !layer.overhead,
             isVideo: foundry.helpers.media.VideoHelper.hasVideoExtension(layer.src)
         })).reverse();
         const bodyContent = await foundry.applications.handlebars.renderTemplate(
             `modules/${MODULE.ID}/templates/window-parallax.hbs`,
             {
                 state,
-                layers,
+                overheadLayers: layers.filter(l => l.overhead),
+                groundLayers: layers.filter(l => !l.overhead),
                 hasLayers: layers.length > 0,
                 ranges: SLIDER_RANGES,
                 hasScene: !!canvas.scene

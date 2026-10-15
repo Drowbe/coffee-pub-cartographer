@@ -195,3 +195,30 @@
     text-align: center;
     color: var(--blacksmith-tool-text-muted);
 }
+
+/* --- Token line -------------------- */
+/* Everything listed above this line draws over the tokens; everything below
+   draws under them. A rule with the label sitting on it. */
+.cartographer-parallax-window .cartographer-parallax-token-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0;
+    color: var(--blacksmith-tool-accent);
+    font-size: 0.8em;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.cartographer-parallax-window .cartographer-parallax-token-line::before,
+.cartographer-parallax-window .cartographer-parallax-token-line::after {
+    content: "";
+    flex: 1 1 auto;
+    border-top: 2px dashed var(--blacksmith-tool-accent);
+    opacity: 0.6;
+}
+
+.cartographer-parallax-window .cartographer-parallax-layer.is-overhead {
+    border-style: dashed;
+}
