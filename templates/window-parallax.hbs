@@ -1,0 +1,82 @@
+{{! Styled from the --blacksmith-tool-* variables so it follows Light, Dark and
+    Glass. Sliders carry data-field (and data-layer-id for a layer); the window
+    previews on input and writes the scene on change. }}
+<div class="cartographer-parallax-root">
+    {{#unless hasScene}}
+    <div class="cartographer-parallax-empty">{{localize "coffee-pub-cartographer.parallax.noScene"}}</div>
+    {{else}}
+
+    <div class="cartographer-parallax-master">
+        <label class="cartographer-parallax-field">
+            <span class="cartographer-parallax-label"><i class="fa-solid fa-gauge-high"></i> {{localize "coffee-pub-cartographer.parallax.masterSpeed"}}</span>
+            <input type="range" data-field="masterSpeed" value="{{state.masterSpeed}}"
+                min="{{ranges.masterSpeed.min}}" max="{{ranges.masterSpeed.max}}" step="{{ranges.masterSpeed.step}}">
+            <span class="cartographer-parallax-value">{{state.masterSpeed}}</span>
+        </label>
+    </div>
+
+    {{#if hasLayers}}
+    <div class="cartographer-parallax-section-header">
+        <i class="fa-solid fa-layer-group"></i>
+        <span>{{localize "coffee-pub-cartographer.parallax.layersNearestFirst"}}</span>
+    </div>
+    <div class="cartographer-parallax-layers">
+        {{#each layers}}
+        <div class="cartographer-parallax-layer{{#unless visible}} is-hidden{{/unless}}">
+            <div class="cartographer-parallax-layer-header">
+                <button type="button" class="cartographer-parallax-thumb" data-action="replace-layer" data-layer-id="{{id}}"
+                    data-tooltip="{{localize "coffee-pub-cartographer.parallax.replaceImage"}}">
+                    {{#if isVideo}}<i class="fa-solid fa-film"></i>{{else}}<img src="{{src}}" alt="">{{/if}}
+                </button>
+                <span class="cartographer-parallax-layer-name" data-tooltip="{{src}}">{{name}}</span>
+                <div class="cartographer-parallax-layer-actions">
+                    <button type="button" class="cartographer-parallax-button{{#if visible}} is-active{{/if}}" data-action="toggle-visible" data-layer-id="{{id}}"
+                        data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleVisible"}}"><i class="fa-solid {{#if visible}}fa-eye{{else}}fa-eye-slash{{/if}}"></i></button>
+                    <button type="button" class="cartographer-parallax-button" data-action="move-up" data-layer-id="{{id}}" {{#if isFirst}}disabled{{/if}}
+                        data-tooltip="{{localize "coffee-pub-cartographer.parallax.moveNearer"}}"><i class="fa-solid fa-chevron-up"></i></button>
+                    <button type="button" class="cartographer-parallax-button" data-action="move-down" data-layer-id="{{id}}" {{#if isLast}}disabled{{/if}}
+                        data-tooltip="{{localize "coffee-pub-cartographer.parallax.moveFarther"}}"><i class="fa-solid fa-chevron-down"></i></button>
+                    <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-layer" data-layer-id="{{id}}"
+                        data-tooltip="{{localize "coffee-pub-cartographer.parallax.removeLayer"}}"><i class="fa-solid fa-trash-can"></i></button>
+                </div>
+            </div>
+
+            <label class="cartographer-parallax-field">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.speed"}}</span>
+                <input type="range" data-field="speed" data-layer-id="{{id}}" value="{{speed}}"
+                    min="{{../ranges.speed.min}}" max="{{../ranges.speed.max}}" step="{{../ranges.speed.step}}">
+                <span class="cartographer-parallax-value">{{speed}}</span>
+            </label>
+            <label class="cartographer-parallax-field">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.opacity"}}</span>
+                <input type="range" data-field="alpha" data-layer-id="{{id}}" value="{{alpha}}"
+                    min="{{../ranges.alpha.min}}" max="{{../ranges.alpha.max}}" step="{{../ranges.alpha.step}}">
+                <span class="cartographer-parallax-value">{{alpha}}</span>
+            </label>
+            <label class="cartographer-parallax-field">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.scale"}}</span>
+                <input type="range" data-field="scale" data-layer-id="{{id}}" value="{{scale}}"
+                    min="{{../ranges.scale.min}}" max="{{../ranges.scale.max}}" step="{{../ranges.scale.step}}">
+                <span class="cartographer-parallax-value">{{scale}}</span>
+            </label>
+            <div class="cartographer-parallax-field cartographer-parallax-band">
+                <label class="cartographer-parallax-label" data-tooltip="{{localize "coffee-pub-cartographer.parallax.bandHint"}}">
+                    <input type="checkbox" data-field="band" data-layer-id="{{id}}" {{checked band}}>
+                    {{localize "coffee-pub-cartographer.parallax.band"}}
+                </label>
+                {{#if band}}
+                <label class="cartographer-parallax-band-offset" data-tooltip="{{localize "coffee-pub-cartographer.parallax.bandOffsetHint"}}">
+                    {{localize "coffee-pub-cartographer.parallax.bandOffset"}}
+                    <input type="number" data-field="bandOffset" data-layer-id="{{id}}" value="{{bandOffset}}" step="1">
+                </label>
+                {{/if}}
+            </div>
+        </div>
+        {{/each}}
+    </div>
+    {{else}}
+    <div class="cartographer-parallax-empty">{{localize "coffee-pub-cartographer.parallax.noLayers"}}</div>
+    {{/if}}
+
+    {{/unless}}
+</div>

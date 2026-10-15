@@ -51,7 +51,8 @@
     "scripts/cartographer.js",
     "scripts/manager-toolbar.js",
     "scripts/manager-drawing.js",
-    "scripts/manager-mapping.js"
+    "scripts/manager-mapping.js",
+    "scripts/manager-parallax.js"
   ],
   "packs": [],
   

@@ -8,6 +8,7 @@ import { drawingTool } from './manager-drawing.js';
 import { cartographerToolbar } from './manager-toolbar.js';
 import { socketManager } from './manager-sockets.js';
 import { mappingManager } from './manager-mapping.js';
+import { parallaxManager } from './manager-parallax.js';
 
 // ================================================================== 
 // ===== BLACKSMITH API INTEGRATION =================================
@@ -149,6 +150,14 @@ Hooks.once('canvasReady', async () => {
         CartographerServices.MODULE = MODULE;
         CartographerServices.blacksmithAPI = await BlacksmithAPI.get();
         CartographerServices.canvasLayer = await BlacksmithAPI.getCanvasLayer();
+
+        // Parallax draws into Foundry's own primary canvas group, so unlike the
+        // other tools it does not need the Blacksmith layer.
+        try {
+            await parallaxManager.initialize();
+        } catch (error) {
+            console.error(`❌ ${MODULE.NAME}: Failed to initialize parallax tool:`, error);
+        }
         
         if (CartographerServices.canvasLayer) {
             console.log(`✅ ${MODULE.NAME}: Canvas Layer initialized`);
