@@ -34,6 +34,12 @@ const MASTER_SNAP = 0.1;
  * that every player receives.
  */
 const PREFS_KEY = `${MODULE.ID}.parallax.windowPrefs`;
+/** Setup mode's tabs, in the order they are offered. */
+const TABS = [
+    { id: 'movement', icon: 'fa-solid fa-gauge-high', labelKey: 'tabMovement' },
+    { id: 'layers', icon: 'fa-solid fa-layer-group', labelKey: 'tabLayers' },
+    { id: 'sets', icon: 'fa-solid fa-swatchbook', labelKey: 'tabSets' }
+];
 function readPrefs() {
     try {
         return JSON.parse(localStorage.getItem(PREFS_KEY)) ?? {};
@@ -79,6 +85,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         'reset-positions': (_event, _target, app) => void app.manager.resetPositions(),
         'set-direction': (_event, target, app) => void app.manager.setAngle(target.dataset.direction),
         'set-mode': (_event, target, app) => app.setMode(target.dataset.mode),
+        'set-tab': (_event, target, app) => app.setTab(target.dataset.tab),
         'toggle-collapse': (_event, target, app) => app.toggleCollapsed(target.dataset.layerId),
         'collapse-all': (_event, _target, app) => app.setAllCollapsed(true),
         'expand-all': (_event, _target, app) => app.setAllCollapsed(false),
@@ -108,6 +115,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         /** 'setup' builds the stack; 'control' is the trimmed panel for running it in play. */
         this.mode = prefs.mode === 'control' ? 'control' : 'setup';
         this.collapsed = new Set(prefs.collapsed ?? []);
+        this.tab = TABS.some(tab => tab.id === prefs.tab) ? prefs.tab : 'layers';
         this._onInput = this._onInput.bind(this);
         this._onChange = this._onChange.bind(this);
     }
@@ -180,13 +188,21 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     _savePrefs() {
         // Ids of layers since deleted are dropped, so the list cannot grow forever.
         const known = new Set(this.manager.state.layers.map(l => l.id));
-        writePrefs({ mode: this.mode, collapsed: [...this.collapsed].filter(id => known.has(id)) });
+        writePrefs({ mode: this.mode, tab: this.tab, collapsed: [...this.collapsed].filter(id => known.has(id)) });
     }
 
     setMode(mode) {
         this.mode = mode === 'control' ? 'control' : 'setup';
         this._savePrefs();
         // The two modes differ a lot in height; let the frame refit.
+        this.setPosition({ height: 'auto' });
+        return this.render();
+    }
+
+    setTab(tab) {
+        if (!TABS.some(entry => entry.id === tab) || tab === this.tab) return;
+        this.tab = tab;
+        this._savePrefs();
         this.setPosition({ height: 'auto' });
         return this.render();
     }
@@ -233,6 +249,9 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         // Control mode lists only what the active set can show; the rest is
         // not something to toggle mid-scene.
         const listed = isControl ? layers.filter(l => !l.outOfSet) : layers;
+        const layerCounts = new Map();
+        for (const layer of state.layers) layerCounts.set(layer.set, (layerCounts.get(layer.set) ?? 0) + 1);
+        const activeSet = state.sets.find(set => set.id === state.activeSet);
         const bodyContent = await foundry.applications.handlebars.renderTemplate(
             `modules/${MODULE.ID}/templates/window-parallax.hbs`,
             {
@@ -240,7 +259,23 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                 isControl,
                 masterLabel: formatMaster(state.masterSpeed),
                 reverseAngle: (state.angle + 180) % 360,
-                sets: state.sets.map(set => ({ ...set, active: set.id === state.activeSet })),
+                tab: this.tab,
+                tabs: TABS.map(tab => ({
+                    id: tab.id,
+                    icon: tab.icon,
+                    label: localize(tab.labelKey),
+                    active: tab.id === this.tab,
+                    count: tab.id === 'layers' ? state.layers.length : (tab.id === 'sets' ? state.sets.length : 0)
+                })),
+                directions: Object.entries(PARALLAX_DIRECTIONS).map(([id, dir]) => ({
+                    id,
+                    icon: dir.icon,
+                    label: localize(`direction.${id}`),
+                    active: state.angle === dir.angle
+                })),
+                allCollapsed: state.layers.length > 0 && state.layers.every(l => this.collapsed.has(l.id)),
+                sets: state.sets.map(set => ({ ...set, active: set.id === state.activeSet, layerCount: layerCounts.get(set.id) ?? 0 })),
+                commonCount: layerCounts.get(null) ?? 0,
                 hasSets: state.sets.length > 0,
                 activeSetId: state.activeSet,
                 overheadLayers: listed.filter(l => l.overhead),
@@ -255,15 +290,17 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             appId: this.id,
             bodyContent,
             showToolBar: true,
-            toolBarLeft: this._buildPlayControls(state, localize, isControl),
-            toolBarRight: (isControl ? '' : this._buildDirectionControls(state, localize)) + this._buildModeToggle(localize, isControl),
+            toolBarLeft: this._buildPlayControls(state, localize),
+            toolBarRight: this._buildModeToggle(localize, isControl),
             showToolFooter: true,
             toolFooterLeft: status,
-            toolFooterRight: isControl ? '' : this._buildSetupFooter(localize)
+            toolFooterRight: activeSet
+                ? `<span class="cartographer-parallax-status"><i class="fa-solid fa-swatchbook"></i> ${foundry.utils.escapeHTML(activeSet.name)}</span>`
+                : ''
         };
     }
 
-    _buildPlayControls(state, localize, isControl) {
+    _buildPlayControls(state, localize) {
         const play = this._button({
             action: 'toggle-play',
             icon: state.playing ? 'fa-solid fa-pause' : 'fa-solid fa-play',
@@ -276,53 +313,16 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             icon: 'fa-solid fa-stop',
             label: localize('stop')
         });
-        if (isControl) return play + stop;
-        return play + stop + this._button({
-            action: 'reset-positions',
-            icon: 'fa-solid fa-rotate-left',
-            label: localize('resetPositions')
-        });
-    }
-
-    /**
-     * In setup these are quick picks for the forward angle; the angle slider in
-     * the body sets anything between, and the master slider's sign reverses it.
-     */
-    _buildDirectionControls(state, localize) {
-        return Object.entries(PARALLAX_DIRECTIONS).map(([id, dir]) => this._button({
-            action: 'set-direction',
-            icon: dir.icon,
-            label: localize(`direction.${id}`),
-            className: state.angle === dir.angle ? 'is-active' : '',
-            dataset: { direction: id }
-        })).join('');
+        return play + stop;
     }
 
     _buildModeToggle(localize, isControl) {
-        return `<span class="cartographer-parallax-divider"></span>` + this._button({
+        return this._button({
             action: 'set-mode',
             icon: isControl ? 'fa-solid fa-sliders' : 'fa-solid fa-gamepad',
             label: localize(isControl ? 'modeSetupHint' : 'modeControlHint'),
             text: localize(isControl ? 'modeSetup' : 'modeControl'),
             dataset: { mode: isControl ? 'setup' : 'control' }
-        });
-    }
-
-    _buildSetupFooter(localize) {
-        const allCollapsed = this.manager.state.layers.length > 0
-            && this.manager.state.layers.every(l => this.collapsed.has(l.id));
-        const collapse = this.manager.state.layers.length
-            ? this._button({
-                action: allCollapsed ? 'expand-all' : 'collapse-all',
-                icon: allCollapsed ? 'fa-solid fa-angles-down' : 'fa-solid fa-angles-up',
-                label: localize(allCollapsed ? 'expandAll' : 'collapseAll')
-            })
-            : '';
-        return collapse + this._button({
-            action: 'add-layer',
-            icon: 'fa-solid fa-plus',
-            label: localize('addLayer'),
-            text: localize('addLayer')
         });
     }
 

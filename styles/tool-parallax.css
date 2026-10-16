@@ -47,6 +47,138 @@
     cursor: default;
 }
 
+/* --- Tabs -------------------------- */
+.cartographer-parallax-window .cartographer-parallax-tabs {
+    display: flex;
+    gap: 2px;
+    margin: -8px -8px 0;
+    padding: 0 8px;
+    border-bottom: 1px solid var(--blacksmith-tool-divider);
+}
+
+.cartographer-parallax-window .cartographer-parallax-tab {
+    display: inline-flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 8px;
+    margin: 0 0 -1px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--blacksmith-tool-text-muted);
+    cursor: pointer;
+}
+
+.cartographer-parallax-window .cartographer-parallax-tab:hover {
+    color: var(--blacksmith-tool-text);
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-parallax-window .cartographer-parallax-tab.is-active {
+    border-bottom-color: var(--blacksmith-tool-accent);
+    color: var(--blacksmith-tool-accent);
+    font-weight: bold;
+}
+
+.cartographer-parallax-window .cartographer-parallax-tab-count {
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--blacksmith-tool-surface-raised);
+    color: var(--blacksmith-tool-text-muted);
+    font-size: 0.75em;
+    font-weight: normal;
+    line-height: 16px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-panel-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-presets {
+    grid-template-columns: 90px 1fr;
+}
+
+.cartographer-parallax-window .cartographer-parallax-preset-buttons {
+    display: flex;
+    gap: 2px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-hint {
+    margin: 0;
+    color: var(--blacksmith-tool-text-muted);
+    font-size: 0.85em;
+}
+
+/* --- Sets tab ---------------------- */
+.cartographer-parallax-window .cartographer-parallax-set-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border: 1px solid var(--blacksmith-tool-divider);
+    border-radius: 4px;
+    background: var(--blacksmith-tool-surface-sunken);
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-row.is-active {
+    border-color: var(--blacksmith-tool-accent);
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-row.is-common {
+    border-style: dashed;
+    background: transparent;
+    color: var(--blacksmith-tool-text-muted);
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-icon {
+    width: 26px;
+    text-align: center;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: bold;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-row.is-common .cartographer-parallax-set-name {
+    font-weight: normal;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-count {
+    color: var(--blacksmith-tool-text-muted);
+    font-size: 0.85em;
+    font-variant-numeric: tabular-nums;
+}
+
 /* --- Status ------------------------ */
 .cartographer-parallax-window .cartographer-parallax-status {
     color: var(--blacksmith-tool-text-muted);
