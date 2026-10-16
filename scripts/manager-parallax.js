@@ -32,6 +32,22 @@ function normalizeAngle(angle) {
     return ((Math.round(Number(angle) || 0) % 360) + 360) % 360;
 }
 
+/** How long a scene takes to get up to speed, or to slow to a stop, by default. */
+const DEFAULT_EASE_SECONDS = 2;
+
+/**
+ * The ease used for every change of speed: smoothstep, gentle at both ends.
+ * Its integral is what turns an eased speed into a distance travelled, and
+ * having that in closed form is what lets every client compute the same
+ * position from the same few numbers instead of stepping frame by frame.
+ */
+function ease(u) {
+    return u * u * (3 - 2 * u);
+}
+function easeIntegral(u) {
+    return u * u * u - (u * u * u * u) / 2;
+}
+
 /** A new layer's speed, in scene pixels per second at a master speed of 1. */
 const DEFAULT_LAYER_SPEED = 60;
 
@@ -52,7 +68,16 @@ function defaultState() {
         masterSpeed: 1,
         angle: 180,
         anchorAt: 0,
-        layers: []
+        // How long a change of speed takes to arrive, in seconds. 0 is instant.
+        easeSeconds: DEFAULT_EASE_SECONDS,
+        // The master speed actually in effect at anchorAt, which the scroll
+        // eases from towards its target. Null means it was already there.
+        rampFrom: null,
+        layers: [],
+        // Named sets of layers -- Summer, Winter -- of which one shows at a
+        // time. A layer in no set always shows. See isLayerShown.
+        sets: [],
+        activeSet: null
     };
 }
 
@@ -70,6 +95,8 @@ function defaultLayer(src) {
         // horizon does. Off, the image tiles across the whole scene.
         band: false,
         bandOffset: 0,
+        // The set this layer belongs to, or null to show whichever set is active.
+        set: null,
         // Overhead layers draw above tokens -- clouds, smoke, birds -- instead
         // of beneath them with the ground.
         overhead: false,
@@ -175,6 +202,8 @@ class ParallaxManager {
             toggle: () => this.togglePlaying(),
             setSpeed: speed => this.setMasterSpeed(speed),
             setAngle: angle => this.setAngle(angle),
+            setSet: nameOrId => this.setActiveSet(nameOrId),
+            setEase: seconds => this.setEaseSeconds(seconds),
             open: () => this.openWindow(),
             get state() { return parallaxManager.state; }
         };
@@ -195,6 +224,11 @@ class ParallaxManager {
         state.layers = normalizeOrder(
             (stored?.layers ?? []).map(layer => ({ ...defaultLayer(layer.src ?? ''), ...layer }))
         );
+        state.sets = stored?.sets ?? [];
+        // A set deleted elsewhere leaves nothing for its layers to wait for.
+        const setIds = new Set(state.sets.map(set => set.id));
+        if (!setIds.has(state.activeSet)) state.activeSet = state.sets[0]?.id ?? null;
+        for (const layer of state.layers) if (!setIds.has(layer.set)) layer.set = null;
         return state;
     }
 
@@ -203,11 +237,43 @@ class ParallaxManager {
      * A negative master speed runs it backwards along the same angle.
      */
     layerOffset(layer, now = game.time.serverTime, state = this.state) {
-        if (!state.playing) return { x: layer.offsetX, y: layer.offsetY };
-        const elapsed = Math.max(0, now - state.anchorAt) / 1000;
-        const distance = elapsed * state.masterSpeed * layer.speed;
+        const distance = this._masterTravel(state, now) * layer.speed;
+        if (distance === 0) return { x: layer.offsetX, y: layer.offsetY };
         const dir = angleVector(state.angle);
         return { x: layer.offsetX + dir.x * distance, y: layer.offsetY + dir.y * distance };
+    }
+
+    /** The master speed the scene is heading for: its setting while playing, zero while paused. */
+    _targetSpeed(state) {
+        return state.playing ? state.masterSpeed : 0;
+    }
+
+    /** The master speed actually in effect at `now`, partway through any ease. */
+    effectiveSpeed(state = this.state, now = game.time.serverTime) {
+        const target = this._targetSpeed(state);
+        const from = state.rampFrom ?? target;
+        const duration = Math.max(0, Number(state.easeSeconds) || 0);
+        const elapsed = Math.max(0, now - state.anchorAt) / 1000;
+        if (duration === 0 || elapsed >= duration) return target;
+        return from + (target - from) * ease(elapsed / duration);
+    }
+
+    /**
+     * How far a layer of speed 1 has moved since anchorAt: the eased master
+     * speed integrated over the time elapsed. During the ease it is the area
+     * under the curve; after it, that plus steady travel at the target.
+     */
+    _masterTravel(state, now) {
+        const target = this._targetSpeed(state);
+        const from = state.rampFrom ?? target;
+        const duration = Math.max(0, Number(state.easeSeconds) || 0);
+        const elapsed = Math.max(0, now - state.anchorAt) / 1000;
+        if (duration === 0 || from === target) return elapsed * target;
+        if (elapsed < duration) {
+            const u = elapsed / duration;
+            return duration * (from * u + (target - from) * easeIntegral(u));
+        }
+        return duration * (from + (target - from) / 2) + (elapsed - duration) * target;
     }
 
     /** The current state with travel so far folded into each offset, anchored at now. */
@@ -219,6 +285,9 @@ class ParallaxManager {
             layer.offsetX = x;
             layer.offsetY = y;
         }
+        // Whatever changes next eases from the speed in effect right now, so a
+        // change made halfway through an ease carries on from where it was.
+        state.rampFrom = this.effectiveSpeed(this.state, now);
         state.anchorAt = now;
         return state;
     }
@@ -252,6 +321,13 @@ class ParallaxManager {
         return this._commit(s => { s.masterSpeed = value; });
     }
 
+    /** How long changes of speed take, in seconds. 0 makes them instant. */
+    setEaseSeconds(seconds) {
+        const value = Number(seconds);
+        if (!Number.isFinite(value)) return;
+        return this._commit(s => { s.easeSeconds = Math.max(0, value); });
+    }
+
     /** Set the scroll angle in degrees, or by name: 'left', 'right', 'up', 'down'. */
     setAngle(angle) {
         const preset = PARALLAX_DIRECTIONS[angle];
@@ -267,6 +343,71 @@ class ParallaxManager {
 
     removeLayer(id) {
         return this._commit(s => { s.layers = s.layers.filter(l => l.id !== id); });
+    }
+
+    // ==================================================================
+    // ===== SETS =======================================================
+    // ==================================================================
+
+    /**
+     * Whether a layer is part of what is showing. Its own eye toggle aside, a
+     * layer shows when it belongs to no set (it is common to all of them) or
+     * to the active one.
+     */
+    isLayerShown(layer, state = this.state) {
+        return !!layer.visible && (!layer.set || layer.set === state.activeSet);
+    }
+
+    _findSet(state, nameOrId) {
+        if (!nameOrId) return null;
+        const key = String(nameOrId).toLowerCase();
+        return state.sets.find(set => set.id === nameOrId)
+            ?? state.sets.find(set => set.name.toLowerCase() === key)
+            ?? null;
+    }
+
+    /** Add a set and make it the active one, since the next thing a GM does is fill it. */
+    addSet(name) {
+        const label = String(name ?? '').trim();
+        if (!label) return;
+        return this._commit(s => {
+            const set = { id: foundry.utils.randomID(), name: label };
+            s.sets.push(set);
+            s.activeSet = set.id;
+        });
+    }
+
+    renameSet(id, name) {
+        const label = String(name ?? '').trim();
+        if (!label) return;
+        return this._commit(s => {
+            const set = s.sets.find(entry => entry.id === id);
+            if (set) set.name = label;
+        });
+    }
+
+    /** Remove a set. Its layers are kept and become common to every set. */
+    removeSet(id) {
+        return this._commit(s => {
+            s.sets = s.sets.filter(set => set.id !== id);
+            for (const layer of s.layers) if (layer.set === id) layer.set = null;
+            if (s.activeSet === id) s.activeSet = s.sets[0]?.id ?? null;
+        });
+    }
+
+    /** Switch the showing set, by id or by name (for macros). */
+    setActiveSet(nameOrId) {
+        const set = this._findSet(this.state, nameOrId);
+        if (!set) return;
+        return this._commit(s => { s.activeSet = set.id; });
+    }
+
+    setLayerSet(layerId, setId) {
+        return this._commit(s => {
+            const layer = s.layers.find(l => l.id === layerId);
+            if (!layer) return;
+            layer.set = s.sets.some(set => set.id === setId) ? setId : null;
+        });
     }
 
     /**
@@ -464,7 +605,7 @@ class ParallaxManager {
             const scale = layer.scale > 0 ? layer.scale : 1;
             sprite.tileScale.set(scale);
             sprite.alpha = layer.alpha;
-            sprite.visible = layer.visible;
+            sprite.visible = this.isLayerShown(layer);
             const tex = sprite.texture;
             if (layer.band && horizontal) {
                 sprite.width = rect.width;

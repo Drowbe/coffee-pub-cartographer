@@ -20,6 +20,7 @@ const APP_ID = `${MODULE.ID}-parallax`;
 const SLIDER_RANGES = {
     masterSpeed: { min: -4, max: 4, step: 0.05 },
     angle: { min: 0, max: 359, step: 1 },
+    easeSeconds: { min: 0, max: 10, step: 0.5 },
     speed: { min: 0, max: 600, step: 5 },
     alpha: { min: 0, max: 1, step: 0.05 },
     scale: { min: 0.1, max: 4, step: 0.05 }
@@ -89,6 +90,10 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         'remove-layer': (_event, target, app) => void app.manager.removeLayer(target.dataset.layerId),
         'move-up': (_event, target, app) => void app.manager.moveLayer(target.dataset.layerId, 1),
         'move-down': (_event, target, app) => void app.manager.moveLayer(target.dataset.layerId, -1),
+        'select-set': (_event, target, app) => void app.manager.setActiveSet(target.dataset.setId),
+        'add-set': (_event, _target, app) => app.promptAddSet(),
+        'rename-set': (_event, target, app) => app.promptRenameSet(target.dataset.setId),
+        'remove-set': (_event, target, app) => app.confirmRemoveSet(target.dataset.setId),
         'toggle-overhead': (_event, target, app) => void app.manager.toggleOverhead(target.dataset.layerId),
         'toggle-visible': (_event, target, app) => {
             const layer = app._layer(target.dataset.layerId);
@@ -126,6 +131,46 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     pickImage(callback, current = '') {
         const FilePicker = foundry.applications.apps.FilePicker.implementation;
         new FilePicker({ type: 'imagevideo', current, callback }).browse();
+    }
+
+    // ==================================================================
+    // ===== SETS =======================================================
+    // ==================================================================
+
+    async _promptName(titleKey, value = '') {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const safe = foundry.utils.escapeHTML(value);
+        const placeholder = foundry.utils.escapeHTML(localize('setNamePlaceholder'));
+        return foundry.applications.api.DialogV2.prompt({
+            window: { title: localize(titleKey) },
+            content: `<input type="text" name="name" value="${safe}" placeholder="${placeholder}" autofocus>`,
+            ok: { callback: (_event, button) => button.form.elements.name.value },
+            rejectClose: false
+        });
+    }
+
+    async promptAddSet() {
+        const name = await this._promptName('addSet');
+        if (name) await this.manager.addSet(name);
+    }
+
+    async promptRenameSet(id) {
+        const set = this.manager.state.sets.find(entry => entry.id === id);
+        if (!set) return;
+        const name = await this._promptName('renameSet', set.name);
+        if (name) await this.manager.renameSet(id, name);
+    }
+
+    async confirmRemoveSet(id) {
+        const set = this.manager.state.sets.find(entry => entry.id === id);
+        if (!set) return;
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const confirmed = await foundry.applications.api.DialogV2.confirm({
+            window: { title: localize('removeSet') },
+            content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.parallax.removeSetConfirm`, { name: set.name }))}</p>`,
+            rejectClose: false
+        });
+        if (confirmed) await this.manager.removeSet(id);
     }
 
     // ==================================================================
@@ -172,13 +217,22 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         // ends only stop a move at the very top and bottom: a step across the
         // token line carries the layer over it (see ParallaxManager.moveLayer).
         const last = state.layers.length - 1;
+        const setNames = new Map(state.sets.map(set => [set.id, set.name]));
         const layers = state.layers.map((layer, index) => ({
             ...layer,
             isFirst: index === last && layer.overhead,
             isLast: index === 0 && !layer.overhead,
             collapsed: this.collapsed.has(layer.id),
-            isVideo: foundry.helpers.media.VideoHelper.hasVideoExtension(layer.src)
+            isVideo: foundry.helpers.media.VideoHelper.hasVideoExtension(layer.src),
+            setName: setNames.get(layer.set) ?? null,
+            // In another set than the one showing: kept editable in setup,
+            // dimmed so it is plain it is not on the canvas right now.
+            outOfSet: !!layer.set && layer.set !== state.activeSet,
+            setOptions: state.sets.map(set => ({ id: set.id, name: set.name, selected: set.id === layer.set }))
         })).reverse();
+        // Control mode lists only what the active set can show; the rest is
+        // not something to toggle mid-scene.
+        const listed = isControl ? layers.filter(l => !l.outOfSet) : layers;
         const bodyContent = await foundry.applications.handlebars.renderTemplate(
             `modules/${MODULE.ID}/templates/window-parallax.hbs`,
             {
@@ -186,9 +240,12 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                 isControl,
                 masterLabel: formatMaster(state.masterSpeed),
                 reverseAngle: (state.angle + 180) % 360,
-                overheadLayers: layers.filter(l => l.overhead),
-                groundLayers: layers.filter(l => !l.overhead),
-                hasLayers: layers.length > 0,
+                sets: state.sets.map(set => ({ ...set, active: set.id === state.activeSet })),
+                hasSets: state.sets.length > 0,
+                activeSetId: state.activeSet,
+                overheadLayers: listed.filter(l => l.overhead),
+                groundLayers: listed.filter(l => !l.overhead),
+                hasLayers: listed.length > 0,
                 ranges: SLIDER_RANGES,
                 hasScene: !!canvas.scene
             }
@@ -299,6 +356,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     _readInput(target) {
         const field = target.dataset.field;
         if (!field) return null;
+        if (target.tagName === 'SELECT') return { field, value: target.value || null, layerId: target.dataset.layerId ?? null };
         let value = target.type === 'checkbox' ? target.checked : Number(target.value);
         if (typeof value === 'number' && !Number.isFinite(value)) return null;
         if (field === 'masterSpeed' && Math.abs(value) < MASTER_SNAP) value = 0;
@@ -307,7 +365,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
 
     _onInput(event) {
         const input = this._readInput(event.target);
-        if (!input || event.target.type === 'checkbox') return;
+        if (!input || event.target.type === 'checkbox' || event.target.tagName === 'SELECT') return;
         const readout = event.target.closest('.cartographer-parallax-field')
             ?.querySelector('.cartographer-parallax-value');
         if (readout) readout.textContent = this._formatReadout(input);
@@ -316,6 +374,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
 
     _formatReadout({ field, value }) {
         if (field === 'masterSpeed') return formatMaster(value);
+        if (field === 'easeSeconds') return `${value}s`;
         if (field === 'angle') {
             this._turnArrows(value);
             return `${value}°`;
@@ -334,9 +393,11 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     _onChange(event) {
         const input = this._readInput(event.target);
         if (!input) return;
-        if (input.layerId) void this.manager.updateLayer(input.layerId, { [input.field]: input.value });
+        if (input.layerId && input.field === 'set') void this.manager.setLayerSet(input.layerId, input.value);
+        else if (input.layerId) void this.manager.updateLayer(input.layerId, { [input.field]: input.value });
         else if (input.field === 'masterSpeed') void this.manager.setMasterSpeed(input.value);
         else if (input.field === 'angle') void this.manager.setAngle(input.value);
+        else if (input.field === 'easeSeconds') void this.manager.setEaseSeconds(input.value);
     }
 
     _assign(state, { field, value, layerId }) {

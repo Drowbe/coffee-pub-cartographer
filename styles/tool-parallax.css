@@ -302,6 +302,96 @@
     height: 24px;
 }
 
+/* --- Sets ------------------------- */
+.cartographer-parallax-window .cartographer-parallax-sets {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-chips {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-chip {
+    height: 24px;
+    padding: 0 10px;
+    margin: 0;
+    border: 1px solid var(--blacksmith-tool-divider);
+    border-radius: 12px;
+    background: transparent;
+    color: var(--blacksmith-tool-text);
+    line-height: 22px;
+    cursor: pointer;
+    width: auto;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-chip:hover {
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-chip.is-active {
+    border-color: var(--blacksmith-tool-accent);
+    background: var(--blacksmith-tool-surface-selected);
+    color: var(--blacksmith-tool-accent);
+    font-weight: bold;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-actions {
+    display: flex;
+    gap: 2px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-add-set {
+    align-self: flex-start;
+    width: auto;
+    height: 24px;
+    padding: 0 8px;
+    margin: 0;
+    border: 1px dashed var(--blacksmith-tool-divider);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--blacksmith-tool-text-muted);
+    line-height: 22px;
+    cursor: pointer;
+}
+
+.cartographer-parallax-window .cartographer-parallax-add-set:hover {
+    color: var(--blacksmith-tool-text);
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-badge {
+    margin-left: 4px;
+    padding: 0 6px;
+    border-radius: 8px;
+    background: var(--blacksmith-tool-surface-raised);
+    color: var(--blacksmith-tool-text-muted);
+    font-size: 0.75em;
+    font-weight: normal;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-field select {
+    width: 100%;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-field {
+    grid-template-columns: 90px 1fr;
+}
+
+/* A layer in a set that is not showing: still editable, plainly off-canvas. */
+.cartographer-parallax-window .cartographer-parallax-layer.is-out-of-set {
+    opacity: 0.55;
+}
+
+.cartographer-parallax-window .cartographer-parallax-layer.is-out-of-set:hover {
+    opacity: 1;
+}
+
 /* --- Control mode ------------------ */
 .cartographer-parallax-window .cartographer-parallax-control-layers {
     display: flex;
