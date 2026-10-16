@@ -15,38 +15,50 @@
  *
  * A texture without mipmaps has nothing to drop to, so the seam disappears.
  * Foundry's own texture cannot be changed -- the same image may be a tile or a
- * background elsewhere, which want their mipmaps -- so a second texture is
- * made over the same loaded image, and repeats use that. The image itself is
- * not loaded twice.
+ * background elsewhere, which want their mipmaps -- so repeats draw from a
+ * copy without them.
+ *
+ * The copy is made by drawing Foundry's texture into a render texture once,
+ * through PIXI's ordinary pipeline. An earlier version built a second texture
+ * straight from the loaded image instead, and got the image's alpha handling
+ * wrong: soft transparent edges came out brighter than they should, so
+ * branches and other cut-out art looked as if they glowed. Drawing it means
+ * the copy holds exactly what Foundry would draw.
+ *
+ * A video cannot be copied this way -- the copy would be one frozen frame --
+ * so a video keeps Foundry's own texture, seam and all.
  */
 
-/** Foundry's texture -> the mipmap-free twin made for it. */
-const twins = new Map();
+/** Foundry's base texture -> the render-texture copy made from it. */
+const copies = new Map();
 
 export function repeatingTexture(texture) {
     const base = texture?.baseTexture;
-    if (!base || base.mipmap === PIXI.MIPMAP_MODES.OFF) return texture;
-    const existing = twins.get(base);
-    if (existing && !existing.baseTexture.destroyed) return existing;
-    const source = base.resource?.source;
-    if (!source) return texture;
-    const twinBase = new PIXI.BaseTexture(source, {
-        mipmap: PIXI.MIPMAP_MODES.OFF,
-        scaleMode: base.scaleMode,
-        alphaMode: base.alphaMode,
-        resolution: base.resolution
+    if (!base?.valid || base.mipmap === PIXI.MIPMAP_MODES.OFF) return texture;
+    if (base.resource instanceof PIXI.VideoResource) return texture;
+    const renderer = canvas?.app?.renderer;
+    if (!renderer) return texture;
+    const existing = copies.get(base);
+    if (existing && !existing.destroyed) return existing;
+
+    const copy = PIXI.RenderTexture.create({
+        width: texture.width,
+        height: texture.height,
+        resolution: base.resolution,
+        scaleMode: base.scaleMode
     });
-    const twin = new PIXI.Texture(twinBase);
-    twins.set(base, twin);
-    return twin;
+    copy.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+    const sprite = new PIXI.Sprite(texture);
+    renderer.render(sprite, { renderTexture: copy, clear: true });
+    sprite.destroy({ texture: false, baseTexture: false });
+    copies.set(base, copy);
+    return copy;
 }
 
-/**
- * Free the twins' GPU memory when the canvas goes away. They are disposed
- * rather than destroyed: destroying would destroy their resource too, and for
- * a video that pauses and unloads the very element Foundry is still playing.
- */
+/** Free the copies when the canvas goes away. They are ours alone, so they are destroyed outright. */
 export function releaseRepeatingTextures() {
-    for (const twin of twins.values()) twin.baseTexture.dispose();
-    twins.clear();
+    for (const copy of copies.values()) {
+        if (!copy.destroyed) copy.destroy(true);
+    }
+    copies.clear();
 }

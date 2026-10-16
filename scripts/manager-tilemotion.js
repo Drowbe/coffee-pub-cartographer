@@ -7,6 +7,7 @@ import {
     angleVector,
     defaultMotion,
     motionSpeed,
+    motionTickerPriority,
     motionTravel,
     rebaseMotion,
     wrap
@@ -272,7 +273,7 @@ class TileMotionManager {
         }
         if (this.configs.size && !this._ticker) {
             this._ticker = this._tick;
-            canvas.app.ticker.add(this._ticker);
+            canvas.app.ticker.add(this._ticker, undefined, motionTickerPriority());
         } else if (!this.configs.size && this._ticker) {
             canvas.app.ticker.remove(this._ticker);
             this._ticker = null;
@@ -282,8 +283,9 @@ class TileMotionManager {
 
     /**
      * Runs every frame, after Foundry has applied its own refreshes to the
-     * tiles (those run at a higher ticker priority), so a refresh that resets
-     * a tile's transform is overridden before the frame is drawn.
+     * tiles, so a refresh that resets a tile's transform is overridden before
+     * the frame is drawn, and before Foundry's primary and perception updates,
+     * so those see where the tile is now. See motionTickerPriority.
      */
     _tick() {
         if (!canvas?.ready) return;

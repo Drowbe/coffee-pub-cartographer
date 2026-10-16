@@ -93,6 +93,25 @@ export function rebaseMotion(motion, now) {
     return { ...motion, rampFrom: motionSpeed(motion, now), anchorAt: now };
 }
 
+/**
+ * When in each frame Cartographer moves things. Foundry's canvas ticker runs,
+ * highest first: its placeable refreshes (OBJECTS, HIGH - 2), then the
+ * primary group update (PRIMARY, NORMAL + 3: draw order and the depth mask),
+ * then perception (PERCEPTION, NORMAL + 2: vision and lighting), then PIXI's
+ * render (LOW).
+ *
+ * Moving at the default NORMAL put us after PRIMARY and PERCEPTION, so those
+ * always worked from where things stood a frame earlier while the render drew
+ * where they stand now -- a mismatch that shows on moving art as a faint fringe
+ * along the trailing edge, flipping sides when the direction does. Running at
+ * NORMAL + 4 moves everything before them, and still after OBJECTS, which a
+ * spinning tile has to follow so a Foundry refresh of its transform is
+ * overridden in the same frame.
+ */
+export function motionTickerPriority() {
+    return PIXI.UPDATE_PRIORITY.NORMAL + 4;
+}
+
 /** The unit vector for an angle in degrees: 0 is right, 90 down. */
 export function angleVector(angle) {
     const radians = (Number(angle) || 0) * Math.PI / 180;

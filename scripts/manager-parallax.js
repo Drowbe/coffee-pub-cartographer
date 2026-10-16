@@ -6,7 +6,7 @@ import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
 import { tileMotionManager } from './manager-tilemotion.js';
 import { releaseRepeatingTextures, repeatingTexture } from './utils-textures.js';
-import { angleVector, DEFAULT_EASE_SECONDS, easeProgress, motionSpeed, motionTravel, wrap } from './utils-motion.js';
+import { angleVector, DEFAULT_EASE_SECONDS, easeProgress, motionSpeed, motionTickerPriority, motionTravel, wrap } from './utils-motion.js';
 
 const FLAG_KEY = 'parallax';
 const TOOL_ID = `${MODULE.ID}-parallax`;
@@ -685,7 +685,7 @@ class ParallaxManager {
         this.containers = [ground, overhead];
 
         this._ticker = this._tick;
-        canvas.app.ticker.add(this._ticker);
+        canvas.app.ticker.add(this._ticker, undefined, motionTickerPriority());
     }
 
     _makeContainer(kind, { elevation, sortLayer, sort, zIndex }) {
