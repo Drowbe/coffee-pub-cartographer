@@ -33,13 +33,16 @@
     background: var(--blacksmith-tool-surface-hover);
 }
 
+/* "On" and "selected" use the house orange, not --blacksmith-tool-accent:
+   that accent is near-black under Light and cream under Glass, so it cannot
+   carry state. Same rule as Blacksmith's window-tool.css and window-rest.css. */
 .cartographer-parallax-window .cartographer-parallax-button.is-active {
     background: var(--blacksmith-tool-surface-selected);
-    color: var(--blacksmith-tool-accent);
+    color: var(--blacksmith-color-brand-accent);
 }
 
 .cartographer-parallax-window .cartographer-parallax-button.is-danger:hover:not(:disabled) {
-    color: #c9412d;
+    color: var(--blacksmith-status-danger);
 }
 
 .cartographer-parallax-window .cartographer-parallax-button:disabled {
@@ -79,8 +82,8 @@
 }
 
 .cartographer-parallax-window .cartographer-parallax-tab.is-active {
-    border-bottom-color: var(--blacksmith-tool-accent);
-    color: var(--blacksmith-tool-accent);
+    border-bottom-color: var(--blacksmith-color-brand-accent);
+    color: var(--blacksmith-tool-text);
     font-weight: bold;
 }
 
@@ -145,19 +148,78 @@
     background: var(--blacksmith-tool-surface-sunken);
 }
 
+/* A set and, when opened out, its layers beneath it. */
+.cartographer-parallax-window .cartographer-parallax-set {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-members {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-left: 26px;
+    padding: 2px 0 4px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-member {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-member:hover {
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-member .cartographer-parallax-layer-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: normal;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-member.is-off .cartographer-parallax-layer-name {
+    color: var(--blacksmith-tool-text-muted);
+    text-decoration: line-through;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-member-thumb {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 32px;
+    height: 20px;
+    border-radius: 3px;
+    background: repeating-conic-gradient(rgba(128, 128, 128, 0.25) 0 25%, transparent 0 50%) 0 0 / 8px 8px;
+    overflow: hidden;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-member-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border: none;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-member.is-off .cartographer-parallax-set-member-thumb {
+    opacity: 0.4;
+}
+
 .cartographer-parallax-window .cartographer-parallax-set-row.is-active {
-    border-color: var(--blacksmith-tool-accent);
+    border-color: var(--blacksmith-color-brand-accent);
 }
 
 .cartographer-parallax-window .cartographer-parallax-set-row.is-common {
     border-style: dashed;
     background: transparent;
     color: var(--blacksmith-tool-text-muted);
-}
-
-.cartographer-parallax-window .cartographer-parallax-set-icon {
-    width: 26px;
-    text-align: center;
 }
 
 .cartographer-parallax-window .cartographer-parallax-set-name {
@@ -179,19 +241,153 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* --- Status ------------------------ */
-.cartographer-parallax-window .cartographer-parallax-status {
-    color: var(--blacksmith-tool-text-muted);
-    font-size: 0.85em;
+/* --- Set dialog -------------------- */
+/* The add/edit set dialog is its own Foundry dialog, outside the tool window,
+   so it is scoped by its own class and uses Foundry's colours. */
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
-.cartographer-parallax-window .cartographer-parallax-status i {
-    font-size: 0.7em;
-    margin-right: 4px;
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-field {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    align-items: center;
+    gap: 8px;
 }
 
-.cartographer-parallax-window .cartographer-parallax-status.is-playing i {
-    color: #4caf50;
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-head {
+    display: flex;
+    justify-content: space-between;
+    font-weight: bold;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-bulk {
+    font-weight: normal;
+    font-size: 0.9em;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-bulk a {
+    cursor: pointer;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-row:hover {
+    background: rgba(128, 128, 128, 0.15);
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-row input {
+    margin: 0;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-thumb {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 24px;
+    border-radius: 3px;
+    background: repeating-conic-gradient(rgba(128, 128, 128, 0.25) 0 25%, transparent 0 50%) 0 0 / 8px 8px;
+    overflow: hidden;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border: none;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0;
+    font-size: 0.8em;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.8;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-line::before,
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-line::after {
+    content: "";
+    flex: 1 1 auto;
+    border-top: 2px dashed currentColor;
+    opacity: 0.5;
+}
+
+.cartographer-parallax-set-dialog .cartographer-parallax-set-dialog-empty {
+    margin: 0;
+    opacity: 0.7;
+}
+
+/* --- Control bar ------------------- */
+/* The bar is the whole window with settings hidden, so the speed slider takes
+   whatever width is left after Play/Stop, the set and the gear. */
+.cartographer-parallax-window .blacksmith-window-tool-bar-left {
+    flex: 1 1 auto;
+}
+
+/* Also a .cartographer-parallax-field (so the slider readout updates), whose
+   grid is declared later; the doubled class keeps this one in charge. */
+.cartographer-parallax-window .cartographer-parallax-field.cartographer-parallax-bar-speed {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 6px;
+    min-width: 120px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-bar-speed input[type="range"] {
+    flex: 1 1 auto;
+    min-width: 60px;
+    margin: 0;
+}
+
+.cartographer-parallax-window .cartographer-parallax-bar-speed .cartographer-parallax-value {
+    min-width: 44px;
+    font-weight: bold;
+}
+
+.cartographer-parallax-window .cartographer-parallax-set-select {
+    max-width: 130px;
+    height: 24px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-bar-speed.is-disabled {
+    opacity: 0.4;
+}
+
+.cartographer-parallax-window.is-settings-closed .blacksmith-window-tool-body {
+    display: none;
 }
 
 /* --- Fields ------------------------ */
@@ -216,17 +412,6 @@
 .cartographer-parallax-window .cartographer-parallax-value {
     text-align: right;
     font-variant-numeric: tabular-nums;
-}
-
-.cartographer-parallax-window .cartographer-parallax-master {
-    padding: 8px;
-    border-radius: 4px;
-    background: var(--blacksmith-tool-surface-raised);
-}
-
-.cartographer-parallax-window .cartographer-parallax-master .cartographer-parallax-label {
-    color: var(--blacksmith-tool-text);
-    font-weight: bold;
 }
 
 /* --- Layers ------------------------ */
@@ -300,26 +485,85 @@
     gap: 2px;
 }
 
-.cartographer-parallax-window .cartographer-parallax-band {
-    grid-template-columns: auto 1fr;
+/* --- Start X / Y ------------------- */
+.cartographer-parallax-window .cartographer-parallax-start {
+    grid-template-columns: 90px 1fr;
 }
 
-.cartographer-parallax-window .cartographer-parallax-band .cartographer-parallax-label {
+.cartographer-parallax-window .cartographer-parallax-xy {
     display: flex;
+    gap: 8px;
+    max-width: 220px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-xy label {
+    display: flex;
+    flex: 1 1 0;
     align-items: center;
     gap: 4px;
-}
-
-.cartographer-parallax-window .cartographer-parallax-band-offset {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 6px;
+    min-width: 0;
     color: var(--blacksmith-tool-text-muted);
 }
 
-.cartographer-parallax-window .cartographer-parallax-band-offset input {
-    width: 70px;
+.cartographer-parallax-window .cartographer-parallax-xy input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 22px;
+    text-align: right;
+}
+
+/* --- Repeat (Tile / Band) ---------- */
+/* Same three columns as the sliders: label, control, value. Blacksmith has no
+   segmented control in its shared vocabulary, so this is built from the
+   shell's tokens, as its Rest window does for the same kind of choice. */
+.cartographer-parallax-window .cartographer-parallax-repeat {
+    grid-template-columns: 90px 1fr 56px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-segmented {
+    display: flex;
+    max-width: 180px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-segment {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 22px;
+    padding: 0 8px;
+    margin: 0;
+    border: 1px solid var(--blacksmith-tool-border);
+    border-radius: 0;
+    background: transparent;
+    color: var(--blacksmith-tool-text-muted);
+    font-size: 0.9em;
+    line-height: 20px;
+    cursor: pointer;
+}
+
+.cartographer-parallax-window .cartographer-parallax-segment:first-child {
+    border-radius: 3px 0 0 3px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-segment:last-child {
+    border-left: none;
+    border-radius: 0 3px 3px 0;
+}
+
+.cartographer-parallax-window .cartographer-parallax-segment:hover {
+    background: var(--blacksmith-tool-surface-hover);
+    color: var(--blacksmith-tool-text);
+}
+
+.cartographer-parallax-window .cartographer-parallax-segment.is-active {
+    background: var(--blacksmith-tool-surface-selected);
+    color: var(--blacksmith-tool-text);
+    box-shadow: inset 0 0 0 1px var(--blacksmith-color-brand-accent);
+}
+
+.cartographer-parallax-window .cartographer-parallax-band-offset {
+    width: 100%;
+    height: 22px;
+    text-align: right;
 }
 
 .cartographer-parallax-window .cartographer-parallax-empty {
@@ -355,31 +599,6 @@
     border-style: dashed;
 }
 
-
-/* --- Master speed ------------------ */
-/* Zero sits in the middle of the track; the arrows either end show which way
-   the scenery runs on that side, turned to the current angle. */
-.cartographer-parallax-window .cartographer-parallax-master {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.cartographer-parallax-window .cartographer-parallax-master-track {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.cartographer-parallax-window .cartographer-parallax-master-slider {
-    flex: 1 1 auto;
-    grid-template-columns: 1fr 52px;
-}
-
-.cartographer-parallax-window .cartographer-parallax-master-slider .cartographer-parallax-value {
-    font-weight: bold;
-}
-
 .cartographer-parallax-window .cartographer-parallax-arrow {
     flex: 0 0 auto;
     width: 16px;
@@ -390,16 +609,6 @@
 
 .cartographer-parallax-window .cartographer-parallax-arrow[data-arrow="reverse"] {
     color: var(--blacksmith-tool-text-muted);
-}
-
-/* --- Toolbar divider --------------- */
-.cartographer-parallax-window .cartographer-parallax-divider {
-    display: inline-block;
-    width: 1px;
-    height: 18px;
-    margin: 0 4px;
-    background: var(--blacksmith-tool-divider);
-    vertical-align: middle;
 }
 
 /* --- Collapsed layers -------------- */
@@ -434,69 +643,6 @@
     height: 24px;
 }
 
-/* --- Sets ------------------------- */
-.cartographer-parallax-window .cartographer-parallax-sets {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px 8px;
-}
-
-.cartographer-parallax-window .cartographer-parallax-set-chips {
-    display: flex;
-    flex: 1 1 auto;
-    flex-wrap: wrap;
-    gap: 4px;
-}
-
-.cartographer-parallax-window .cartographer-parallax-set-chip {
-    height: 24px;
-    padding: 0 10px;
-    margin: 0;
-    border: 1px solid var(--blacksmith-tool-divider);
-    border-radius: 12px;
-    background: transparent;
-    color: var(--blacksmith-tool-text);
-    line-height: 22px;
-    cursor: pointer;
-    width: auto;
-}
-
-.cartographer-parallax-window .cartographer-parallax-set-chip:hover {
-    background: var(--blacksmith-tool-surface-hover);
-}
-
-.cartographer-parallax-window .cartographer-parallax-set-chip.is-active {
-    border-color: var(--blacksmith-tool-accent);
-    background: var(--blacksmith-tool-surface-selected);
-    color: var(--blacksmith-tool-accent);
-    font-weight: bold;
-}
-
-.cartographer-parallax-window .cartographer-parallax-set-actions {
-    display: flex;
-    gap: 2px;
-}
-
-.cartographer-parallax-window .cartographer-parallax-add-set {
-    align-self: flex-start;
-    width: auto;
-    height: 24px;
-    padding: 0 8px;
-    margin: 0;
-    border: 1px dashed var(--blacksmith-tool-divider);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--blacksmith-tool-text-muted);
-    line-height: 22px;
-    cursor: pointer;
-}
-
-.cartographer-parallax-window .cartographer-parallax-add-set:hover {
-    color: var(--blacksmith-tool-text);
-    background: var(--blacksmith-tool-surface-hover);
-}
-
 .cartographer-parallax-window .cartographer-parallax-set-badge {
     margin-left: 4px;
     padding: 0 6px;
@@ -507,48 +653,4 @@
     font-weight: normal;
 }
 
-.cartographer-parallax-window .cartographer-parallax-set-field select {
-    width: 100%;
-}
 
-.cartographer-parallax-window .cartographer-parallax-set-field {
-    grid-template-columns: 90px 1fr;
-}
-
-/* A layer in a set that is not showing: still editable, plainly off-canvas. */
-.cartographer-parallax-window .cartographer-parallax-layer.is-out-of-set {
-    opacity: 0.55;
-}
-
-.cartographer-parallax-window .cartographer-parallax-layer.is-out-of-set:hover {
-    opacity: 1;
-}
-
-/* --- Control mode ------------------ */
-.cartographer-parallax-window .cartographer-parallax-control-layers {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.cartographer-parallax-window .cartographer-parallax-control-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 2px 4px;
-    border-radius: 3px;
-}
-
-.cartographer-parallax-window .cartographer-parallax-control-row:hover {
-    background: var(--blacksmith-tool-surface-hover);
-}
-
-.cartographer-parallax-window .cartographer-parallax-control-row .cartographer-parallax-layer-name {
-    flex: 1 1 auto;
-    font-weight: normal;
-}
-
-.cartographer-parallax-window .cartographer-parallax-control-row.is-hidden .cartographer-parallax-layer-name {
-    color: var(--blacksmith-tool-text-muted);
-    text-decoration: line-through;
-}

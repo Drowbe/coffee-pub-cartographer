@@ -130,23 +130,25 @@ const HATCH_NEIGHBOURS = [
 ];
 
 export class MappingWindow extends BlacksmithToolWindowBaseV2 {
-    static DEFAULT_OPTIONS = foundry.utils.mergeObject(
-        foundry.utils.mergeObject({}, super.DEFAULT_OPTIONS ?? {}),
-        {
-            id: APP_ID,
-            classes: ['blacksmith-window-tool', 'cartographer-mapping-window'],
-            position: { width: 560, height: 560 },
-            window: {
-                title: `${MODULE.ID}.mapping.windowTitle`,
-                icon: 'fa-solid fa-street-view',
-                resizable: true,
-                minimizable: true
-            },
-            toolTheme: 'glass',
-            toolTitlebar: 'micro',
-            windowSizeConstraints: { minWidth: 320, minHeight: 320 }
-        }
-    );
+    // A plain object, not a copy of super's merged in. Foundry already merges
+    // DEFAULT_OPTIONS down the class chain (concatenating arrays), so copying
+    // super's in re-contributes core's v14 window.controls and duplicates the
+    // Detach / Re-attach menu entries. See window-tool-base.js in Blacksmith.
+    // The base class's own 'blacksmith-window-tool' arrives through that merge.
+    static DEFAULT_OPTIONS = {
+        id: APP_ID,
+        classes: ['cartographer-mapping-window'],
+        position: { width: 560, height: 560 },
+        window: {
+            title: `${MODULE.ID}.mapping.windowTitle`,
+            icon: 'fa-solid fa-street-view',
+            resizable: true,
+            minimizable: true
+        },
+        toolTheme: 'glass',
+        toolTitlebar: 'micro',
+        windowSizeConstraints: { minWidth: 320, minHeight: 320 }
+    };
 
     static ACTION_HANDLERS = {
         'set-mode': (_event, target, app) => void app.manager.setMode(target.dataset.mode),

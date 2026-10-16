@@ -8,7 +8,7 @@
 {{! A layer in setup mode. Collapsed, it is one line: what it is, how fast,
     and the buttons. Expanded, its sliders follow. }}
 {{#*inline "layerRow"}}
-<div class="cartographer-parallax-layer{{#unless visible}} is-hidden{{/unless}}{{#if overhead}} is-overhead{{/if}}{{#if collapsed}} is-collapsed{{/if}}{{#if outOfSet}} is-out-of-set{{/if}}">
+<div class="cartographer-parallax-layer{{#unless visible}} is-hidden{{/unless}}{{#if overhead}} is-overhead{{/if}}{{#if collapsed}} is-collapsed{{/if}}">
     <div class="cartographer-parallax-layer-header">
         <button type="button" class="cartographer-parallax-button cartographer-parallax-collapse" data-action="toggle-collapse" data-layer-id="{{id}}"
             data-tooltip="{{localize (ifThen collapsed "coffee-pub-cartographer.parallax.expand" "coffee-pub-cartographer.parallax.collapse")}}"><i class="fa-solid {{#if collapsed}}fa-chevron-right{{else}}fa-chevron-down{{/if}}"></i></button>
@@ -17,7 +17,7 @@
             {{#if isVideo}}<i class="fa-solid fa-film"></i>{{else}}<img src="{{src}}" alt="">{{/if}}
         </button>
         <div class="cartographer-parallax-layer-title">
-            <span class="cartographer-parallax-layer-name" data-tooltip="{{src}}">{{name}}{{#if setName}} <span class="cartographer-parallax-set-badge">{{setName}}</span>{{/if}}</span>
+            <span class="cartographer-parallax-layer-name" data-tooltip="{{src}}">{{name}}{{#each setNames}} <span class="cartographer-parallax-set-badge">{{this}}</span>{{/each}}</span>
             {{#if collapsed}}
             <span class="cartographer-parallax-layer-summary">
                 {{speed}} px/s{{#if band}} · {{localize "coffee-pub-cartographer.parallax.band"}}{{/if}}{{#unless visible}} · {{localize "coffee-pub-cartographer.parallax.hidden"}}{{/unless}}
@@ -25,8 +25,6 @@
             {{/if}}
         </div>
         <div class="cartographer-parallax-layer-actions">
-            <button type="button" class="cartographer-parallax-button{{#if overhead}} is-active{{/if}}" data-action="toggle-overhead" data-layer-id="{{id}}"
-                data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleOverhead"}}"><i class="fa-solid fa-cloud"></i></button>
             <button type="button" class="cartographer-parallax-button{{#if visible}} is-active{{/if}}" data-action="toggle-visible" data-layer-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleVisible"}}"><i class="fa-solid {{#if visible}}fa-eye{{else}}fa-eye-slash{{/if}}"></i></button>
             <button type="button" class="cartographer-parallax-button" data-action="move-up" data-layer-id="{{id}}" {{#if isFirst}}disabled{{/if}}
@@ -41,7 +39,7 @@
     {{#unless collapsed}}
     <label class="cartographer-parallax-field">
         <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.speed"}}</span>
-        <input type="range" data-field="speed" data-layer-id="{{id}}" value="{{speed}}"
+        <input type="range" data-field="speed" data-layer-id="{{id}}" value="{{speed}}" list="cartographer-parallax-zero"
             min="{{@root.ranges.speed.min}}" max="{{@root.ranges.speed.max}}" step="{{@root.ranges.speed.step}}">
         <span class="cartographer-parallax-value">{{speed}}</span>
     </label>
@@ -57,37 +55,51 @@
             min="{{@root.ranges.scale.min}}" max="{{@root.ranges.scale.max}}" step="{{@root.ranges.scale.step}}">
         <span class="cartographer-parallax-value">{{scale}}</span>
     </label>
-    {{#if @root.hasSets}}
-    <label class="cartographer-parallax-field cartographer-parallax-set-field">
-        <span class="cartographer-parallax-label" data-tooltip="{{localize "coffee-pub-cartographer.parallax.layerSetHint"}}">{{localize "coffee-pub-cartographer.parallax.layerSet"}}</span>
-        <select data-field="set" data-layer-id="{{id}}">
-            <option value="" {{#unless set}}selected{{/unless}}>{{localize "coffee-pub-cartographer.parallax.allSets"}}</option>
-            {{#each setOptions}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>{{/each}}
-        </select>
+    <label class="cartographer-parallax-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.angleOffsetHint"}}">
+        <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.angleOffset"}}</span>
+        <input type="range" data-field="angleOffset" data-layer-id="{{id}}" value="{{angleOffset}}" list="cartographer-parallax-zero"
+            min="{{@root.ranges.angleOffset.min}}" max="{{@root.ranges.angleOffset.max}}" step="{{@root.ranges.angleOffset.step}}">
+        <span class="cartographer-parallax-value">{{angleOffset}}°</span>
     </label>
-    {{/if}}
-    <div class="cartographer-parallax-field cartographer-parallax-band">
-        <label class="cartographer-parallax-label" data-tooltip="{{localize "coffee-pub-cartographer.parallax.bandHint"}}">
-            <input type="checkbox" data-field="band" data-layer-id="{{id}}" {{checked band}}>
-            {{localize "coffee-pub-cartographer.parallax.band"}}
-        </label>
+    <label class="cartographer-parallax-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.depthHint"}}">
+        <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.depth"}}</span>
+        <input type="range" data-field="depth" data-layer-id="{{id}}" value="{{depth}}" list="cartographer-parallax-zero"
+            min="{{@root.ranges.depth.min}}" max="{{@root.ranges.depth.max}}" step="{{@root.ranges.depth.step}}">
+        <span class="cartographer-parallax-value">{{depth}}</span>
+    </label>
+    <div class="cartographer-parallax-field cartographer-parallax-start" data-tooltip="{{localize "coffee-pub-cartographer.parallax.startHint"}}">
+        <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.start"}}</span>
+        <div class="cartographer-parallax-xy">
+            <label><span>X</span><input type="number" data-field="startX" data-layer-id="{{id}}" value="{{startX}}" step="1"></label>
+            <label><span>Y</span><input type="number" data-field="startY" data-layer-id="{{id}}" value="{{startY}}" step="1"></label>
+        </div>
+    </div>
+    {{! Two exclusive answers, so two buttons rather than a checkbox. The band's
+        offset sits in the value column, where the sliders show their numbers. }}
+    <div class="cartographer-parallax-field cartographer-parallax-repeat">
+        <span class="cartographer-parallax-label" data-tooltip="{{localize "coffee-pub-cartographer.parallax.bandHint"}}">{{localize "coffee-pub-cartographer.parallax.repeat"}}</span>
+        <div class="cartographer-parallax-segmented" role="radiogroup">
+            <button type="button" class="cartographer-parallax-segment{{#unless band}} is-active{{/unless}}" data-action="set-band" data-layer-id="{{id}}" data-band="false"
+                role="radio" aria-checked="{{#if band}}false{{else}}true{{/if}}" data-tooltip="{{localize "coffee-pub-cartographer.parallax.tileHint"}}">{{localize "coffee-pub-cartographer.parallax.tile"}}</button>
+            <button type="button" class="cartographer-parallax-segment{{#if band}} is-active{{/if}}" data-action="set-band" data-layer-id="{{id}}" data-band="true"
+                role="radio" aria-checked="{{#if band}}true{{else}}false{{/if}}" data-tooltip="{{localize "coffee-pub-cartographer.parallax.bandHint"}}">{{localize "coffee-pub-cartographer.parallax.band"}}</button>
+        </div>
         {{#if band}}
-        <label class="cartographer-parallax-band-offset" data-tooltip="{{localize "coffee-pub-cartographer.parallax.bandOffsetHint"}}">
-            {{localize "coffee-pub-cartographer.parallax.bandOffset"}}
-            <input type="number" data-field="bandOffset" data-layer-id="{{id}}" value="{{bandOffset}}" step="1">
-        </label>
+        <input type="number" class="cartographer-parallax-band-offset" data-field="bandOffset" data-layer-id="{{id}}" value="{{bandOffset}}" step="1"
+            aria-label="{{localize "coffee-pub-cartographer.parallax.bandOffset"}}" data-tooltip="{{localize "coffee-pub-cartographer.parallax.bandOffsetHint"}}">
         {{/if}}
     </div>
     {{/unless}}
 </div>
 {{/inline}}
 
-{{! A layer in control mode: its name and whether it is showing, nothing more. }}
-{{#*inline "controlRow"}}
-<div class="cartographer-parallax-control-row{{#unless visible}} is-hidden{{/unless}}">
+{{! One of a set's layers, in the Sets tab: on or off within that set. }}
+{{#*inline "setMember"}}
+<div class="cartographer-parallax-set-member{{#if offInSet}} is-off{{/if}}">
+    <span class="cartographer-parallax-set-member-thumb">{{#if isVideo}}<i class="fa-solid fa-film"></i>{{else}}<img src="{{src}}" alt="">{{/if}}</span>
     <span class="cartographer-parallax-layer-name" data-tooltip="{{src}}">{{name}}</span>
-    <button type="button" class="cartographer-parallax-button{{#if visible}} is-active{{/if}}" data-action="toggle-visible" data-layer-id="{{id}}"
-        data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleVisible"}}"><i class="fa-solid {{#if visible}}fa-eye{{else}}fa-eye-slash{{/if}}"></i></button>
+    <button type="button" class="cartographer-parallax-button{{#unless offInSet}} is-active{{/unless}}" data-action="toggle-set-layer" data-set-id="{{setId}}" data-layer-id="{{id}}"
+        data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleInSet"}}"><i class="fa-solid {{#if offInSet}}fa-eye-slash{{else}}fa-eye{{/if}}"></i></button>
 </div>
 {{/inline}}
 
@@ -97,61 +109,12 @@
 </div>
 {{/inline}}
 
-{{! The master speed track, shared by control mode and the Movement tab.
-    Centred on zero: right runs forward, left runs in reverse, middle stops.
-    The arrows at either end point the way the scenery will run on that side
-    of zero, turned to the current angle. }}
-{{#*inline "masterTrack"}}
-<div class="cartographer-parallax-master-track">
-    <i class="fa-solid fa-arrow-right cartographer-parallax-arrow" data-arrow="reverse" style="transform: rotate({{reverseAngle}}deg)"
-        data-tooltip="{{localize "coffee-pub-cartographer.parallax.reverse"}}"></i>
-    <label class="cartographer-parallax-field cartographer-parallax-master-slider">
-        <input type="range" data-field="masterSpeed" value="{{state.masterSpeed}}" list="cartographer-parallax-zero"
-            min="{{ranges.masterSpeed.min}}" max="{{ranges.masterSpeed.max}}" step="{{ranges.masterSpeed.step}}"
-            aria-label="{{localize "coffee-pub-cartographer.parallax.masterSpeed"}}">
-        <span class="cartographer-parallax-value" data-tooltip="{{localize "coffee-pub-cartographer.parallax.masterSpeed"}}">{{masterLabel}}</span>
-    </label>
-    <i class="fa-solid fa-arrow-right cartographer-parallax-arrow" data-arrow="forward" style="transform: rotate({{state.angle}}deg)"
-        data-tooltip="{{localize "coffee-pub-cartographer.parallax.forward"}}"></i>
-</div>
-<datalist id="cartographer-parallax-zero"><option value="0"></option></datalist>
-{{/inline}}
-
-{{! Quick switch between sets, for control mode and the head of the Layers tab. }}
-{{#*inline "setChips"}}
-{{#if hasSets}}
-<div class="cartographer-parallax-sets">
-    <span class="cartographer-parallax-label"><i class="fa-solid fa-swatchbook"></i> {{localize "coffee-pub-cartographer.parallax.showing"}}</span>
-    <div class="cartographer-parallax-set-chips">
-        {{#each sets}}
-        <button type="button" class="cartographer-parallax-set-chip{{#if active}} is-active{{/if}}" data-action="select-set" data-set-id="{{id}}">{{name}}</button>
-        {{/each}}
-    </div>
-</div>
-{{/if}}
-{{/inline}}
-
-<div class="cartographer-parallax-root{{#if isControl}} is-control{{/if}}">
+<div class="cartographer-parallax-root">
     {{#unless hasScene}}
     <div class="cartographer-parallax-empty">{{localize "coffee-pub-cartographer.parallax.noScene"}}</div>
     {{else}}
 
-    {{#if isControl}}
-    {{! ===== CONTROL: only what is needed while the scene runs ===== }}
-    <div class="cartographer-parallax-master">{{> masterTrack}}</div>
-    {{> setChips}}
-    {{#if hasLayers}}
-    <div class="cartographer-parallax-control-layers">
-        {{#each overheadLayers}}{{> controlRow}}{{/each}}
-        {{> tokenLine}}
-        {{#each groundLayers}}{{> controlRow}}{{/each}}
-    </div>
-    {{else}}
-    <div class="cartographer-parallax-empty">{{localize "coffee-pub-cartographer.parallax.noLayers"}}</div>
-    {{/if}}
-
-    {{else}}
-    {{! ===== SETUP: three tabs ===== }}
+    {{! The settings: three tabs. Running the scene is the control bar's job. }}
     <nav class="cartographer-parallax-tabs" role="tablist">
         {{#each tabs}}
         <button type="button" role="tab" class="cartographer-parallax-tab{{#if active}} is-active{{/if}}" data-action="set-tab" data-tab="{{id}}" aria-selected="{{active}}">
@@ -162,11 +125,6 @@
 
     {{#if (eq tab "movement")}}
     <div class="cartographer-parallax-panel">
-        <div class="cartographer-parallax-master">
-            <span class="cartographer-parallax-label"><i class="fa-solid fa-gauge-high"></i> {{localize "coffee-pub-cartographer.parallax.masterSpeed"}}</span>
-            {{> masterTrack}}
-        </div>
-
         <div class="cartographer-parallax-group">
             <div class="cartographer-parallax-field cartographer-parallax-presets">
                 <span class="cartographer-parallax-label"><i class="fa-solid fa-compass"></i> {{localize "coffee-pub-cartographer.parallax.direction"}}</span>
@@ -200,7 +158,6 @@
 
     {{#if (eq tab "layers")}}
     <div class="cartographer-parallax-panel">
-        {{> setChips}}
         {{#if hasLayers}}
         <div class="cartographer-parallax-section-header">
             <i class="fa-solid fa-layer-group"></i>
@@ -229,29 +186,43 @@
     <div class="cartographer-parallax-panel">
         <p class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.parallax.setsHint"}}</p>
         <div class="cartographer-parallax-set-list">
+            <div class="cartographer-parallax-set-row is-common{{#if allActive}} is-active{{/if}}">
+                <button type="button" class="cartographer-parallax-button{{#if allActive}} is-active{{/if}}" data-action="select-set" data-set-id=""
+                    data-tooltip="{{localize "coffee-pub-cartographer.parallax.allLayersHint"}}"><i class="fa-solid {{#if allActive}}fa-circle-dot{{else}}fa-circle{{/if}}"></i></button>
+                <span class="cartographer-parallax-set-name">{{localize "coffee-pub-cartographer.parallax.allLayers"}}</span>
+                <span class="cartographer-parallax-set-count">{{layerTotal}}</span>
+            </div>
             {{#each sets}}
-            <div class="cartographer-parallax-set-row{{#if active}} is-active{{/if}}">
-                <button type="button" class="cartographer-parallax-button{{#if active}} is-active{{/if}}" data-action="select-set" data-set-id="{{id}}"
-                    data-tooltip="{{localize "coffee-pub-cartographer.parallax.showSet"}}"><i class="fa-solid {{#if active}}fa-circle-dot{{else}}fa-circle{{/if}}"></i></button>
-                <span class="cartographer-parallax-set-name">{{name}}</span>
-                <span class="cartographer-parallax-set-count">{{layerCount}}</span>
-                <button type="button" class="cartographer-parallax-button" data-action="rename-set" data-set-id="{{id}}"
-                    data-tooltip="{{localize "coffee-pub-cartographer.parallax.renameSet"}}"><i class="fa-solid fa-pen"></i></button>
-                <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-set" data-set-id="{{id}}"
-                    data-tooltip="{{localize "coffee-pub-cartographer.parallax.removeSet"}}"><i class="fa-solid fa-trash-can"></i></button>
+            <div class="cartographer-parallax-set{{#if active}} is-active{{/if}}{{#if expanded}} is-expanded{{/if}}">
+                <div class="cartographer-parallax-set-row{{#if active}} is-active{{/if}}">
+                    <button type="button" class="cartographer-parallax-button cartographer-parallax-collapse" data-action="toggle-set-expand" data-set-id="{{id}}"
+                        data-tooltip="{{localize (ifThen expanded "coffee-pub-cartographer.parallax.collapse" "coffee-pub-cartographer.parallax.expand")}}"><i class="fa-solid {{#if expanded}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i></button>
+                    <button type="button" class="cartographer-parallax-button{{#if active}} is-active{{/if}}" data-action="select-set" data-set-id="{{id}}"
+                        data-tooltip="{{localize "coffee-pub-cartographer.parallax.showSet"}}"><i class="fa-solid {{#if active}}fa-circle-dot{{else}}fa-circle{{/if}}"></i></button>
+                    <span class="cartographer-parallax-set-name">{{name}}</span>
+                    <span class="cartographer-parallax-set-count">{{layerCount}}</span>
+                    <button type="button" class="cartographer-parallax-button" data-action="edit-set" data-set-id="{{id}}"
+                        data-tooltip="{{localize "coffee-pub-cartographer.parallax.editSet"}}"><i class="fa-solid fa-pen"></i></button>
+                    <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-set" data-set-id="{{id}}"
+                        data-tooltip="{{localize "coffee-pub-cartographer.parallax.removeSet"}}"><i class="fa-solid fa-trash-can"></i></button>
+                </div>
+                {{#if expanded}}
+                {{! The set's layers, each with its own on/off in this set. Off keeps
+                    the layer in the set; edit the set to take it out. }}
+                <div class="cartographer-parallax-set-members">
+                    {{#each overheadMembers}}{{> setMember}}{{/each}}
+                    {{#if overheadMembers.length}}{{#if groundMembers.length}}{{> tokenLine}}{{/if}}{{/if}}
+                    {{#each groundMembers}}{{> setMember}}{{/each}}
+                    {{#unless layerCount}}<div class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.parallax.setEmpty"}}</div>{{/unless}}
+                </div>
+                {{/if}}
             </div>
             {{/each}}
-            <div class="cartographer-parallax-set-row is-common">
-                <i class="fa-solid fa-layer-group cartographer-parallax-set-icon"></i>
-                <span class="cartographer-parallax-set-name">{{localize "coffee-pub-cartographer.parallax.allSets"}}</span>
-                <span class="cartographer-parallax-set-count">{{commonCount}}</span>
-            </div>
         </div>
         <div class="cartographer-parallax-panel-actions">
             <button type="button" class="cartographer-parallax-button is-labelled" data-action="add-set"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.addSet"}}</span></button>
         </div>
     </div>
-    {{/if}}
     {{/if}}
 
     {{/unless}}

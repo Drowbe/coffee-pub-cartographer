@@ -8,6 +8,26 @@ import { cartographerToolbar } from './manager-toolbar.js';
 const FLAG_KEY = 'parallax';
 const TOOL_ID = `${MODULE.ID}-parallax`;
 const WINDOW_ID = `${MODULE.ID}-parallax`;
+/**
+ * Whether the GM wants the window up, per browser. Set when they open or close
+ * it themselves, and left alone when the window comes and goes with the scene,
+ * so a scene with no parallax does not make them reopen it on the next one.
+ */
+const WINDOW_OPEN_KEY = `${MODULE.ID}.parallax.windowOpen`;
+function readWindowOpen() {
+    try {
+        return localStorage.getItem(WINDOW_OPEN_KEY) === 'true';
+    } catch {
+        return false;
+    }
+}
+function writeWindowOpen(open) {
+    try {
+        localStorage.setItem(WINDOW_OPEN_KEY, String(!!open));
+    } catch {
+        // Storage unavailable: the window just will not reopen on its own.
+    }
+}
 
 /**
  * Which way the scenery travels, as an angle in degrees on screen: 0 runs it
@@ -74,8 +94,8 @@ function defaultState() {
         // eases from towards its target. Null means it was already there.
         rampFrom: null,
         layers: [],
-        // Named sets of layers -- Summer, Winter -- of which one shows at a
-        // time. A layer in no set always shows. See isLayerShown.
+        // Named combinations of layers -- Summer, Winter -- of which one shows
+        // at a time, or none for every layer. See isLayerShown.
         sets: [],
         activeSet: null
     };
@@ -95,11 +115,22 @@ function defaultLayer(src) {
         // horizon does. Off, the image tiles across the whole scene.
         band: false,
         bandOffset: 0,
-        // The set this layer belongs to, or null to show whichever set is active.
-        set: null,
         // Overhead layers draw above tokens -- clouds, smoke, birds -- instead
         // of beneath them with the ground.
         overhead: false,
+        // Turns this layer's direction away from the scene's angle, in
+        // degrees: clouds blown across the road rather than along it.
+        angleOffset: 0,
+        // Where the tiling sits at rest, in scene pixels, so layers can be
+        // lined up with each other. Reset returns here, not to 0,0.
+        startX: 0,
+        startY: 0,
+        // How the layer moves as the camera pans, from -1 to 1. 0 is fixed to
+        // the map like everything else. Positive reads as farther away (it
+        // trails the map; at 1 it is pinned to the screen); negative reads as
+        // nearer, above the map (it runs ahead of it). Local to each viewer,
+        // since everyone pans on their own.
+        depth: 0,
         // Where the tiling stood at the state's anchorAt. Kept as x and y
         // rather than a distance along the scroll, so turning the angle mid-run
         // carries on from where the layer is instead of jumping.
@@ -145,7 +176,7 @@ class ParallaxManager {
         this._registerToolbarTool();
         this._registerHooks();
         this._exposeApi();
-        await this.refresh();
+        await this.refresh({ sceneLoaded: true });
         console.log(`${MODULE.NAME}: Parallax tool initialized`);
     }
 
@@ -182,7 +213,7 @@ class ParallaxManager {
 
         // The canvas is rebuilt on every scene change, which destroys our
         // container with it, so the layers are drawn afresh each time.
-        on('canvasReady', () => void this.refresh());
+        on('canvasReady', () => void this.refresh({ sceneLoaded: true }));
         on('canvasTearDown', () => this._teardown());
         on('updateScene', (scene, changes) => {
             if (scene.id !== canvas.scene?.id) return;
@@ -198,7 +229,7 @@ class ParallaxManager {
         module.api ??= {};
         module.api.parallax = {
             play: () => this.play(),
-            pause: () => this.pause(),
+            stop: () => this.stop(),
             toggle: () => this.togglePlaying(),
             setSpeed: speed => this.setMasterSpeed(speed),
             setAngle: angle => this.setAngle(angle),
@@ -224,12 +255,37 @@ class ParallaxManager {
         state.layers = normalizeOrder(
             (stored?.layers ?? []).map(layer => ({ ...defaultLayer(layer.src ?? ''), ...layer }))
         );
-        state.sets = stored?.sets ?? [];
-        // A set deleted elsewhere leaves nothing for its layers to wait for.
-        const setIds = new Set(state.sets.map(set => set.id));
-        if (!setIds.has(state.activeSet)) state.activeSet = state.sets[0]?.id ?? null;
-        for (const layer of state.layers) if (!setIds.has(layer.set)) layer.set = null;
+        // `hidden` is the set's own on/off for each of its layers: still in the
+        // set, so it is one click to bring back, but not drawn while it shows.
+        state.sets = (stored?.sets ?? []).map(set => ({
+            ...set,
+            layers: [...(set.layers ?? [])],
+            hidden: [...(set.hidden ?? [])]
+        }));
+        this._migrateLayerSets(state);
+        const layerIds = new Set(state.layers.map(l => l.id));
+        for (const set of state.sets) {
+            set.layers = set.layers.filter(id => layerIds.has(id));
+            set.hidden = set.hidden.filter(id => set.layers.includes(id));
+        }
+        if (!state.sets.some(set => set.id === state.activeSet)) state.activeSet = null;
         return state;
+    }
+
+    /**
+     * Sets used to be a field on each layer, so a layer could be in only one
+     * of them, and a layer in none showed with all of them. Fold that into the
+     * set lists, keeping what each set showed: its own layers plus the common
+     * ones. Runs only on a scene saved that way, and is written back on the
+     * next change.
+     */
+    _migrateLayerSets(state) {
+        if (!state.layers.some(layer => 'set' in layer)) return;
+        for (const set of state.sets) {
+            if (set.layers.length) continue;
+            set.layers = state.layers.filter(l => !l.set || l.set === set.id).map(l => l.id);
+        }
+        for (const layer of state.layers) delete layer.set;
     }
 
     /**
@@ -239,7 +295,7 @@ class ParallaxManager {
     layerOffset(layer, now = game.time.serverTime, state = this.state) {
         const distance = this._masterTravel(state, now) * layer.speed;
         if (distance === 0) return { x: layer.offsetX, y: layer.offsetY };
-        const dir = angleVector(state.angle);
+        const dir = angleVector(state.angle + (Number(layer.angleOffset) || 0));
         return { x: layer.offsetX + dir.x * distance, y: layer.offsetY + dir.y * distance };
     }
 
@@ -311,9 +367,11 @@ class ParallaxManager {
     // ===== CONTROLS ===================================================
     // ==================================================================
 
+    /** Start the scenery moving, easing up to the master speed. */
     play() { return this._commit(s => { s.playing = true; }); }
-    pause() { return this._commit(s => { s.playing = false; }); }
-    togglePlaying() { return this.state.playing ? this.pause() : this.play(); }
+    /** Ease the scenery to a halt. The master speed is kept, so Play resumes at it. */
+    stop() { return this._commit(s => { s.playing = false; }); }
+    togglePlaying() { return this.state.playing ? this.stop() : this.play(); }
 
     setMasterSpeed(speed) {
         const value = Number(speed);
@@ -336,13 +394,27 @@ class ParallaxManager {
         return this._commit(s => { s.angle = normalizeAngle(value); });
     }
 
+    /**
+     * Add a layer. With a set showing it joins that set too; otherwise it
+     * would be added and promptly hidden, which reads as the add failing.
+     */
     addLayer(src) {
         if (!src) return;
-        return this._commit(s => { s.layers.push(defaultLayer(src)); });
+        return this._commit(s => {
+            const layer = defaultLayer(src);
+            s.layers.push(layer);
+            s.sets.find(set => set.id === s.activeSet)?.layers.push(layer.id);
+        });
     }
 
     removeLayer(id) {
-        return this._commit(s => { s.layers = s.layers.filter(l => l.id !== id); });
+        return this._commit(s => {
+            s.layers = s.layers.filter(l => l.id !== id);
+            for (const set of s.sets) {
+                set.layers = set.layers.filter(layerId => layerId !== id);
+                set.hidden = (set.hidden ?? []).filter(layerId => layerId !== id);
+            }
+        });
     }
 
     // ==================================================================
@@ -350,12 +422,30 @@ class ParallaxManager {
     // ==================================================================
 
     /**
-     * Whether a layer is part of what is showing. Its own eye toggle aside, a
-     * layer shows when it belongs to no set (it is common to all of them) or
-     * to the active one.
+     * Whether a layer is part of what is showing. A set is a chosen
+     * combination of layers -- Summer is sky, hills and leafy trees; Winter is
+     * the same sky, the same hills, bare trees and snow -- so a layer can be in
+     * any number of them. With a set active exactly its layers show; with none
+     * active ("All layers") every layer does. The layer's own eye toggle
+     * applies on top either way.
      */
     isLayerShown(layer, state = this.state) {
-        return !!layer.visible && (!layer.set || layer.set === state.activeSet);
+        if (!layer.visible) return false;
+        const active = state.sets.find(set => set.id === state.activeSet);
+        if (!active) return true;
+        return active.layers.includes(layer.id) && !active.hidden?.includes(layer.id);
+    }
+
+    /** Turn one of a set's layers on or off within that set only. */
+    toggleSetLayer(setId, layerId) {
+        return this._commit(s => {
+            const set = s.sets.find(entry => entry.id === setId);
+            if (!set?.layers.includes(layerId)) return;
+            set.hidden ??= [];
+            set.hidden = set.hidden.includes(layerId)
+                ? set.hidden.filter(id => id !== layerId)
+                : [...set.hidden, layerId];
+        });
     }
 
     _findSet(state, nameOrId) {
@@ -366,48 +456,53 @@ class ParallaxManager {
             ?? null;
     }
 
-    /** Add a set and make it the active one, since the next thing a GM does is fill it. */
-    addSet(name) {
+    /** Only ids of layers that exist, each once. */
+    _cleanLayerIds(state, layerIds) {
+        const known = new Set(state.layers.map(l => l.id));
+        return [...new Set(layerIds ?? [])].filter(id => known.has(id));
+    }
+
+    /** Add a set of the given layers and show it, so the GM sees what they just made. */
+    addSet(name, layerIds = []) {
         const label = String(name ?? '').trim();
         if (!label) return;
         return this._commit(s => {
-            const set = { id: foundry.utils.randomID(), name: label };
+            const set = { id: foundry.utils.randomID(), name: label, layers: this._cleanLayerIds(s, layerIds), hidden: [] };
             s.sets.push(set);
             s.activeSet = set.id;
         });
     }
 
-    renameSet(id, name) {
-        const label = String(name ?? '').trim();
-        if (!label) return;
+    /** Change a set's name and/or which layers it holds. */
+    updateSet(id, { name, layers } = {}) {
         return this._commit(s => {
             const set = s.sets.find(entry => entry.id === id);
-            if (set) set.name = label;
+            if (!set) return;
+            const label = String(name ?? '').trim();
+            if (label) set.name = label;
+            if (layers) {
+                set.layers = this._cleanLayerIds(s, layers);
+                set.hidden = (set.hidden ?? []).filter(layerId => set.layers.includes(layerId));
+            }
         });
     }
 
-    /** Remove a set. Its layers are kept and become common to every set. */
+    /** Remove a set. Its layers are untouched; only the combination goes. */
     removeSet(id) {
         return this._commit(s => {
             s.sets = s.sets.filter(set => set.id !== id);
-            for (const layer of s.layers) if (layer.set === id) layer.set = null;
-            if (s.activeSet === id) s.activeSet = s.sets[0]?.id ?? null;
+            if (s.activeSet === id) s.activeSet = null;
         });
     }
 
-    /** Switch the showing set, by id or by name (for macros). */
+    /** Switch the showing set, by id or by name (for macros). Null, or 'all', shows every layer. */
     setActiveSet(nameOrId) {
+        if (!nameOrId || String(nameOrId).toLowerCase() === 'all') {
+            return this._commit(s => { s.activeSet = null; });
+        }
         const set = this._findSet(this.state, nameOrId);
         if (!set) return;
         return this._commit(s => { s.activeSet = set.id; });
-    }
-
-    setLayerSet(layerId, setId) {
-        return this._commit(s => {
-            const layer = s.layers.find(l => l.id === layerId);
-            if (!layer) return;
-            layer.set = s.sets.some(set => set.id === setId) ? setId : null;
-        });
     }
 
     /**
@@ -434,13 +529,6 @@ class ParallaxManager {
             if (!neighbour) return;
             s.layers.splice(from, 1);
             s.layers.splice(to, 0, layer);
-        });
-    }
-
-    toggleOverhead(id) {
-        return this._commit(s => {
-            const layer = s.layers.find(l => l.id === id);
-            if (layer) layer.overhead = !layer.overhead;
         });
     }
 
@@ -473,8 +561,19 @@ class ParallaxManager {
         this._applyState();
     }
 
+    /** Whether this scene has any parallax to run. */
+    get isConfigured() {
+        return this.state.layers.length > 0;
+    }
+
+    /** Open the window because the GM asked to, which also means "keep it up". */
     async openWindow() {
         if (!game.user.isGM) return null;
+        writeWindowOpen(true);
+        return this._showWindow();
+    }
+
+    async _showWindow() {
         if (this.window?.rendered) {
             this.window.bringToFront?.();
             return this.window;
@@ -484,14 +583,44 @@ class ParallaxManager {
         return this.window;
     }
 
+    /**
+     * Called by the window as it closes. A close the GM made means they want it
+     * down; a close made here because the scene has no parallax does not.
+     */
+    onWindowClosed(window) {
+        if (this.window === window) this.window = null;
+        if (!this._closingForScene) writeWindowOpen(false);
+    }
+
+    /**
+     * On each scene load, bring the window up or down to match: up where there
+     * is parallax and the GM left it on, down where there is none. A GM can
+     * still open it on an empty scene to set one up -- it just is not offered.
+     */
+    async _syncWindowToScene() {
+        if (!game.user.isGM) return;
+        if (this.isConfigured) {
+            if (readWindowOpen()) await this._showWindow();
+            return;
+        }
+        if (!this.window?.rendered) return;
+        this._closingForScene = true;
+        try {
+            await this.window.close();
+        } finally {
+            this._closingForScene = false;
+        }
+    }
+
     // ==================================================================
     // ===== RENDERING ==================================================
     // ==================================================================
 
-    async refresh() {
+    async refresh({ sceneLoaded = false } = {}) {
         if (!canvas?.ready || !canvas.scene) return;
         this.state = this._readState();
         await this._applyState();
+        if (sceneLoaded) await this._syncWindowToScene();
         if (this.window?.rendered) this.window.render();
     }
 
@@ -626,14 +755,21 @@ class ParallaxManager {
     _tick() {
         if (!this._isBuilt()) return;
         const now = game.time.serverTime;
+        // How far this viewer's camera sits from the middle of the scene; the
+        // depth of each layer decides how much of that it follows.
+        const rect = canvas.dimensions.sceneRect;
+        const pivot = canvas.stage.pivot;
+        const panX = pivot.x - (rect.x + rect.width / 2);
+        const panY = pivot.y - (rect.y + rect.height / 2);
         for (const layer of this.state.layers) {
             const sprite = this.sprites.get(layer.id);
             if (!sprite) continue;
             const offset = this.layerOffset(layer, now);
+            const depth = Number(layer.depth) || 0;
             const scale = layer.scale > 0 ? layer.scale : 1;
             sprite.tilePosition.set(
-                wrap(offset.x, sprite.texture.width * scale),
-                wrap(offset.y, sprite.texture.height * scale)
+                wrap(offset.x + (Number(layer.startX) || 0) + panX * depth, sprite.texture.width * scale),
+                wrap(offset.y + (Number(layer.startY) || 0) + panY * depth, sprite.texture.height * scale)
             );
         }
     }
