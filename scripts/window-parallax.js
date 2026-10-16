@@ -4,6 +4,7 @@
 
 import { MODULE } from './const.js';
 import { PARALLAX_DIRECTIONS } from './manager-parallax.js';
+import { defaultTileMotion, tileMotionManager } from './manager-tilemotion.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -26,12 +27,31 @@ const SLIDER_RANGES = {
     alpha: { min: 0, max: 1, step: 0.05 },
     scale: { min: 0.1, max: 4, step: 0.05 },
     angleOffset: { min: -180, max: 180, step: 1 },
-    depth: { min: -1, max: 1, step: 0.05 }
+    depth: { min: -1, max: 1, step: 0.05 },
+    // Tile mode.
+    rotateSpeed: { min: -360, max: 360, step: 5 },
+    pivot: { min: 0, max: 1, step: 0.05 },
+    scrollSpeed: { min: -600, max: 600, step: 5 },
+    scrollAngle: { min: 0, max: 359, step: 1 },
+    scrollScale: { min: 0.1, max: 4, step: 0.05 }
 };
 /** A master speed this close to zero snaps to a stop, so the middle is easy to find by hand. */
 const MASTER_SNAP = 0.1;
 /** The same, for a layer's own speed in pixels per second. */
 const LAYER_SNAP = 10;
+/** The same, for a tile's spin (degrees per second) and scroll (pixels per second). */
+const TILE_SNAP = { 'rotate.speed': 5, 'scroll.speed': 10 };
+
+/** The two things the window can run: the scene's parallax, or its animated tiles. */
+const TARGETS = [
+    { id: 'scene', icon: 'fa-solid fa-layer-group', labelKey: 'targetScene' },
+    { id: 'tiles', icon: 'fa-solid fa-arrows-spin', labelKey: 'targetTiles' }
+];
+
+function tileName(tileDocument) {
+    const src = tileDocument.texture?.src ?? '';
+    return decodeURIComponent(src.split('/').pop() ?? '').replace(/\.[^.]+$/, '') || tileDocument.id;
+}
 
 /**
  * Window preferences, per browser. They describe how this GM likes to read the
@@ -88,7 +108,16 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     };
 
     static ACTION_HANDLERS = {
-        'toggle-play': (_event, _target, app) => void app.manager.togglePlaying(),
+        'toggle-play': (_event, _target, app) => void app._motion().togglePlaying(),
+        'set-target': (_event, target, app) => app.setTarget(target.dataset.target),
+        'toggle-tile-part': (_event, target, app) => {
+            const config = app._selectedConfig();
+            const part = target.dataset.part;
+            if (config && part) void tileMotionManager.setTileMotion(target.dataset.tileId, `${part}.enabled`, !config[part].enabled);
+        },
+        'select-tile': (_event, target, app) => app.selectTile(target.dataset.tileId),
+        'clear-tile-motion': (_event, target, _app) => void tileMotionManager.clearTileMotion(target.dataset.tileId),
+        'reset-tile-positions': (_event, _target, _app) => void tileMotionManager.resetPositions(),
         'reset-positions': (_event, _target, app) => void app.manager.resetPositions(),
         'set-direction': (_event, target, app) => void app.manager.setAngle(target.dataset.direction),
         'toggle-settings': (_event, _target, app) => app.toggleSettings(),
@@ -133,6 +162,8 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         /** Sets opened out in the Sets tab to show their layers. */
         this.expandedSets = new Set(prefs.expandedSets ?? []);
         this.tab = TABS.some(tab => tab.id === prefs.tab) ? prefs.tab : 'layers';
+        /** Which the bar and settings are running: 'scene' parallax or 'tiles'. */
+        this.target = TARGETS.some(entry => entry.id === prefs.target) ? prefs.target : 'scene';
         this._onInput = this._onInput.bind(this);
         this._onChange = this._onChange.bind(this);
     }
@@ -259,6 +290,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             settingsOpen: this.settingsOpen,
             settingsHeight: this._settingsHeight,
             tab: this.tab,
+            target: this.target,
             collapsed: [...this.collapsed].filter(id => known.has(id)),
             expandedSets: [...this.expandedSets].filter(id => this.manager.state.sets.some(set => set.id === id))
         });
@@ -297,6 +329,32 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const rect = this.element?.getBoundingClientRect();
         await this.render();
         if (rect?.height && !this.minimized) this.setPosition({ width: rect.width, height: rect.height });
+    }
+
+    /** The motion the bar is running: the scene's parallax or its tiles. Both answer play/stop/speed alike. */
+    _motion() {
+        return this.target === 'tiles' ? tileMotionManager : this.manager;
+    }
+
+    setTarget(target) {
+        if (!TARGETS.some(entry => entry.id === target) || target === this.target) return;
+        this.target = target;
+        this._savePrefs();
+        return this._renderKeepingSize();
+    }
+
+    /** The selected tile's motion settings, for the editor. */
+    _selectedConfig() {
+        return tileMotionManager.selectedTile()?.config ?? null;
+    }
+
+    /** Select a tile from the list: switch to the Tiles layer, select it, and bring it into view. */
+    selectTile(tileId) {
+        const tile = canvas.tiles?.get(tileId);
+        if (!tile) return;
+        if (!canvas.tiles.active) canvas.tiles.activate();
+        tile.control({ releaseOthers: true });
+        canvas.animatePan({ x: tile.center.x, y: tile.center.y });
     }
 
     toggleSetExpanded(id) {
@@ -344,10 +402,13 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             // thinking about the other.
             setNames: state.sets.filter(set => set.layers.includes(layer.id)).map(set => set.name)
         })).reverse();
+        const isTiles = this.target === 'tiles';
         const bodyContent = !this.settingsOpen ? '' : await foundry.applications.handlebars.renderTemplate(
             `modules/${MODULE.ID}/templates/window-parallax.hbs`,
             {
                 state,
+                isTiles,
+                tiles: isTiles ? this._tileContext() : null,
                 tab: this.tab,
                 tabs: TABS.map(tab => ({
                     id: tab.id,
@@ -388,8 +449,13 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             appId: this.id,
             bodyContent,
             showToolBar: true,
-            toolBarLeft: this._buildPlayControl(state, localize) + this._buildSpeedControl(state, localize),
-            toolBarRight: this._buildSetControl(state, localize) + this._buildSettingsToggle(localize),
+            toolBarLeft: isTiles
+                ? this._buildPlayControl(tileMotionManager.motion, localize, tileMotionManager.isConfigured)
+                    + this._buildTileSpeedControl(tileMotionManager.motion, localize)
+                : this._buildPlayControl(state, localize, this.manager.isConfigured)
+                    + this._buildSpeedControl(state, localize),
+            toolBarRight: (isTiles ? '' : this._buildSetControl(state, localize))
+                + this._buildTargetSwitch(localize) + this._buildSettingsToggle(localize),
             showToolFooter: false
         };
     }
@@ -400,12 +466,14 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
      * leaves the speed alone and eases the scenery to a halt; Play eases it
      * back up to that same speed.
      */
-    _buildPlayControl(state, localize) {
-        const disabled = !this.manager.isConfigured;
+    _buildPlayControl(state, localize, configured) {
+        const disabled = !configured;
         return this._button({
             action: 'toggle-play',
             icon: state.playing ? 'fa-solid fa-stop' : 'fa-solid fa-play',
-            label: disabled ? localize('notConfigured') : localize(state.playing ? 'stop' : 'play'),
+            label: disabled
+                ? localize(this.target === 'tiles' ? 'tilesNotConfigured' : 'notConfigured')
+                : localize(state.playing ? 'stop' : 'play'),
             text: localize(state.playing ? 'stop' : 'play'),
             className: state.playing && !disabled ? 'is-active' : '',
             disabled
@@ -430,6 +498,60 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             <span class="cartographer-parallax-value">${esc(formatMaster(state.masterSpeed))}</span>
             <datalist id="cartographer-parallax-zero"><option value="0"></option></datalist>
         </div>`;
+    }
+
+    /** The tiles' master speed: the same centred slider, with spin arrows either end. */
+    _buildTileSpeedControl(motion, localize) {
+        const esc = value => foundry.utils.escapeHTML(String(value));
+        const range = SLIDER_RANGES.masterSpeed;
+        const label = esc(localize('masterSpeed'));
+        const disabled = tileMotionManager.isConfigured ? '' : ' disabled';
+        return `<div class="cartographer-parallax-field cartographer-parallax-bar-speed${disabled ? ' is-disabled' : ''}">
+            <i class="fa-solid fa-rotate-left cartographer-parallax-arrow" data-tooltip="${esc(localize('reverse'))}"></i>
+            <input type="range" data-field="tileMasterSpeed" value="${esc(motion.masterSpeed)}" min="${range.min}" max="${range.max}" step="${range.step}"
+                list="cartographer-parallax-zero" aria-label="${label}" data-tooltip="${label}"${disabled}>
+            <i class="fa-solid fa-rotate-right cartographer-parallax-arrow" data-tooltip="${esc(localize('forward'))}"></i>
+            <span class="cartographer-parallax-value">${esc(formatMaster(motion.masterSpeed))}</span>
+            <datalist id="cartographer-parallax-zero"><option value="0"></option></datalist>
+        </div>`;
+    }
+
+    /** Scene or Tiles: which the bar and settings are running. */
+    _buildTargetSwitch(localize) {
+        const buttons = TARGETS.map(entry => this._button({
+            action: 'set-target',
+            icon: entry.icon,
+            label: localize(entry.labelKey),
+            className: `cartographer-parallax-segment${entry.id === this.target ? ' is-active' : ''}`,
+            dataset: { target: entry.id }
+        })).join('');
+        return `<div class="cartographer-parallax-segmented cartographer-parallax-target" role="radiogroup">${buttons}</div>`;
+    }
+
+    /** What the Tiles settings show: the shared ease, the selected tile's editor, and every animated tile. */
+    _tileContext() {
+        const selected = tileMotionManager.selectedTile();
+        const isVideo = src => foundry.helpers.media.VideoHelper.hasVideoExtension(src ?? '');
+        const editor = selected ? {
+            id: selected.tile.id,
+            name: tileName(selected.tile.document),
+            src: selected.tile.document.texture?.src,
+            isVideo: isVideo(selected.tile.document.texture?.src),
+            ...selected.config
+        } : null;
+        const animated = (canvas.scene?.tiles ?? []).filter(tile => tileMotionManager.configs.has(tile.id)).map(tile => {
+            const config = tileMotionManager.configs.get(tile.id) ?? defaultTileMotion();
+            return {
+                id: tile.id,
+                name: tileName(tile),
+                src: tile.texture?.src,
+                isVideo: isVideo(tile.texture?.src),
+                rotates: config.rotate.enabled,
+                scrolls: config.scroll.enabled,
+                selected: tile.id === editor?.id
+            };
+        });
+        return { motion: tileMotionManager.motion, editor, animated, hasAnimated: animated.length > 0 };
     }
 
     /** Which set is showing. Absent until there is a set to choose. */
@@ -484,9 +606,16 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const field = target.dataset.field;
         if (!field) return null;
         if (target.tagName === 'SELECT') return { field, value: target.value || null, layerId: null };
+        if (field === 'tile') {
+            const path = target.dataset.path;
+            let value = Number(target.value);
+            if (!path || !Number.isFinite(value)) return null;
+            if (TILE_SNAP[path] && Math.abs(value) < TILE_SNAP[path]) value = 0;
+            return { field, path, value, tileId: target.dataset.tileId };
+        }
         let value = target.type === 'checkbox' ? target.checked : Number(target.value);
         if (typeof value === 'number' && !Number.isFinite(value)) return null;
-        if (field === 'masterSpeed' && Math.abs(value) < MASTER_SNAP) value = 0;
+        if ((field === 'masterSpeed' || field === 'tileMasterSpeed') && Math.abs(value) < MASTER_SNAP) value = 0;
         if (field === 'speed' && Math.abs(value) < LAYER_SNAP) value = 0;
         if (field === 'angleOffset' && Math.abs(value) < 5) value = 0;
         if (field === 'depth' && Math.abs(value) < 0.05) value = 0;
@@ -499,12 +628,28 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const readout = event.target.closest('.cartographer-parallax-field')
             ?.querySelector('.cartographer-parallax-value');
         if (readout) readout.textContent = this._formatReadout(input);
-        this.manager.preview(state => this._assign(state, input));
+        if (input.field === 'tile') {
+            tileMotionManager.preview((_motion, configs) => {
+                const config = configs.get(input.tileId);
+                if (config) foundry.utils.setProperty(config, input.path, input.value);
+            });
+        } else if (input.field === 'tileMasterSpeed') {
+            tileMotionManager.preview(motion => { motion.masterSpeed = input.value; });
+        } else if (input.field === 'tileEaseSeconds') {
+            tileMotionManager.preview(motion => { motion.easeSeconds = input.value; });
+        } else {
+            this.manager.preview(state => this._assign(state, input));
+        }
     }
 
-    _formatReadout({ field, value }) {
-        if (field === 'masterSpeed') return formatMaster(value);
-        if (field === 'easeSeconds') return `${value}s`;
+    _formatReadout({ field, value, path }) {
+        if (field === 'masterSpeed' || field === 'tileMasterSpeed') return formatMaster(value);
+        if (field === 'easeSeconds' || field === 'tileEaseSeconds') return `${value}s`;
+        if (field === 'tile') {
+            if (path === 'rotate.speed') return `${value}°/s`;
+            if (path === 'scroll.angle') return `${value}°`;
+            return String(value);
+        }
         if (field === 'angleOffset') return `${value > 0 ? '+' : ''}${value}°`;
         if (field === 'depth') return value > 0 ? `+${value}` : String(value);
         if (field === 'angle') {
@@ -525,7 +670,10 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     _onChange(event) {
         const input = this._readInput(event.target);
         if (!input) return;
-        if (input.layerId) void this.manager.updateLayer(input.layerId, { [input.field]: input.value });
+        if (input.field === 'tile') void tileMotionManager.setTileMotion(input.tileId, input.path, input.value);
+        else if (input.field === 'tileMasterSpeed') void tileMotionManager.setMasterSpeed(input.value);
+        else if (input.field === 'tileEaseSeconds') void tileMotionManager.setEaseSeconds(input.value);
+        else if (input.layerId) void this.manager.updateLayer(input.layerId, { [input.field]: input.value });
         else if (input.field === 'masterSpeed') void this.manager.setMasterSpeed(input.value);
         else if (input.field === 'activeSet') void this.manager.setActiveSet(input.value);
         else if (input.field === 'angle') void this.manager.setAngle(input.value);

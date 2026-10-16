@@ -4,6 +4,9 @@
 
 import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
+import { tileMotionManager } from './manager-tilemotion.js';
+import { releaseRepeatingTextures, repeatingTexture } from './utils-textures.js';
+import { angleVector, DEFAULT_EASE_SECONDS, easeProgress, motionSpeed, motionTravel, wrap } from './utils-motion.js';
 
 const FLAG_KEY = 'parallax';
 const TOOL_ID = `${MODULE.ID}-parallax`;
@@ -42,30 +45,8 @@ export const PARALLAX_DIRECTIONS = {
     down: { angle: 90, icon: 'fa-solid fa-arrow-down' }
 };
 
-/** The unit vector for an angle in degrees. */
-export function angleVector(angle) {
-    const radians = (Number(angle) || 0) * Math.PI / 180;
-    return { x: Math.cos(radians), y: Math.sin(radians) };
-}
-
 function normalizeAngle(angle) {
     return ((Math.round(Number(angle) || 0) % 360) + 360) % 360;
-}
-
-/** How long a scene takes to get up to speed, or to slow to a stop, by default. */
-const DEFAULT_EASE_SECONDS = 2;
-
-/**
- * The ease used for every change of speed: smoothstep, gentle at both ends.
- * Its integral is what turns an eased speed into a distance travelled, and
- * having that in closed form is what lets every client compute the same
- * position from the same few numbers instead of stepping frame by frame.
- */
-function ease(u) {
-    return u * u * (3 - 2 * u);
-}
-function easeIntegral(u) {
-    return u * u * u - (u * u * u * u) / 2;
 }
 
 /** A new layer's speed, in scene pixels per second at a master speed of 1. */
@@ -148,12 +129,6 @@ function normalizeOrder(layers) {
     return [...layers.filter(l => !l.overhead), ...layers.filter(l => l.overhead)];
 }
 
-/** Wrap a value into [0, size), so tile positions stay small however far we travel. */
-function wrap(value, size) {
-    if (!(size > 0)) return 0;
-    return ((value % size) + size) % size;
-}
-
 class ParallaxManager {
     constructor() {
         this.containers = []; // [ground, overhead]
@@ -164,6 +139,16 @@ class ParallaxManager {
         this._ticker = null;
         this._signature = '';
         this._drawToken = 0;
+        /**
+         * layer id -> a fade in progress: { from, to, start }. A layer coming
+         * into view (its set switched in, its eye turned on, or just added)
+         * fades in, and one leaving fades out, over the scene's Ease time.
+         * Purely visual and local to each viewer, so it is timed on this
+         * client's own clock and never saved.
+         */
+        this._fades = new Map();
+        /** False until the scene's layers have been drawn once; what is there on load just appears. */
+        this._fadeReady = false;
         this._tick = this._tick.bind(this);
     }
 
@@ -214,7 +199,12 @@ class ParallaxManager {
         // The canvas is rebuilt on every scene change, which destroys our
         // container with it, so the layers are drawn afresh each time.
         on('canvasReady', () => void this.refresh({ sceneLoaded: true }));
-        on('canvasTearDown', () => this._teardown());
+        on('canvasTearDown', () => {
+            this._teardown();
+            releaseRepeatingTextures();
+            this._fades.clear();
+            this._fadeReady = false;
+        });
         on('updateScene', (scene, changes) => {
             if (scene.id !== canvas.scene?.id) return;
             if (!foundry.utils.hasProperty(changes, `flags.${MODULE.ID}`)) return;
@@ -293,43 +283,12 @@ class ParallaxManager {
      * A negative master speed runs it backwards along the same angle.
      */
     layerOffset(layer, now = game.time.serverTime, state = this.state) {
-        const distance = this._masterTravel(state, now) * layer.speed;
+        // The scene state carries the motion fields (playing, masterSpeed,
+        // easeSeconds, anchorAt, rampFrom) itself; see utils-motion.js.
+        const distance = motionTravel(state, now) * layer.speed;
         if (distance === 0) return { x: layer.offsetX, y: layer.offsetY };
         const dir = angleVector(state.angle + (Number(layer.angleOffset) || 0));
         return { x: layer.offsetX + dir.x * distance, y: layer.offsetY + dir.y * distance };
-    }
-
-    /** The master speed the scene is heading for: its setting while playing, zero while paused. */
-    _targetSpeed(state) {
-        return state.playing ? state.masterSpeed : 0;
-    }
-
-    /** The master speed actually in effect at `now`, partway through any ease. */
-    effectiveSpeed(state = this.state, now = game.time.serverTime) {
-        const target = this._targetSpeed(state);
-        const from = state.rampFrom ?? target;
-        const duration = Math.max(0, Number(state.easeSeconds) || 0);
-        const elapsed = Math.max(0, now - state.anchorAt) / 1000;
-        if (duration === 0 || elapsed >= duration) return target;
-        return from + (target - from) * ease(elapsed / duration);
-    }
-
-    /**
-     * How far a layer of speed 1 has moved since anchorAt: the eased master
-     * speed integrated over the time elapsed. During the ease it is the area
-     * under the curve; after it, that plus steady travel at the target.
-     */
-    _masterTravel(state, now) {
-        const target = this._targetSpeed(state);
-        const from = state.rampFrom ?? target;
-        const duration = Math.max(0, Number(state.easeSeconds) || 0);
-        const elapsed = Math.max(0, now - state.anchorAt) / 1000;
-        if (duration === 0 || from === target) return elapsed * target;
-        if (elapsed < duration) {
-            const u = elapsed / duration;
-            return duration * (from * u + (target - from) * easeIntegral(u));
-        }
-        return duration * (from + (target - from) / 2) + (elapsed - duration) * target;
     }
 
     /** The current state with travel so far folded into each offset, anchored at now. */
@@ -343,7 +302,7 @@ class ParallaxManager {
         }
         // Whatever changes next eases from the speed in effect right now, so a
         // change made halfway through an ease carries on from where it was.
-        state.rampFrom = this.effectiveSpeed(this.state, now);
+        state.rampFrom = motionSpeed(this.state, now);
         state.anchorAt = now;
         return state;
     }
@@ -599,7 +558,9 @@ class ParallaxManager {
      */
     async _syncWindowToScene() {
         if (!game.user.isGM) return;
-        if (this.isConfigured) {
+        // The window runs both the scene's parallax and its animated tiles,
+        // so a scene with either is one it belongs on.
+        if (this.isConfigured || tileMotionManager.isConfigured) {
             if (readWindowOpen()) await this._showWindow();
             return;
         }
@@ -647,7 +608,29 @@ class ParallaxManager {
         }
 
         this._layout();
+        this._fadeReady = true;
         this._tick();
+    }
+
+    /** Start fading a layer towards shown (1) or hidden (0), from wherever it is now. */
+    _setFadeTarget(layerId, target) {
+        const now = performance.now();
+        const fade = this._fades.get(layerId);
+        if (!fade) {
+            this._fades.set(layerId, { from: this._fadeReady ? 0 : target, to: target, start: now });
+            return;
+        }
+        if (fade.to === target) return;
+        this._fades.set(layerId, { from: this._fadeFactor(layerId, now), to: target, start: now });
+    }
+
+    /** How far faded in a layer is, 0 to 1, eased over the scene's Ease time. */
+    _fadeFactor(layerId, now = performance.now()) {
+        const fade = this._fades.get(layerId);
+        if (!fade) return 1;
+        const duration = Math.max(0, Number(this.state.easeSeconds) || 0) * 1000;
+        if (duration === 0) return fade.to;
+        return fade.from + (fade.to - fade.from) * easeProgress((now - fade.start) / duration);
     }
 
     _isBuilt() {
@@ -691,7 +674,8 @@ class ParallaxManager {
                 console.warn(`${MODULE.NAME}: Parallax layer image could not be loaded: ${layer.src}`);
                 return;
             }
-            const sprite = new PIXI.TilingSprite(texture, rect.width, rect.height);
+            // A mipmap-free twin of the image: see utils-textures.js for the seam it prevents.
+            const sprite = new PIXI.TilingSprite(repeatingTexture(texture), rect.width, rect.height);
             (layer.overhead ? overhead : ground).addChild(sprite);
             this.sprites.set(layer.id, sprite);
         });
@@ -733,8 +717,7 @@ class ParallaxManager {
             if (!sprite) continue;
             const scale = layer.scale > 0 ? layer.scale : 1;
             sprite.tileScale.set(scale);
-            sprite.alpha = layer.alpha;
-            sprite.visible = this.isLayerShown(layer);
+            this._setFadeTarget(layer.id, this.isLayerShown(layer) ? 1 : 0);
             const tex = sprite.texture;
             if (layer.band && horizontal) {
                 sprite.width = rect.width;
@@ -761,9 +744,13 @@ class ParallaxManager {
         const pivot = canvas.stage.pivot;
         const panX = pivot.x - (rect.x + rect.width / 2);
         const panY = pivot.y - (rect.y + rect.height / 2);
+        const clock = performance.now();
         for (const layer of this.state.layers) {
             const sprite = this.sprites.get(layer.id);
             if (!sprite) continue;
+            const fade = this._fadeFactor(layer.id, clock);
+            sprite.alpha = layer.alpha * fade;
+            sprite.visible = fade > 0.001;
             const offset = this.layerOffset(layer, now);
             const depth = Number(layer.depth) || 0;
             const scale = layer.scale > 0 ? layer.scale : 1;

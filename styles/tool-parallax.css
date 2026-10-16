@@ -485,6 +485,41 @@
     gap: 2px;
 }
 
+/* --- Tiles mode -------------------- */
+.cartographer-parallax-window .cartographer-parallax-target {
+    max-width: none;
+}
+
+.cartographer-parallax-window .cartographer-parallax-target .cartographer-parallax-segment {
+    min-width: 28px;
+    height: 24px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-tile-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid var(--blacksmith-tool-divider);
+    border-radius: 4px;
+    background: var(--blacksmith-tool-surface-sunken);
+}
+
+.cartographer-parallax-window .cartographer-parallax-tile-part {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 6px;
+    border-top: 1px solid var(--blacksmith-tool-divider);
+}
+
+/* The chosen side of an On/Off pair is disabled -- choosing it again does
+   nothing -- but should still read as chosen, not greyed. */
+.cartographer-parallax-window .cartographer-parallax-segment.is-active:disabled {
+    cursor: default;
+    opacity: 1;
+}
+
 /* --- Start X / Y ------------------- */
 .cartographer-parallax-window .cartographer-parallax-start {
     grid-template-columns: 90px 1fr;

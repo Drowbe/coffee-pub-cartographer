@@ -9,6 +9,7 @@ import { cartographerToolbar } from './manager-toolbar.js';
 import { socketManager } from './manager-sockets.js';
 import { mappingManager } from './manager-mapping.js';
 import { parallaxManager } from './manager-parallax.js';
+import { tileMotionManager } from './manager-tilemotion.js';
 
 // ================================================================== 
 // ===== BLACKSMITH API INTEGRATION =================================
@@ -157,6 +158,11 @@ Hooks.once('canvasReady', async () => {
             await parallaxManager.initialize();
         } catch (error) {
             console.error(`❌ ${MODULE.NAME}: Failed to initialize parallax tool:`, error);
+        }
+        try {
+            tileMotionManager.initialize();
+        } catch (error) {
+            console.error(`❌ ${MODULE.NAME}: Failed to initialize tile motion:`, error);
         }
         
         if (CartographerServices.canvasLayer) {

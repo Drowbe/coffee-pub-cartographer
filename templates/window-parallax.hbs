@@ -109,11 +109,118 @@
 </div>
 {{/inline}}
 
+{{! ===== TILES: the settings for animated tiles ===== }}
+{{! A slider row for one part of the selected tile's motion. }}
+{{#*inline "tileSlider"}}
+<label class="cartographer-parallax-field">
+    <span class="cartographer-parallax-label">{{label}}</span>
+    <input type="range" data-field="tile" data-tile-id="{{tileId}}" data-path="{{path}}" value="{{value}}"{{#if zero}} list="cartographer-parallax-zero"{{/if}}
+        min="{{range.min}}" max="{{range.max}}" step="{{range.step}}">
+    <span class="cartographer-parallax-value">{{readout}}</span>
+</label>
+{{/inline}}
+
+{{#*inline "tilePanel"}}
+<div class="cartographer-parallax-panel">
+    <label class="cartographer-parallax-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.easeHint"}}">
+        <span class="cartographer-parallax-label"><i class="fa-solid fa-wave-square"></i> {{localize "coffee-pub-cartographer.parallax.ease"}}</span>
+        <input type="range" data-field="tileEaseSeconds" value="{{tiles.motion.easeSeconds}}"
+            min="{{ranges.easeSeconds.min}}" max="{{ranges.easeSeconds.max}}" step="{{ranges.easeSeconds.step}}">
+        <span class="cartographer-parallax-value">{{tiles.motion.easeSeconds}}s</span>
+    </label>
+
+    {{! The selected tile, if any. Select one on the canvas, or from the list below. }}
+    {{#with tiles.editor}}
+    <div class="cartographer-parallax-tile-editor">
+        <div class="cartographer-parallax-layer-header">
+            <span class="cartographer-parallax-thumb">{{#if isVideo}}<i class="fa-solid fa-film"></i>{{else}}<img src="{{src}}" alt="">{{/if}}</span>
+            <div class="cartographer-parallax-layer-title">
+                <span class="cartographer-parallax-layer-name" data-tooltip="{{src}}">{{name}}</span>
+                <span class="cartographer-parallax-layer-summary">{{localize "coffee-pub-cartographer.parallax.selectedTile"}}</span>
+            </div>
+        </div>
+
+        <div class="cartographer-parallax-tile-part">
+            <div class="cartographer-parallax-field cartographer-parallax-repeat">
+                <span class="cartographer-parallax-label"><i class="fa-solid fa-rotate"></i> {{localize "coffee-pub-cartographer.parallax.rotate"}}</span>
+                <div class="cartographer-parallax-segmented" role="radiogroup">
+                    <button type="button" class="cartographer-parallax-segment{{#unless rotate.enabled}} is-active{{/unless}}" {{#unless rotate.enabled}}disabled{{/unless}}
+                        data-action="toggle-tile-part" data-tile-id="{{id}}" data-part="rotate">{{localize "coffee-pub-cartographer.parallax.off"}}</button>
+                    <button type="button" class="cartographer-parallax-segment{{#if rotate.enabled}} is-active{{/if}}" {{#if rotate.enabled}}disabled{{/if}}
+                        data-action="toggle-tile-part" data-tile-id="{{id}}" data-part="rotate">{{localize "coffee-pub-cartographer.parallax.on"}}</button>
+                </div>
+            </div>
+            {{#if rotate.enabled}}
+            {{> tileSlider label=(localize "coffee-pub-cartographer.parallax.speed") tileId=id path="rotate.speed" value=rotate.speed range=@root.ranges.rotateSpeed zero=true readout=(concat rotate.speed "°/s")}}
+            <div class="cartographer-parallax-field cartographer-parallax-start" data-tooltip="{{localize "coffee-pub-cartographer.parallax.pivotHint"}}">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.pivot"}}</span>
+                <div class="cartographer-parallax-xy">
+                    <label><span>X</span><input type="number" data-field="tile" data-tile-id="{{id}}" data-path="rotate.pivotX" value="{{rotate.pivotX}}"
+                        min="{{@root.ranges.pivot.min}}" max="{{@root.ranges.pivot.max}}" step="{{@root.ranges.pivot.step}}"></label>
+                    <label><span>Y</span><input type="number" data-field="tile" data-tile-id="{{id}}" data-path="rotate.pivotY" value="{{rotate.pivotY}}"
+                        min="{{@root.ranges.pivot.min}}" max="{{@root.ranges.pivot.max}}" step="{{@root.ranges.pivot.step}}"></label>
+                </div>
+            </div>
+            {{/if}}
+        </div>
+
+        <div class="cartographer-parallax-tile-part">
+            <div class="cartographer-parallax-field cartographer-parallax-repeat">
+                <span class="cartographer-parallax-label"><i class="fa-solid fa-arrows-left-right"></i> {{localize "coffee-pub-cartographer.parallax.scroll"}}</span>
+                <div class="cartographer-parallax-segmented" role="radiogroup">
+                    <button type="button" class="cartographer-parallax-segment{{#unless scroll.enabled}} is-active{{/unless}}" {{#unless scroll.enabled}}disabled{{/unless}}
+                        data-action="toggle-tile-part" data-tile-id="{{id}}" data-part="scroll">{{localize "coffee-pub-cartographer.parallax.off"}}</button>
+                    <button type="button" class="cartographer-parallax-segment{{#if scroll.enabled}} is-active{{/if}}" {{#if scroll.enabled}}disabled{{/if}}
+                        data-action="toggle-tile-part" data-tile-id="{{id}}" data-part="scroll">{{localize "coffee-pub-cartographer.parallax.on"}}</button>
+                </div>
+            </div>
+            {{#if scroll.enabled}}
+            {{> tileSlider label=(localize "coffee-pub-cartographer.parallax.speed") tileId=id path="scroll.speed" value=scroll.speed range=@root.ranges.scrollSpeed zero=true readout=scroll.speed}}
+            {{> tileSlider label=(localize "coffee-pub-cartographer.parallax.angle") tileId=id path="scroll.angle" value=scroll.angle range=@root.ranges.scrollAngle readout=(concat scroll.angle "°")}}
+            {{> tileSlider label=(localize "coffee-pub-cartographer.parallax.scale") tileId=id path="scroll.scale" value=scroll.scale range=@root.ranges.scrollScale readout=scroll.scale}}
+            {{/if}}
+        </div>
+    </div>
+    {{else}}
+    <div class="cartographer-parallax-empty">{{localize "coffee-pub-cartographer.parallax.selectATile"}}</div>
+    {{/with}}
+
+    {{#if tiles.hasAnimated}}
+    <div class="cartographer-parallax-section-header">
+        <i class="fa-solid fa-arrows-spin"></i>
+        <span>{{localize "coffee-pub-cartographer.parallax.animatedTiles"}}</span>
+    </div>
+    <div class="cartographer-parallax-set-list">
+        {{#each tiles.animated}}
+        <div class="cartographer-parallax-set-row{{#if selected}} is-active{{/if}}">
+            <span class="cartographer-parallax-set-member-thumb">{{#if isVideo}}<i class="fa-solid fa-film"></i>{{else}}<img src="{{src}}" alt="">{{/if}}</span>
+            <span class="cartographer-parallax-set-name">{{name}}</span>
+            {{#if rotates}}<i class="fa-solid fa-rotate" data-tooltip="{{localize "coffee-pub-cartographer.parallax.rotate"}}"></i>{{/if}}
+            {{#if scrolls}}<i class="fa-solid fa-arrows-left-right" data-tooltip="{{localize "coffee-pub-cartographer.parallax.scroll"}}"></i>{{/if}}
+            <button type="button" class="cartographer-parallax-button" data-action="select-tile" data-tile-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.selectTile"}}"><i class="fa-solid fa-crosshairs"></i></button>
+            <button type="button" class="cartographer-parallax-button is-danger" data-action="clear-tile-motion" data-tile-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.clearTileMotion"}}"><i class="fa-solid fa-trash-can"></i></button>
+        </div>
+        {{/each}}
+    </div>
+    {{/if}}
+
+    <div class="cartographer-parallax-panel-actions">
+        <button type="button" class="cartographer-parallax-button is-labelled" data-action="reset-tile-positions"
+            data-tooltip="{{localize "coffee-pub-cartographer.parallax.resetTilesHint"}}"><i class="fa-solid fa-rotate-left"></i><span>{{localize "coffee-pub-cartographer.parallax.resetPositions"}}</span></button>
+    </div>
+</div>
+{{/inline}}
+
 <div class="cartographer-parallax-root">
     {{#unless hasScene}}
     <div class="cartographer-parallax-empty">{{localize "coffee-pub-cartographer.parallax.noScene"}}</div>
     {{else}}
 
+    {{#if isTiles}}
+    {{> tilePanel}}
+    {{else}}
     {{! The settings: three tabs. Running the scene is the control bar's job. }}
     <nav class="cartographer-parallax-tabs" role="tablist">
         {{#each tabs}}
@@ -223,6 +330,7 @@
             <button type="button" class="cartographer-parallax-button is-labelled" data-action="add-set"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.addSet"}}</span></button>
         </div>
     </div>
+    {{/if}}
     {{/if}}
 
     {{/unless}}
