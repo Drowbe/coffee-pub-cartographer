@@ -486,6 +486,42 @@
 }
 
 /* --- Tiles mode -------------------- */
+/* Between the mode switch and Play/Stop in the bar. */
+.cartographer-parallax-window .cartographer-parallax-divider {
+    flex: 0 0 auto;
+    width: 1px;
+    height: 18px;
+    background: var(--blacksmith-tool-divider);
+}
+
+/* The tile selected on the canvas, so the row it matches is easy to find. */
+.cartographer-parallax-window .cartographer-parallax-layer.is-selected {
+    border-color: var(--blacksmith-color-brand-accent);
+}
+
+.cartographer-parallax-window .cartographer-parallax-add-tile {
+    width: 100%;
+    height: auto;
+    padding: 6px 8px;
+    margin: 0;
+    border: 1px dashed var(--blacksmith-color-brand-accent);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--blacksmith-tool-text);
+    line-height: 1.4;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cartographer-parallax-window .cartographer-parallax-add-tile:hover {
+    background: var(--blacksmith-tool-surface-hover);
+}
+
+.cartographer-parallax-window .cartographer-parallax-kind {
+    color: var(--blacksmith-tool-text-muted);
+    font-size: 0.85em;
+}
+
 .cartographer-parallax-window .cartographer-parallax-target {
     max-width: none;
 }
@@ -493,16 +529,6 @@
 .cartographer-parallax-window .cartographer-parallax-target .cartographer-parallax-segment {
     min-width: 28px;
     height: 24px;
-}
-
-.cartographer-parallax-window .cartographer-parallax-tile-editor {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 6px 8px;
-    border: 1px solid var(--blacksmith-tool-divider);
-    border-radius: 4px;
-    background: var(--blacksmith-tool-surface-sunken);
 }
 
 .cartographer-parallax-window .cartographer-parallax-tile-part {
@@ -687,5 +713,4 @@
     font-size: 0.75em;
     font-weight: normal;
 }
-
 

@@ -59,10 +59,15 @@ function tileName(tileDocument) {
  * that every player receives.
  */
 const PREFS_KEY = `${MODULE.ID}.parallax.windowPrefs`;
-/** Setup mode's tabs, in the order they are offered. */
+/** The settings tabs in each mode, in the order they are offered. Sets is the same tab in both. */
 const TABS = [
     { id: 'movement', icon: 'fa-solid fa-gauge-high', labelKey: 'tabMovement' },
     { id: 'layers', icon: 'fa-solid fa-layer-group', labelKey: 'tabLayers' },
+    { id: 'sets', icon: 'fa-solid fa-swatchbook', labelKey: 'tabSets' }
+];
+const TILE_TABS = [
+    { id: 'movement', icon: 'fa-solid fa-gauge-high', labelKey: 'tabMovement' },
+    { id: 'tiles', icon: 'fa-solid fa-arrows-spin', labelKey: 'tabTiles' },
     { id: 'sets', icon: 'fa-solid fa-swatchbook', labelKey: 'tabSets' }
 ];
 function readPrefs() {
@@ -110,11 +115,20 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     static ACTION_HANDLERS = {
         'toggle-play': (_event, _target, app) => void app._motion().togglePlaying(),
         'set-target': (_event, target, app) => app.setTarget(target.dataset.target),
-        'toggle-tile-part': (_event, target, app) => {
-            const config = app._selectedConfig();
+        'toggle-tile-part': (_event, target, _app) => {
+            const config = tileMotionManager.configs.get(target.dataset.tileId);
             const part = target.dataset.part;
             if (config && part) void tileMotionManager.setTileMotion(target.dataset.tileId, `${part}.enabled`, !config[part].enabled);
         },
+        'toggle-tile-visible': (_event, target, _app) => {
+            const config = tileMotionManager.configs.get(target.dataset.tileId);
+            if (config) void tileMotionManager.setTileMotion(target.dataset.tileId, 'visible', !config.visible);
+        },
+        'toggle-tile-collapse': (_event, target, app) => app.toggleTileCollapsed(target.dataset.tileId),
+        'collapse-all-tiles': (_event, _target, app) => app.setAllTilesCollapsed(true),
+        'expand-all-tiles': (_event, _target, app) => app.setAllTilesCollapsed(false),
+        'manage-selected-tile': (_event, target, _app) => void tileMotionManager.setTileMotion(target.dataset.tileId, 'visible', true),
+        'toggle-set-tile': (_event, target, _app) => void tileMotionManager.toggleGroupTile(target.dataset.setId, target.dataset.tileId),
         'select-tile': (_event, target, app) => app.selectTile(target.dataset.tileId),
         'clear-tile-motion': (_event, target, _app) => void tileMotionManager.clearTileMotion(target.dataset.tileId),
         'reset-tile-positions': (_event, _target, _app) => void tileMotionManager.resetPositions(),
@@ -133,7 +147,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         'remove-layer': (_event, target, app) => void app.manager.removeLayer(target.dataset.layerId),
         'move-up': (_event, target, app) => void app.manager.moveLayer(target.dataset.layerId, 1),
         'move-down': (_event, target, app) => void app.manager.moveLayer(target.dataset.layerId, -1),
-        'select-set': (_event, target, app) => void app.manager.setActiveSet(target.dataset.setId),
+        'select-set': (_event, target, app) => void app._groups().setActive(target.dataset.setId || null),
         'add-set': (_event, _target, app) => app.editSet(null),
         'edit-set': (_event, target, app) => app.editSet(target.dataset.setId),
         'toggle-set-expand': (_event, target, app) => app.toggleSetExpanded(target.dataset.setId),
@@ -162,6 +176,9 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         /** Sets opened out in the Sets tab to show their layers. */
         this.expandedSets = new Set(prefs.expandedSets ?? []);
         this.tab = TABS.some(tab => tab.id === prefs.tab) ? prefs.tab : 'layers';
+        this.tileTab = TILE_TABS.some(tab => tab.id === prefs.tileTab) ? prefs.tileTab : 'tiles';
+        /** Managed tiles folded to one line in the Tiles tab. */
+        this.collapsedTiles = new Set(prefs.collapsedTiles ?? []);
         /** Which the bar and settings are running: 'scene' parallax or 'tiles'. */
         this.target = TARGETS.some(entry => entry.id === prefs.target) ? prefs.target : 'scene';
         this._onInput = this._onInput.bind(this);
@@ -190,49 +207,92 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     }
 
     // ==================================================================
-    // ===== SETS =======================================================
+    // ===== GROUPS =====================================================
     // ==================================================================
 
     /**
-     * Add a set (id null) or edit one: a name and a checkbox per layer. The
-     * layers are listed as the Layers tab lists them -- nearest first, split at
-     * the token line -- so the GM recognises the stack they built.
+     * The groups for the mode the window is in. Parallax groups hold layers;
+     * tile groups hold tiles; each mode has its own and shows one at a time,
+     * independently of the other. This gives the window one shape for both:
+     * a list of groups, each with its item ids and the ids switched off in it,
+     * and the operations on them. (Parallax groups are stored as `sets`, the
+     * name they had first.)
+     */
+    _groups() {
+        if (this.target === 'tiles') {
+            const motion = tileMotionManager.motion;
+            return {
+                list: motion.groups.map(group => ({ id: group.id, name: group.name, items: group.tiles, off: group.hidden })),
+                activeId: motion.activeGroup,
+                setActive: id => tileMotionManager.setActiveGroup(id),
+                add: (name, items) => tileMotionManager.addGroup(name, items),
+                update: (id, { name, items }) => tileMotionManager.updateGroup(id, { name, tiles: items }),
+                remove: id => tileMotionManager.removeGroup(id)
+            };
+        }
+        const state = this.manager.state;
+        return {
+            list: state.sets.map(set => ({ id: set.id, name: set.name, items: set.layers, off: set.hidden })),
+            activeId: state.activeSet,
+            setActive: id => this.manager.setActiveSet(id),
+            add: (name, items) => this.manager.addSet(name, items),
+            update: (id, { name, items }) => this.manager.updateSet(id, { name, layers: items }),
+            remove: id => this.manager.removeSet(id)
+        };
+    }
+
+    /**
+     * Add a group (id null) or edit one: a name and a checkbox per item. In
+     * parallax mode the items are layers, listed as the Layers tab lists them
+     * -- nearest first, split at the token line; in tiles mode, the managed
+     * tiles.
      */
     async editSet(id) {
-        const state = this.manager.state;
-        const set = id ? state.sets.find(entry => entry.id === id) : null;
-        if (id && !set) return;
+        const groups = this._groups();
+        const group = id ? groups.list.find(entry => entry.id === id) : null;
+        if (id && !group) return;
+        const isTiles = this.target === 'tiles';
         const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
         const esc = value => foundry.utils.escapeHTML(String(value ?? ''));
-        // A new set starts from what is showing now, which is usually the
+        const isVideo = src => foundry.helpers.media.VideoHelper.hasVideoExtension(src ?? '');
+        const state = this.manager.state;
+        const managedTiles = (canvas.scene?.tiles ?? []).filter(tile => tileMotionManager.configs.has(tile.id));
+        // A new group starts from what is showing now, which is usually the
         // nearest thing to what the GM wants and leaves them to adjust it.
-        const checked = new Set(set ? set.layers : state.layers.filter(l => this.manager.isLayerShown(l)).map(l => l.id));
-        const defaultName = set?.name ?? '';
+        const checked = new Set(group ? group.items : (isTiles
+            ? managedTiles.filter(tile => tileMotionManager.isTileShown(tile.id)).map(tile => tile.id)
+            : state.layers.filter(l => this.manager.isLayerShown(l)).map(l => l.id)));
 
-        const row = layer => `
+        const row = ({ id: itemId, name, src, icon }) => `
             <label class="cartographer-parallax-set-dialog-row">
-                <input type="checkbox" name="layers" value="${esc(layer.id)}" ${checked.has(layer.id) ? 'checked' : ''}>
-                <span class="cartographer-parallax-set-dialog-thumb">${foundry.helpers.media.VideoHelper.hasVideoExtension(layer.src)
-                    ? '<i class="fa-solid fa-film"></i>'
-                    : `<img src="${esc(layer.src)}" alt="">`}</span>
-                <span class="cartographer-parallax-set-dialog-name">${esc(layer.name)}</span>
-                ${layer.overhead ? `<i class="fa-solid fa-cloud" data-tooltip="${esc(localize('toggleOverhead'))}"></i>` : ''}
+                <input type="checkbox" name="items" value="${esc(itemId)}" ${checked.has(itemId) ? 'checked' : ''}>
+                <span class="cartographer-parallax-set-dialog-thumb">${isVideo(src) ? '<i class="fa-solid fa-film"></i>' : `<img src="${esc(src)}" alt="">`}</span>
+                <span class="cartographer-parallax-set-dialog-name">${esc(name)}</span>
+                ${icon ?? ''}
             </label>`;
-        const nearestFirst = [...state.layers].reverse();
-        const overhead = nearestFirst.filter(l => l.overhead).map(row).join('');
-        const ground = nearestFirst.filter(l => !l.overhead).map(row).join('');
-        const list = state.layers.length
-            ? `${overhead}<div class="cartographer-parallax-set-dialog-line"><span><i class="fa-solid fa-chess-pawn"></i> ${esc(localize('tokenLine'))}</span></div>${ground}`
-            : `<p class="cartographer-parallax-set-dialog-empty">${esc(localize('setNoLayers'))}</p>`;
+        let list;
+        if (isTiles) {
+            list = managedTiles.map(tile => row({ id: tile.id, name: tileName(tile), src: tile.texture?.src })).join('');
+        } else if (state.layers.length) {
+            const layerRow = layer => row({
+                ...layer,
+                icon: layer.overhead ? `<i class="fa-solid fa-cloud" data-tooltip="${esc(localize('overheadLayer'))}"></i>` : ''
+            });
+            const nearestFirst = [...state.layers].reverse();
+            list = nearestFirst.filter(l => l.overhead).map(layerRow).join('')
+                + `<div class="cartographer-parallax-set-dialog-line"><span><i class="fa-solid fa-chess-pawn"></i> ${esc(localize('tokenLine'))}</span></div>`
+                + nearestFirst.filter(l => !l.overhead).map(layerRow).join('');
+        }
+        if (!list) list = `<p class="cartographer-parallax-set-dialog-empty">${esc(localize(isTiles ? 'groupNoTiles' : 'setNoLayers'))}</p>`;
 
         const content = `
             <div class="cartographer-parallax-set-dialog-body">
                 <label class="cartographer-parallax-set-dialog-field">
                     <span>${esc(localize('setName'))}</span>
-                    <input type="text" name="name" value="${esc(defaultName)}" placeholder="${esc(localize('setNamePlaceholder'))}" autofocus>
+                    <input type="text" name="name" value="${esc(group?.name ?? '')}" placeholder="${esc(localize('setNamePlaceholder'))}" autofocus>
                 </label>
                 <div class="cartographer-parallax-set-dialog-head">
-                    <span>${esc(localize('setLayers'))}</span>
+                    <span>${esc(localize(isTiles ? 'groupTiles' : 'setLayers'))}</span>
                     <span class="cartographer-parallax-set-dialog-bulk">
                         <a data-bulk="all">${esc(localize('selectAll'))}</a> · <a data-bulk="none">${esc(localize('selectNone'))}</a>
                     </span>
@@ -242,41 +302,42 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
 
         const result = await foundry.applications.api.DialogV2.prompt({
             classes: ['cartographer-parallax-set-dialog'],
-            window: { title: localize(set ? 'editSet' : 'addSet'), icon: 'fa-solid fa-swatchbook' },
+            window: { title: localize(group ? 'editSet' : 'addSet'), icon: 'fa-solid fa-swatchbook' },
             position: { width: 360 },
             content,
             ok: {
-                label: localize(set ? 'saveSet' : 'addSet'),
+                label: localize(group ? 'saveSet' : 'addSet'),
                 callback: (_event, button) => ({
                     name: button.form.elements.name.value,
-                    layers: new FormData(button.form).getAll('layers')
+                    items: new FormData(button.form).getAll('items')
                 })
             },
             render: (_event, dialog) => {
                 // Select all / none, wired here because the dialog is its own application.
                 dialog.element.querySelectorAll('[data-bulk]').forEach(link => link.addEventListener('click', () => {
                     const on = link.dataset.bulk === 'all';
-                    dialog.element.querySelectorAll('input[name="layers"]').forEach(box => { box.checked = on; });
+                    dialog.element.querySelectorAll('input[name="items"]').forEach(box => { box.checked = on; });
                 }));
             },
             rejectClose: false
         });
         if (!result) return;
-        const name = result.name.trim() || game.i18n.format(`${MODULE.ID}.parallax.setDefaultName`, { n: state.sets.length + 1 });
-        if (set) await this.manager.updateSet(set.id, { name, layers: result.layers });
-        else await this.manager.addSet(name, result.layers);
+        const name = result.name.trim() || game.i18n.format(`${MODULE.ID}.parallax.setDefaultName`, { n: groups.list.length + 1 });
+        if (group) await groups.update(group.id, { name, items: result.items });
+        else await groups.add(name, result.items);
     }
 
     async confirmRemoveSet(id) {
-        const set = this.manager.state.sets.find(entry => entry.id === id);
-        if (!set) return;
+        const groups = this._groups();
+        const group = groups.list.find(entry => entry.id === id);
+        if (!group) return;
         const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
         const confirmed = await foundry.applications.api.DialogV2.confirm({
             window: { title: localize('removeSet') },
-            content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.parallax.removeSetConfirm`, { name: set.name }))}</p>`,
+            content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.parallax.removeSetConfirm`, { name: group.name }))}</p>`,
             rejectClose: false
         });
-        if (confirmed) await this.manager.removeSet(id);
+        if (confirmed) await groups.remove(id);
     }
 
     // ==================================================================
@@ -290,9 +351,12 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             settingsOpen: this.settingsOpen,
             settingsHeight: this._settingsHeight,
             tab: this.tab,
+            tileTab: this.tileTab,
+            collapsedTiles: [...this.collapsedTiles].filter(id => tileMotionManager.configs.has(id)),
             target: this.target,
             collapsed: [...this.collapsed].filter(id => known.has(id)),
-            expandedSets: [...this.expandedSets].filter(id => this.manager.state.sets.some(set => set.id === id))
+            expandedSets: [...this.expandedSets].filter(id => this.manager.state.sets.some(set => set.id === id)
+                || tileMotionManager.motion.groups.some(group => group.id === id))
         });
     }
 
@@ -312,11 +376,29 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         this.setPosition({ width: rect?.width, height });
     }
 
+    /** Each mode remembers its own tab. */
     setTab(tab) {
-        if (!TABS.some(entry => entry.id === tab) || tab === this.tab) return;
-        this.tab = tab;
+        const isTiles = this.target === 'tiles';
+        const tabs = isTiles ? TILE_TABS : TABS;
+        const current = isTiles ? this.tileTab : this.tab;
+        if (!tabs.some(entry => entry.id === tab) || tab === current) return;
+        if (isTiles) this.tileTab = tab;
+        else this.tab = tab;
         this._savePrefs();
         return this._renderKeepingSize();
+    }
+
+    toggleTileCollapsed(id) {
+        if (this.collapsedTiles.has(id)) this.collapsedTiles.delete(id);
+        else this.collapsedTiles.add(id);
+        this._savePrefs();
+        return this.render();
+    }
+
+    setAllTilesCollapsed(collapsed) {
+        this.collapsedTiles = collapsed ? new Set(tileMotionManager.configs.keys()) : new Set();
+        this._savePrefs();
+        return this.render();
     }
 
     /**
@@ -341,11 +423,6 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         this.target = target;
         this._savePrefs();
         return this._renderKeepingSize();
-    }
-
-    /** The selected tile's motion settings, for the editor. */
-    _selectedConfig() {
-        return tileMotionManager.selectedTile()?.config ?? null;
     }
 
     /** Select a tile from the list: switch to the Tiles layer, select it, and bring it into view. */
@@ -389,7 +466,6 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         // ends only stop a move at the very top and bottom: a step across the
         // token line carries the layer over it (see ParallaxManager.moveLayer).
         const last = state.layers.length - 1;
-        const activeSet = state.sets.find(set => set.id === state.activeSet) ?? null;
         const layers = state.layers.map((layer, index) => ({
             ...layer,
             isFirst: index === last && layer.overhead,
@@ -403,19 +479,24 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             setNames: state.sets.filter(set => set.layers.includes(layer.id)).map(set => set.name)
         })).reverse();
         const isTiles = this.target === 'tiles';
+        const tab = isTiles ? this.tileTab : this.tab;
+        const tiles = this._tileContext(state);
+        const tileById = new Map(tiles.managed.map(tile => [tile.id, tile]));
+        const groups = this._groups();
+        const counts = { layers: state.layers.length, tiles: tiles.managed.length, sets: groups.list.length };
         const bodyContent = !this.settingsOpen ? '' : await foundry.applications.handlebars.renderTemplate(
             `modules/${MODULE.ID}/templates/window-parallax.hbs`,
             {
                 state,
                 isTiles,
-                tiles: isTiles ? this._tileContext() : null,
-                tab: this.tab,
-                tabs: TABS.map(tab => ({
-                    id: tab.id,
-                    icon: tab.icon,
-                    label: localize(tab.labelKey),
-                    active: tab.id === this.tab,
-                    count: tab.id === 'layers' ? state.layers.length : (tab.id === 'sets' ? state.sets.length : 0)
+                tiles,
+                tab,
+                tabs: (isTiles ? TILE_TABS : TABS).map(entry => ({
+                    id: entry.id,
+                    icon: entry.icon,
+                    label: localize(entry.labelKey),
+                    active: entry.id === tab,
+                    count: counts[entry.id] ?? 0
                 })),
                 directions: Object.entries(PARALLAX_DIRECTIONS).map(([id, dir]) => ({
                     id,
@@ -424,20 +505,27 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                     active: state.angle === dir.angle
                 })),
                 allCollapsed: state.layers.length > 0 && state.layers.every(l => this.collapsed.has(l.id)),
-                sets: state.sets.map(set => ({
-                    ...set,
-                    active: set.id === state.activeSet,
-                    layerCount: set.layers.length,
-                    expanded: this.expandedSets.has(set.id),
-                    // The set's layers, nearest first and split at the token
-                    // line as everywhere else, each with its on/off in this set.
-                    overheadMembers: layers.filter(l => l.overhead && set.layers.includes(l.id))
-                        .map(l => ({ ...l, setId: set.id, offInSet: set.hidden?.includes(l.id) })),
-                    groundMembers: layers.filter(l => !l.overhead && set.layers.includes(l.id))
-                        .map(l => ({ ...l, setId: set.id, offInSet: set.hidden?.includes(l.id) }))
-                })),
-                allActive: !activeSet,
-                layerTotal: state.layers.length,
+                // The Groups tab shows the current mode's groups. Each lists
+                // its members -- layers nearest first and split at the token
+                // line, or tiles -- each with its on/off in that group.
+                sets: groups.list.map(group => {
+                    const member = item => ({ ...item, setId: group.id, offInSet: group.off.includes(item.id) });
+                    return {
+                        id: group.id,
+                        name: group.name,
+                        active: group.id === groups.activeId,
+                        itemCount: group.items.length,
+                        expanded: this.expandedSets.has(group.id),
+                        overheadMembers: isTiles ? [] : layers.filter(l => l.overhead && group.items.includes(l.id)).map(member),
+                        groundMembers: isTiles ? [] : layers.filter(l => !l.overhead && group.items.includes(l.id)).map(member),
+                        tileMembers: isTiles ? group.items.map(id => tileById.get(id)).filter(Boolean).map(member) : []
+                    };
+                }),
+                allActive: !groups.activeId,
+                itemTotal: isTiles ? tiles.managed.length : state.layers.length,
+                allLabel: localize(isTiles ? 'allTiles' : 'allLayers'),
+                allHint: localize(isTiles ? 'allTilesHint' : 'allLayersHint'),
+                groupsHint: localize(isTiles ? 'tileGroupsHint' : 'setsHint'),
                 overheadLayers: layers.filter(l => l.overhead),
                 groundLayers: layers.filter(l => !l.overhead),
                 hasLayers: layers.length > 0,
@@ -449,13 +537,16 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             appId: this.id,
             bodyContent,
             showToolBar: true,
-            toolBarLeft: isTiles
-                ? this._buildPlayControl(tileMotionManager.motion, localize, tileMotionManager.isConfigured)
-                    + this._buildTileSpeedControl(tileMotionManager.motion, localize)
-                : this._buildPlayControl(state, localize, this.manager.isConfigured)
-                    + this._buildSpeedControl(state, localize),
-            toolBarRight: (isTiles ? '' : this._buildSetControl(state, localize))
-                + this._buildTargetSwitch(localize) + this._buildSettingsToggle(localize),
+            // Which mode comes first, since it decides what everything after it drives.
+            toolBarLeft: this._buildTargetSwitch(localize)
+                + '<span class="cartographer-parallax-divider"></span>'
+                + (isTiles
+                    ? this._buildPlayControl(tileMotionManager.motion, localize, tileMotionManager.isConfigured)
+                        + this._buildTileSpeedControl(tileMotionManager.motion, localize)
+                    : this._buildPlayControl(state, localize, this.manager.isConfigured)
+                        + this._buildSpeedControl(state, localize)),
+            // Sets cover layers and tiles alike, so the set choice is in both modes.
+            toolBarRight: this._buildSetControl(groups, localize) + this._buildSettingsToggle(localize),
             showToolFooter: false
         };
     }
@@ -529,39 +620,56 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     }
 
     /** What the Tiles settings show: the shared ease, the selected tile's editor, and every animated tile. */
-    _tileContext() {
-        const selected = tileMotionManager.selectedTile();
+    /**
+     * What the Tiles settings show: every tile Cartographer manages, each with
+     * its settings, and a way to bring in the tile selected on the canvas if
+     * it is not managed yet.
+     */
+    _tileContext(state) {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
         const isVideo = src => foundry.helpers.media.VideoHelper.hasVideoExtension(src ?? '');
-        const editor = selected ? {
-            id: selected.tile.id,
-            name: tileName(selected.tile.document),
-            src: selected.tile.document.texture?.src,
-            isVideo: isVideo(selected.tile.document.texture?.src),
-            ...selected.config
-        } : null;
-        const animated = (canvas.scene?.tiles ?? []).filter(tile => tileMotionManager.configs.has(tile.id)).map(tile => {
+        const selectedId = canvas.tiles?.controlled?.[0]?.id ?? null;
+        const managed = (canvas.scene?.tiles ?? []).filter(tile => tileMotionManager.configs.has(tile.id)).map(tile => {
             const config = tileMotionManager.configs.get(tile.id) ?? defaultTileMotion();
+            const parts = [];
+            if (config.rotate.enabled) parts.push(`${localize('rotate')} ${config.rotate.speed}°/s`);
+            if (config.scroll.enabled) parts.push(`${localize('scroll')} ${config.scroll.speed} px/s`);
+            if (!config.visible) parts.push(localize('hidden'));
             return {
+                ...config,
                 id: tile.id,
                 name: tileName(tile),
                 src: tile.texture?.src,
                 isVideo: isVideo(tile.texture?.src),
-                rotates: config.rotate.enabled,
-                scrolls: config.scroll.enabled,
-                selected: tile.id === editor?.id
+                alpha: tile.alpha ?? 1,
+                collapsed: this.collapsedTiles.has(tile.id),
+                selected: tile.id === selectedId,
+                setNames: state.sets.filter(set => set.tiles?.includes(tile.id)).map(set => set.name),
+                summary: parts.join(' · ') || localize('still')
             };
         });
-        return { motion: tileMotionManager.motion, editor, animated, hasAnimated: animated.length > 0 };
+        const selectedDoc = selectedId ? canvas.scene?.tiles.get(selectedId) : null;
+        const selectedUnmanaged = selectedDoc && !tileMotionManager.configs.has(selectedId)
+            ? { id: selectedId, name: tileName(selectedDoc) }
+            : null;
+        return {
+            motion: tileMotionManager.motion,
+            managed,
+            hasManaged: managed.length > 0,
+            allCollapsed: managed.length > 0 && managed.every(tile => tile.collapsed),
+            selectedUnmanaged
+        };
     }
 
-    /** Which set is showing. Absent until there is a set to choose. */
-    _buildSetControl(state, localize) {
-        if (!state.sets.length) return '';
+    /** Which of this mode's groups is showing. Absent until there is a group to choose. */
+    _buildSetControl(groups, localize) {
+        if (!groups.list.length) return '';
         const esc = value => foundry.utils.escapeHTML(String(value));
-        const option = (id, name) => `<option value="${esc(id)}"${(state.activeSet ?? '') === id ? ' selected' : ''}>${esc(name)}</option>`;
+        const option = (id, name) => `<option value="${esc(id)}"${(groups.activeId ?? '') === id ? ' selected' : ''}>${esc(name)}</option>`;
         const label = esc(localize('activeSet'));
+        const all = localize(this.target === 'tiles' ? 'allTiles' : 'allLayers');
         return `<select class="cartographer-parallax-set-select" data-field="activeSet" aria-label="${label}" data-tooltip="${label}">
-            ${option('', localize('allLayers'))}${state.sets.map(set => option(set.id, set.name)).join('')}
+            ${option('', all)}${groups.list.map(group => option(group.id, group.name)).join('')}
         </select>`;
     }
 
@@ -619,7 +727,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         if (field === 'speed' && Math.abs(value) < LAYER_SNAP) value = 0;
         if (field === 'angleOffset' && Math.abs(value) < 5) value = 0;
         if (field === 'depth' && Math.abs(value) < 0.05) value = 0;
-        return { field, value, layerId: target.dataset.layerId ?? null };
+        return { field, value, layerId: target.dataset.layerId ?? null, tileId: target.dataset.tileId ?? null };
     }
 
     _onInput(event) {
@@ -628,7 +736,9 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const readout = event.target.closest('.cartographer-parallax-field')
             ?.querySelector('.cartographer-parallax-value');
         if (readout) readout.textContent = this._formatReadout(input);
-        if (input.field === 'tile') {
+        if (input.field === 'tileAlpha') {
+            // The tile's own opacity is saved on release; nothing to preview.
+        } else if (input.field === 'tile') {
             tileMotionManager.preview((_motion, configs) => {
                 const config = configs.get(input.tileId);
                 if (config) foundry.utils.setProperty(config, input.path, input.value);
@@ -670,12 +780,13 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     _onChange(event) {
         const input = this._readInput(event.target);
         if (!input) return;
-        if (input.field === 'tile') void tileMotionManager.setTileMotion(input.tileId, input.path, input.value);
+        if (input.field === 'tileAlpha') void tileMotionManager.setTileOpacity(input.tileId, input.value);
+        else if (input.field === 'tile') void tileMotionManager.setTileMotion(input.tileId, input.path, input.value);
         else if (input.field === 'tileMasterSpeed') void tileMotionManager.setMasterSpeed(input.value);
         else if (input.field === 'tileEaseSeconds') void tileMotionManager.setEaseSeconds(input.value);
         else if (input.layerId) void this.manager.updateLayer(input.layerId, { [input.field]: input.value });
         else if (input.field === 'masterSpeed') void this.manager.setMasterSpeed(input.value);
-        else if (input.field === 'activeSet') void this.manager.setActiveSet(input.value);
+        else if (input.field === 'activeSet') void this._groups().setActive(input.value);
         else if (input.field === 'angle') void this.manager.setAngle(input.value);
         else if (input.field === 'easeSeconds') void this.manager.setEaseSeconds(input.value);
     }

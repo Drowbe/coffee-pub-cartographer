@@ -223,7 +223,7 @@ class ParallaxManager {
             toggle: () => this.togglePlaying(),
             setSpeed: speed => this.setMasterSpeed(speed),
             setAngle: angle => this.setAngle(angle),
-            setSet: nameOrId => this.setActiveSet(nameOrId),
+            setGroup: nameOrId => this.setActiveSet(nameOrId),
             setEase: seconds => this.setEaseSeconds(seconds),
             open: () => this.openWindow(),
             get state() { return parallaxManager.state; }
@@ -247,8 +247,13 @@ class ParallaxManager {
         );
         // `hidden` is the set's own on/off for each of its layers: still in the
         // set, so it is one click to bring back, but not drawn while it shows.
+        // The layer groups. Stored as `sets`, the name they had before they
+        // were called groups in the window. Each holds layers, with its own
+        // on/off for each (`hidden`). Tiles have groups of their own, in the
+        // tile motion manager, chosen independently of these.
         state.sets = (stored?.sets ?? []).map(set => ({
-            ...set,
+            id: set.id,
+            name: set.name,
             layers: [...(set.layers ?? [])],
             hidden: [...(set.hidden ?? [])]
         }));
@@ -426,7 +431,12 @@ class ParallaxManager {
         const label = String(name ?? '').trim();
         if (!label) return;
         return this._commit(s => {
-            const set = { id: foundry.utils.randomID(), name: label, layers: this._cleanLayerIds(s, layerIds), hidden: [] };
+            const set = {
+                id: foundry.utils.randomID(),
+                name: label,
+                layers: this._cleanLayerIds(s, layerIds),
+                hidden: []
+            };
             s.sets.push(set);
             s.activeSet = set.id;
         });
