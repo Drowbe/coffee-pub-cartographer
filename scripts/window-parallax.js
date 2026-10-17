@@ -5,6 +5,7 @@
 import { MODULE } from './const.js';
 import { PARALLAX_DIRECTIONS } from './manager-parallax.js';
 import { defaultTileMotion, tileMotionManager } from './manager-tilemotion.js';
+import { NONE_GROUP } from './utils-motion.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -100,7 +101,13 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     static DEFAULT_OPTIONS = {
         id: APP_ID,
         classes: ['cartographer-parallax-window'],
-        position: { width: 400, height: 'auto' },
+        // A fixed height, not 'auto'. With 'auto', Foundry refits the window to
+        // its content on every re-render -- every click, slider release and
+        // scene update here -- and pushes it back on screen when that makes it
+        // taller, so it kept resizing and moving by itself. With a number the
+        // window keeps whatever size and place the GM gives it; the body
+        // scrolls when there is more than fits.
+        position: { width: 400, height: 560 },
         window: {
             title: `${MODULE.ID}.parallax.windowTitle`,
             icon: 'fa-solid fa-layer-group',
@@ -372,8 +379,15 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         this._savePrefs();
         await this.render();
         if (this.minimized) return;
-        const height = this.settingsOpen ? (this._settingsHeight ?? 'auto') : 'auto';
-        this.setPosition({ width: rect?.width, height });
+        // Width and place are left alone; only the height follows the settings.
+        if (this.settingsOpen) {
+            this.setPosition({ height: this._settingsHeight ?? this.options.position.height });
+            return;
+        }
+        // Closed, fit the bar, then pin that number so later renders leave it be.
+        this.setPosition({ height: 'auto' });
+        const barHeight = this.element?.getBoundingClientRect().height;
+        if (barHeight) this.setPosition({ height: barHeight });
     }
 
     /** Each mode remembers its own tab. */
@@ -385,7 +399,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         if (isTiles) this.tileTab = tab;
         else this.tab = tab;
         this._savePrefs();
-        return this._renderKeepingSize();
+        return this.render();
     }
 
     toggleTileCollapsed(id) {
@@ -402,16 +416,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     }
 
     /**
-     * Re-render without the frame changing size. Tab switches swap
-     * the whole body, and with an 'auto' height the window would grow and
-     * shrink under the pointer each time; pinning the measured size keeps it
-     * where the GM put it, and the body scrolls instead.
-     */
-    async _renderKeepingSize() {
-        const rect = this.element?.getBoundingClientRect();
-        await this.render();
-        if (rect?.height && !this.minimized) this.setPosition({ width: rect.width, height: rect.height });
-    }
+
 
     /** The motion the bar is running: the scene's parallax or its tiles. Both answer play/stop/speed alike. */
     _motion() {
@@ -422,7 +427,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         if (!TARGETS.some(entry => entry.id === target) || target === this.target) return;
         this.target = target;
         this._savePrefs();
-        return this._renderKeepingSize();
+        return this.render();
     }
 
     /** Select a tile from the list: switch to the Tiles layer, select it, and bring it into view. */
@@ -522,6 +527,15 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                     };
                 }),
                 allActive: !groups.activeId,
+                noneActive: groups.activeId === NONE_GROUP,
+                noneId: NONE_GROUP,
+                noneLabel: localize(isTiles ? 'noTiles' : 'noLayers'),
+                noneHint: localize(isTiles ? 'noTilesHint' : 'noLayersHint'),
+                // Shown on the Layers or Tiles tab while None is chosen, since
+                // nothing there -- not even something just added -- will show.
+                noneShowing: groups.activeId === NONE_GROUP
+                    ? localize(isTiles ? 'noneShowingTiles' : 'noneShowingLayers')
+                    : null,
                 itemTotal: isTiles ? tiles.managed.length : state.layers.length,
                 allLabel: localize(isTiles ? 'allTiles' : 'allLayers'),
                 allHint: localize(isTiles ? 'allTilesHint' : 'allLayersHint'),
@@ -663,13 +677,16 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
 
     /** Which of this mode's groups is showing. Absent until there is a group to choose. */
     _buildSetControl(groups, localize) {
-        if (!groups.list.length) return '';
+        // All and None are always there, so the choice is offered as soon as
+        // the mode has anything to show or hide, groups or not.
+        const isTiles = this.target === 'tiles';
+        const hasItems = isTiles ? tileMotionManager.configs.size > 0 : this.manager.state.layers.length > 0;
+        if (!hasItems) return '';
         const esc = value => foundry.utils.escapeHTML(String(value));
         const option = (id, name) => `<option value="${esc(id)}"${(groups.activeId ?? '') === id ? ' selected' : ''}>${esc(name)}</option>`;
         const label = esc(localize('activeSet'));
-        const all = localize(this.target === 'tiles' ? 'allTiles' : 'allLayers');
         return `<select class="cartographer-parallax-set-select" data-field="activeSet" aria-label="${label}" data-tooltip="${label}">
-            ${option('', all)}${groups.list.map(group => option(group.id, group.name)).join('')}
+            ${option('', localize(isTiles ? 'allTiles' : 'allLayers'))}${option(NONE_GROUP, localize(isTiles ? 'noTiles' : 'noLayers'))}${groups.list.map(group => option(group.id, group.name)).join('')}
         </select>`;
     }
 

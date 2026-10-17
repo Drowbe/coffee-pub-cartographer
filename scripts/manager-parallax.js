@@ -6,7 +6,7 @@ import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
 import { tileMotionManager } from './manager-tilemotion.js';
 import { releaseRepeatingTextures, repeatingTexture } from './utils-textures.js';
-import { angleVector, DEFAULT_EASE_SECONDS, easeProgress, motionSpeed, motionTickerPriority, motionTravel, wrap } from './utils-motion.js';
+import { angleVector, DEFAULT_EASE_SECONDS, NONE_GROUP, easeProgress, motionSpeed, motionTickerPriority, motionTravel, wrap } from './utils-motion.js';
 
 const FLAG_KEY = 'parallax';
 const TOOL_ID = `${MODULE.ID}-parallax`;
@@ -263,7 +263,7 @@ class ParallaxManager {
             set.layers = set.layers.filter(id => layerIds.has(id));
             set.hidden = set.hidden.filter(id => set.layers.includes(id));
         }
-        if (!state.sets.some(set => set.id === state.activeSet)) state.activeSet = null;
+        if (state.activeSet !== NONE_GROUP && !state.sets.some(set => set.id === state.activeSet)) state.activeSet = null;
         return state;
     }
 
@@ -395,6 +395,7 @@ class ParallaxManager {
      */
     isLayerShown(layer, state = this.state) {
         if (!layer.visible) return false;
+        if (state.activeSet === NONE_GROUP) return false;
         const active = state.sets.find(set => set.id === state.activeSet);
         if (!active) return true;
         return active.layers.includes(layer.id) && !active.hidden?.includes(layer.id);
@@ -468,6 +469,10 @@ class ParallaxManager {
     setActiveSet(nameOrId) {
         if (!nameOrId || String(nameOrId).toLowerCase() === 'all') {
             return this._commit(s => { s.activeSet = null; });
+        }
+        // The built-in None comes before any group a GM happened to name "None".
+        if (String(nameOrId).toLowerCase() === NONE_GROUP) {
+            return this._commit(s => { s.activeSet = NONE_GROUP; });
         }
         const set = this._findSet(this.state, nameOrId);
         if (!set) return;

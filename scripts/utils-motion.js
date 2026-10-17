@@ -20,6 +20,13 @@
  * keeps a change of speed from making anything jump.
  */
 
+/**
+ * The id of the built-in "None" group, in either mode: nothing shows. Saved
+ * as the active group like any other; real group ids are random and never
+ * collide with it. "All" is the other built-in, saved as no group at all.
+ */
+export const NONE_GROUP = 'none';
+
 /** How long a change of speed takes by default, in seconds. */
 export const DEFAULT_EASE_SECONDS = 2;
 

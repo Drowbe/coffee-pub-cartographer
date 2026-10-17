@@ -213,6 +213,12 @@
             <span class="cartographer-parallax-set-name">{{allLabel}}</span>
             <span class="cartographer-parallax-set-count">{{itemTotal}}</span>
         </div>
+        <div class="cartographer-parallax-set-row is-common{{#if noneActive}} is-active{{/if}}">
+            <button type="button" class="cartographer-parallax-button{{#if noneActive}} is-active{{/if}}" data-action="select-set" data-set-id="{{noneId}}"
+                data-tooltip="{{noneHint}}"><i class="fa-solid {{#if noneActive}}fa-circle-dot{{else}}fa-circle{{/if}}"></i></button>
+            <span class="cartographer-parallax-set-name">{{noneLabel}}</span>
+            <span class="cartographer-parallax-set-count">0</span>
+        </div>
         {{#each sets}}
         <div class="cartographer-parallax-set{{#if active}} is-active{{/if}}{{#if expanded}} is-expanded{{/if}}">
             <div class="cartographer-parallax-set-row{{#if active}} is-active{{/if}}">
@@ -280,6 +286,7 @@
 
     {{#if (eq tab "tiles")}}
     <div class="cartographer-parallax-panel">
+        {{#if noneShowing}}<div class="cartographer-parallax-notice"><i class="fa-solid fa-eye-slash"></i> {{noneShowing}}</div>{{/if}}
         {{#if tiles.selectedUnmanaged}}
         {{! A tile is selected on the canvas that Cartographer does not manage yet. }}
         <button type="button" class="cartographer-parallax-add-tile" data-action="manage-selected-tile" data-tile-id="{{tiles.selectedUnmanaged.id}}">
@@ -339,6 +346,7 @@
 
     {{#if (eq tab "layers")}}
     <div class="cartographer-parallax-panel">
+        {{#if noneShowing}}<div class="cartographer-parallax-notice"><i class="fa-solid fa-eye-slash"></i> {{noneShowing}}</div>{{/if}}
         {{#if hasLayers}}
         <div class="cartographer-parallax-section-header">
             <i class="fa-solid fa-layer-group"></i>

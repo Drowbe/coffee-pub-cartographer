@@ -7,6 +7,7 @@ import {
     angleVector,
     defaultMotion,
     easeProgress,
+    NONE_GROUP,
     motionSpeed,
     motionTickerPriority,
     motionTravel,
@@ -167,7 +168,9 @@ class TileMotionManager {
             group.tiles = group.tiles.filter(id => this.configs.has(id));
             group.hidden = group.hidden.filter(id => group.tiles.includes(id));
         }
-        if (!this.motion.groups.some(group => group.id === this.motion.activeGroup)) this.motion.activeGroup = null;
+        if (this.motion.activeGroup !== NONE_GROUP && !this.motion.groups.some(group => group.id === this.motion.activeGroup)) {
+            this.motion.activeGroup = null;
+        }
         this._sync();
         this._fadeReady = true;
         this._renderWindow();
@@ -185,6 +188,7 @@ class TileMotionManager {
      */
     isTileShown(tileId, config = this.configs.get(tileId)) {
         if (!config?.visible) return false;
+        if (this.motion.activeGroup === NONE_GROUP) return false;
         const active = this.activeGroup;
         if (!active) return true;
         return active.tiles.includes(tileId) && !active.hidden.includes(tileId);
@@ -238,6 +242,10 @@ class TileMotionManager {
     setActiveGroup(nameOrId) {
         if (!nameOrId || String(nameOrId).toLowerCase() === 'all') {
             return this._commit(m => { m.activeGroup = null; });
+        }
+        // The built-in None comes before any group a GM happened to name "None".
+        if (String(nameOrId).toLowerCase() === NONE_GROUP) {
+            return this._commit(m => { m.activeGroup = NONE_GROUP; });
         }
         const key = String(nameOrId).toLowerCase();
         const group = this.motion.groups.find(entry => entry.id === nameOrId)

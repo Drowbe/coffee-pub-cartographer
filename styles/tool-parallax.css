@@ -485,6 +485,16 @@
     gap: 2px;
 }
 
+/* A short note at the head of a tab, e.g. that None is hiding everything here. */
+.cartographer-parallax-window .cartographer-parallax-notice {
+    padding: 6px 8px;
+    border-left: 3px solid var(--blacksmith-color-brand-accent);
+    border-radius: 3px;
+    background: var(--blacksmith-tool-surface-raised);
+    color: var(--blacksmith-tool-text);
+    font-size: 0.85em;
+}
+
 /* --- Tiles mode -------------------- */
 /* Between the mode switch and Play/Stop in the bar. */
 .cartographer-parallax-window .cartographer-parallax-divider {
