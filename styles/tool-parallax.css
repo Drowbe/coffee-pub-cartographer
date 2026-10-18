@@ -377,6 +377,14 @@
     flex: 1 1 auto;
 }
 
+/* Bar items keep their natural width, so the window's minimum (measured from
+   them in the script) is honest and nothing is squeezed into its neighbour.
+   The speed slider is the one part that stretches. */
+.cartographer-parallax-window .blacksmith-window-tool-bar-left > *,
+.cartographer-parallax-window .blacksmith-window-tool-bar-right > * {
+    flex-shrink: 0;
+}
+
 /* Also a .cartographer-parallax-field (so the slider readout updates), whose
    grid is declared later; the doubled class keeps this one in charge. */
 .cartographer-parallax-window .cartographer-parallax-field.cartographer-parallax-bar-speed {
@@ -384,7 +392,9 @@
     flex: 1 1 auto;
     align-items: center;
     gap: 6px;
-    min-width: 120px;
+    /* Two arrows, a usable slider and the readout. Read by the script as the
+       bar's minimum share for the slider, so change it here only. */
+    min-width: 160px;
 }
 
 .cartographer-parallax-window .cartographer-parallax-bar-speed input[type="range"] {

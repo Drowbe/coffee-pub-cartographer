@@ -125,7 +125,9 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         },
         toolTheme: 'glass',
         // No minimum height: with settings hidden the window is only its bar.
-        windowSizeConstraints: { minWidth: 380 }
+        // The minimum width is a floor only; the real one is measured from the
+        // bar after each render (see _applyWindowSizeConstraints).
+        windowSizeConstraints: { minWidth: 300 }
     };
 
     static ACTION_HANDLERS = {
@@ -579,6 +581,41 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
      * position -- fits the bar rather than the last saved height. Every way
      * the frame is sized comes through here, so this is the one place to say it.
      */
+    /**
+     * Never narrower than the control bar needs. What the bar holds changes
+     * with the mode -- a speed slider or not, a group dropdown once there is
+     * something to choose -- so the minimum is measured from it rather than
+     * fixed: every bar item at its natural width, and the speed slider, the one
+     * part that stretches, at its smallest.
+     *
+     * Blacksmith applies the window's size limits from its options after every
+     * render, which would put back the fixed floor; measuring here, straight
+     * after it, keeps the measured minimum in force.
+     */
+    _applyWindowSizeConstraints() {
+        super._applyWindowSizeConstraints?.();
+        const bar = this.element?.querySelector('.blacksmith-window-tool-bar');
+        if (!bar || this.minimized) return;
+        const px = value => parseFloat(value) || 0;
+        const barStyle = getComputedStyle(bar);
+        const zones = [...bar.children];
+        let need = px(barStyle.paddingLeft) + px(barStyle.paddingRight) + px(barStyle.columnGap) * Math.max(0, zones.length - 1);
+        for (const zone of zones) {
+            const items = [...zone.children].filter(item => item.tagName !== 'DATALIST' && getComputedStyle(item).display !== 'none');
+            need += px(getComputedStyle(zone).columnGap) * Math.max(0, items.length - 1);
+            for (const item of items) {
+                need += item.classList.contains('cartographer-parallax-bar-speed')
+                    ? px(getComputedStyle(item).minWidth)
+                    : item.getBoundingClientRect().width;
+            }
+        }
+        // The frame around the bar: borders and the content area's padding.
+        need += this.element.getBoundingClientRect().width - bar.getBoundingClientRect().width;
+        need = Math.ceil(need);
+        this.element.style.setProperty('--blacksmith-window-min-width', `${need}px`);
+        if (this.element.getBoundingClientRect().width < need) this.setPosition({ width: need });
+    }
+
     setPosition(position = {}) {
         if (this.settingsOpen || !this.element || this.minimized) return super.setPosition(position);
         return super.setPosition({ ...position, height: 'auto' });
