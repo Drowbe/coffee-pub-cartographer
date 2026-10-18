@@ -102,6 +102,11 @@ class CartographerToolbar {
                     'Utilities': {
                         mode: 'default', // Independent buttons (supports toggleable)
                         order: 20 // Order for the group
+                    },
+                    // Parallax, tile motion and collections: see manager-motionbar.js.
+                    'Scene Motion': {
+                        mode: 'default', // Independent buttons; Play/Stop and collections are toggleable
+                        order: 25
                     }
                     // 'default' group is automatically created for items without a group
                 },

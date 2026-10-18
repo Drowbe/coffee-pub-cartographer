@@ -7,7 +7,6 @@ import {
     angleVector,
     defaultMotion,
     easeProgress,
-    NONE_GROUP,
     motionSpeed,
     motionTickerPriority,
     motionTravel,
@@ -15,6 +14,7 @@ import {
     wrap
 } from './utils-motion.js';
 import { repeatingTexture } from './utils-textures.js';
+import { NONE_GROUP, normalizeActive, shownByGroups, toggledActive } from './utils-groups.js';
 
 /**
  * Scene flag: the shared Play/Stop, speed and ease for every animated tile,
@@ -66,7 +66,7 @@ export function isManagedTile(tileDocument) {
 class TileMotionManager {
     constructor() {
         /** The shared motion, from the scene flag. */
-        this.motion = { ...defaultMotion(), offsets: {}, groups: [], activeGroup: null };
+        this.motion = { ...defaultMotion(), offsets: {}, groups: [], activeGroups: null };
         /** tile id -> its motion settings, for every tile Cartographer manages on the scene. */
         this.configs = new Map();
         /** tile id -> a fade in progress: { from, to, start }. As for parallax layers. */
@@ -136,6 +136,7 @@ class TileMotionManager {
             /** e.g. setTileMotion(tileId, 'rotate.speed', 90) or (tileId, 'scroll.enabled', true) */
             setTileMotion: (tileId, path, value) => this.setTileMotion(tileId, path, value),
             setGroup: nameOrId => this.setActiveGroup(nameOrId),
+            toggleGroup: nameOrId => this.toggleGroup(nameOrId),
             show: tileId => this.setTileMotion(tileId, 'visible', true),
             hide: tileId => this.setTileMotion(tileId, 'visible', false),
             clear: tileId => this.clearTileMotion(tileId),
@@ -149,7 +150,6 @@ class TileMotionManager {
         const stored = canvas.scene.getFlag(MODULE.ID, SCENE_FLAG) ?? {};
         this.motion = {
             ...defaultMotion(),
-            activeGroup: null,
             ...stored,
             offsets: { ...(stored.offsets ?? {}) },
             groups: (stored.groups ?? []).map(group => ({
@@ -168,9 +168,10 @@ class TileMotionManager {
             group.tiles = group.tiles.filter(id => this.configs.has(id));
             group.hidden = group.hidden.filter(id => group.tiles.includes(id));
         }
-        if (this.motion.activeGroup !== NONE_GROUP && !this.motion.groups.some(group => group.id === this.motion.activeGroup)) {
-            this.motion.activeGroup = null;
-        }
+        // Which tile groups are on: null for All, [] for None, else ids. Older
+        // saves held one group, as `activeGroup`.
+        this.motion.activeGroups = normalizeActive(stored.activeGroups, stored.activeGroup, this.motion.groups);
+        delete this.motion.activeGroup;
         this._sync();
         this._fadeReady = true;
         this._renderWindow();
@@ -183,19 +184,11 @@ class TileMotionManager {
 
     /**
      * Whether a managed tile is part of what is showing: its own show/hide,
-     * then the tile group showing. With no group showing ("All Tiles"),
-     * every managed tile does.
+     * then the tile groups that are on, which add together.
      */
     isTileShown(tileId, config = this.configs.get(tileId)) {
         if (!config?.visible) return false;
-        if (this.motion.activeGroup === NONE_GROUP) return false;
-        const active = this.activeGroup;
-        if (!active) return true;
-        return active.tiles.includes(tileId) && !active.hidden.includes(tileId);
-    }
-
-    get activeGroup() {
-        return this.motion.groups.find(group => group.id === this.motion.activeGroup) ?? null;
+        return shownByGroups(tileId, this.motion.groups, this.motion.activeGroups, group => group.tiles, group => group.hidden);
     }
 
     // ==================================================================
@@ -213,7 +206,9 @@ class TileMotionManager {
         return this._commit(m => {
             const group = { id: foundry.utils.randomID(), name: label, tiles: this._cleanTileIds(tileIds), hidden: [] };
             m.groups = [...m.groups, group];
-            m.activeGroup = group.id;
+            // Shown on its own, which looks exactly as things did when it was
+            // made from what was showing.
+            m.activeGroups = [group.id];
         });
     }
 
@@ -234,24 +229,48 @@ class TileMotionManager {
     removeGroup(id) {
         return this._commit(m => {
             m.groups = m.groups.filter(group => group.id !== id);
-            if (m.activeGroup === id) m.activeGroup = null;
+            if (m.activeGroups) {
+                const wasOn = m.activeGroups.includes(id);
+                m.activeGroups = m.activeGroups.filter(groupId => groupId !== id);
+                // The last group on was the one removed: back to All.
+                if (wasOn && !m.activeGroups.length) m.activeGroups = null;
+            }
         });
     }
 
-    /** Switch the showing group, by id or by name (for macros). Null, or 'all', shows every tile. */
-    setActiveGroup(nameOrId) {
-        if (!nameOrId || String(nameOrId).toLowerCase() === 'all') {
-            return this._commit(m => { m.activeGroup = null; });
-        }
-        // The built-in None comes before any group a GM happened to name "None".
-        if (String(nameOrId).toLowerCase() === NONE_GROUP) {
-            return this._commit(m => { m.activeGroup = NONE_GROUP; });
-        }
+    _findGroup(nameOrId) {
+        if (!nameOrId) return null;
         const key = String(nameOrId).toLowerCase();
-        const group = this.motion.groups.find(entry => entry.id === nameOrId)
-            ?? this.motion.groups.find(entry => entry.name.toLowerCase() === key);
+        return this.motion.groups.find(entry => entry.id === nameOrId)
+            ?? this.motion.groups.find(entry => entry.name.toLowerCase() === key)
+            ?? null;
+    }
+
+    /**
+     * Show just one group, by id or by name (for macros), or 'all' / null for
+     * every tile, or 'none' for none. The built-in None comes before any
+     * group a GM happened to name "None".
+     */
+    setActiveGroup(nameOrId) {
+        if (!nameOrId || String(nameOrId).toLowerCase() === 'all') return this.setActiveGroups(null);
+        if (String(nameOrId).toLowerCase() === NONE_GROUP) return this.setActiveGroups([]);
+        const group = this._findGroup(nameOrId);
         if (!group) return;
-        return this._commit(m => { m.activeGroup = group.id; });
+        return this.setActiveGroups([group.id]);
+    }
+
+    /** Turn one group on or off among those on, by id or name. */
+    toggleGroup(nameOrId) {
+        const group = this._findGroup(nameOrId);
+        if (!group) return;
+        return this.setActiveGroups(toggledActive(this.motion.activeGroups, group.id));
+    }
+
+    /** Set exactly which groups are on: null for All, [] for None, else ids. Unknown ids are dropped. */
+    setActiveGroups(ids) {
+        return this._commit(m => {
+            m.activeGroups = ids === null ? null : [...new Set(ids)].filter(id => m.groups.some(group => group.id === id));
+        });
     }
 
     /** Turn one of a group's tiles on or off within that group only. */
@@ -344,11 +363,13 @@ class TileMotionManager {
         const isNew = !isManagedTile(tile);
         const config = readTileMotion(tile) ?? defaultTileMotion();
         foundry.utils.setProperty(config, path, value);
-        // A tile brought in while a group is showing joins it, as a new layer
+        // A tile brought in while groups are on joins them, as a new layer
         // does; otherwise it would be hidden the moment it was set up.
         await this._commit(m => {
-            const active = m.groups.find(group => group.id === m.activeGroup);
-            if (isNew && active && !active.tiles.includes(tileId)) active.tiles.push(tileId);
+            if (!isNew || !m.activeGroups) return;
+            for (const group of m.groups) {
+                if (m.activeGroups.includes(group.id) && !group.tiles.includes(tileId)) group.tiles.push(tileId);
+            }
         });
         await tile.setFlag(MODULE.ID, TILE_FLAG, config);
     }

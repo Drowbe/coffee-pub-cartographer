@@ -3,13 +3,12 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
-import { cartographerToolbar } from './manager-toolbar.js';
 import { tileMotionManager } from './manager-tilemotion.js';
 import { releaseRepeatingTextures, repeatingTexture } from './utils-textures.js';
-import { angleVector, DEFAULT_EASE_SECONDS, NONE_GROUP, easeProgress, motionSpeed, motionTickerPriority, motionTravel, wrap } from './utils-motion.js';
+import { NONE_GROUP, normalizeActive, shownByGroups, toggledActive } from './utils-groups.js';
+import { angleVector, DEFAULT_EASE_SECONDS, easeProgress, motionSpeed, motionTickerPriority, motionTravel, wrap } from './utils-motion.js';
 
 const FLAG_KEY = 'parallax';
-const TOOL_ID = `${MODULE.ID}-parallax`;
 const WINDOW_ID = `${MODULE.ID}-parallax`;
 /**
  * Whether the GM wants the window up, per browser. Set when they open or close
@@ -75,10 +74,11 @@ function defaultState() {
         // eases from towards its target. Null means it was already there.
         rampFrom: null,
         layers: [],
-        // Named combinations of layers -- Summer, Winter -- of which one shows
-        // at a time, or none for every layer. See isLayerShown.
+        // Named groups of layers -- Base, Snow, Night -- which add together.
+        // `activeSets` is which are on: null for All, [] for None, else ids.
+        // See utils-groups.js.
         sets: [],
-        activeSet: null
+        activeSets: null
     };
 }
 
@@ -158,7 +158,6 @@ class ParallaxManager {
 
     async initialize() {
         this._registerWindow();
-        this._registerToolbarTool();
         this._registerHooks();
         this._exposeApi();
         await this.refresh({ sceneLoaded: true });
@@ -178,18 +177,6 @@ class ParallaxManager {
             moduleId: MODULE.ID,
             title: game.i18n.localize(`${MODULE.ID}.parallax.windowTitle`),
             open: async () => this.openWindow()
-        });
-    }
-
-    _registerToolbarTool() {
-        if (!game.user.isGM) return;
-        cartographerToolbar.registerTool(TOOL_ID, {
-            icon: 'fa-solid fa-layer-group',
-            tooltip: game.i18n.localize(`${MODULE.ID}.parallax.openHint`),
-            group: 'Utilities',
-            order: 10,
-            toggleable: false,
-            onClick: () => this.openWindow()
         });
     }
 
@@ -224,6 +211,7 @@ class ParallaxManager {
             setSpeed: speed => this.setMasterSpeed(speed),
             setAngle: angle => this.setAngle(angle),
             setGroup: nameOrId => this.setActiveSet(nameOrId),
+            toggleGroup: nameOrId => this.toggleSet(nameOrId),
             setEase: seconds => this.setEaseSeconds(seconds),
             open: () => this.openWindow(),
             get state() { return parallaxManager.state; }
@@ -263,7 +251,9 @@ class ParallaxManager {
             set.layers = set.layers.filter(id => layerIds.has(id));
             set.hidden = set.hidden.filter(id => set.layers.includes(id));
         }
-        if (state.activeSet !== NONE_GROUP && !state.sets.some(set => set.id === state.activeSet)) state.activeSet = null;
+        // Older saves held one group, as `activeSet`.
+        state.activeSets = normalizeActive(stored?.activeSets, stored?.activeSet, state.sets);
+        delete state.activeSet;
         return state;
     }
 
@@ -359,15 +349,16 @@ class ParallaxManager {
     }
 
     /**
-     * Add a layer. With a set showing it joins that set too; otherwise it
-     * would be added and promptly hidden, which reads as the add failing.
+     * Add a layer. With groups on it joins them too; otherwise it would be
+     * added and promptly hidden, which reads as the add failing. (Under None
+     * it joins nothing and stays hidden, as the window says.)
      */
     addLayer(src) {
         if (!src) return;
         return this._commit(s => {
             const layer = defaultLayer(src);
             s.layers.push(layer);
-            s.sets.find(set => set.id === s.activeSet)?.layers.push(layer.id);
+            for (const set of s.sets) if (s.activeSets?.includes(set.id)) set.layers.push(layer.id);
         });
     }
 
@@ -386,19 +377,13 @@ class ParallaxManager {
     // ==================================================================
 
     /**
-     * Whether a layer is part of what is showing. A set is a chosen
-     * combination of layers -- Summer is sky, hills and leafy trees; Winter is
-     * the same sky, the same hills, bare trees and snow -- so a layer can be in
-     * any number of them. With a set active exactly its layers show; with none
-     * active ("All layers") every layer does. The layer's own eye toggle
-     * applies on top either way.
+     * Whether a layer is part of what is showing: its own eye, then the
+     * groups that are on. Groups add together -- Base plus Snow plus Night --
+     * and a layer shows when any group that is on shows it.
      */
     isLayerShown(layer, state = this.state) {
         if (!layer.visible) return false;
-        if (state.activeSet === NONE_GROUP) return false;
-        const active = state.sets.find(set => set.id === state.activeSet);
-        if (!active) return true;
-        return active.layers.includes(layer.id) && !active.hidden?.includes(layer.id);
+        return shownByGroups(layer.id, state.sets, state.activeSets, set => set.layers, set => set.hidden);
     }
 
     /** Turn one of a set's layers on or off within that set only. */
@@ -439,7 +424,9 @@ class ParallaxManager {
                 hidden: []
             };
             s.sets.push(set);
-            s.activeSet = set.id;
+            // Shown on its own, which looks exactly as things did when it was
+            // made from what was showing.
+            s.activeSets = [set.id];
         });
     }
 
@@ -461,22 +448,40 @@ class ParallaxManager {
     removeSet(id) {
         return this._commit(s => {
             s.sets = s.sets.filter(set => set.id !== id);
-            if (s.activeSet === id) s.activeSet = null;
+            if (s.activeSets) {
+                const wasOn = s.activeSets.includes(id);
+                s.activeSets = s.activeSets.filter(setId => setId !== id);
+                // The last group on was the one removed: back to All.
+                if (wasOn && !s.activeSets.length) s.activeSets = null;
+            }
         });
     }
 
-    /** Switch the showing set, by id or by name (for macros). Null, or 'all', shows every layer. */
+    /**
+     * Show just one group, by id or by name (for macros), or 'all' / null for
+     * every layer, or 'none' for none. The built-in None comes before any
+     * group a GM happened to name "None".
+     */
     setActiveSet(nameOrId) {
-        if (!nameOrId || String(nameOrId).toLowerCase() === 'all') {
-            return this._commit(s => { s.activeSet = null; });
-        }
-        // The built-in None comes before any group a GM happened to name "None".
-        if (String(nameOrId).toLowerCase() === NONE_GROUP) {
-            return this._commit(s => { s.activeSet = NONE_GROUP; });
-        }
+        if (!nameOrId || String(nameOrId).toLowerCase() === 'all') return this.setActiveSets(null);
+        if (String(nameOrId).toLowerCase() === NONE_GROUP) return this.setActiveSets([]);
         const set = this._findSet(this.state, nameOrId);
         if (!set) return;
-        return this._commit(s => { s.activeSet = set.id; });
+        return this.setActiveSets([set.id]);
+    }
+
+    /** Turn one group on or off among those on, by id or name. */
+    toggleSet(nameOrId) {
+        const set = this._findSet(this.state, nameOrId);
+        if (!set) return;
+        return this.setActiveSets(toggledActive(this.state.activeSets, set.id));
+    }
+
+    /** Set exactly which groups are on: null for All, [] for None, else ids. Unknown ids are dropped. */
+    setActiveSets(ids) {
+        return this._commit(s => {
+            s.activeSets = ids === null ? null : [...new Set(ids)].filter(id => s.sets.some(set => set.id === id));
+        });
     }
 
     /**

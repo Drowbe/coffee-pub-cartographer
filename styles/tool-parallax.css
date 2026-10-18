@@ -495,6 +495,47 @@
     font-size: 0.85em;
 }
 
+/* --- Collections ------------------- */
+/* Every group as a chip: All and None choose outright; the rest switch on and
+   off, since groups add together. */
+.cartographer-parallax-window .cartographer-parallax-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+    height: 24px;
+    padding: 0 10px;
+    margin: 0;
+    border: 1px solid var(--blacksmith-tool-divider);
+    border-radius: 12px;
+    background: transparent;
+    color: var(--blacksmith-tool-text-muted);
+    line-height: 22px;
+    cursor: pointer;
+}
+
+.cartographer-parallax-window .cartographer-parallax-chip:hover {
+    background: var(--blacksmith-tool-surface-hover);
+    color: var(--blacksmith-tool-text);
+}
+
+.cartographer-parallax-window .cartographer-parallax-chip.is-active {
+    border-color: var(--blacksmith-color-brand-accent);
+    background: var(--blacksmith-tool-surface-selected);
+    color: var(--blacksmith-tool-text);
+    font-weight: bold;
+}
+
+.cartographer-parallax-window .cartographer-parallax-chip.is-active i {
+    color: var(--blacksmith-color-brand-accent);
+}
+
 /* --- Tiles mode -------------------- */
 /* Between the mode switch and Play/Stop in the bar. */
 .cartographer-parallax-window .cartographer-parallax-divider {

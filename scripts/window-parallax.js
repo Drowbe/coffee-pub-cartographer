@@ -5,7 +5,8 @@
 import { MODULE } from './const.js';
 import { PARALLAX_DIRECTIONS } from './manager-parallax.js';
 import { defaultTileMotion, tileMotionManager } from './manager-tilemotion.js';
-import { NONE_GROUP } from './utils-motion.js';
+import { collectionsManager } from './manager-collections.js';
+import { NONE_GROUP } from './utils-groups.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -44,9 +45,15 @@ const LAYER_SNAP = 10;
 const TILE_SNAP = { 'rotate.speed': 5, 'scroll.speed': 10 };
 
 /** The two things the window can run: the scene's parallax, or its animated tiles. */
+/**
+ * The three things the window can run: the scene's parallax layers, its
+ * animated tiles, or its collections -- saved looks across both, which is why
+ * they are a mode of their own rather than a tab inside either.
+ */
 const TARGETS = [
     { id: 'scene', icon: 'fa-solid fa-layer-group', labelKey: 'targetScene' },
-    { id: 'tiles', icon: 'fa-solid fa-arrows-spin', labelKey: 'targetTiles' }
+    { id: 'tiles', icon: 'fa-solid fa-arrows-spin', labelKey: 'targetTiles' },
+    { id: 'collections', icon: 'fa-solid fa-boxes-stacked', labelKey: 'targetCollections' }
 ];
 
 function tileName(tileDocument) {
@@ -60,7 +67,7 @@ function tileName(tileDocument) {
  * that every player receives.
  */
 const PREFS_KEY = `${MODULE.ID}.parallax.windowPrefs`;
-/** The settings tabs in each mode, in the order they are offered. Sets is the same tab in both. */
+/** The settings tabs in the parallax and tiles modes. Collections mode has one panel and no tabs. */
 const TABS = [
     { id: 'movement', icon: 'fa-solid fa-gauge-high', labelKey: 'tabMovement' },
     { id: 'layers', icon: 'fa-solid fa-layer-group', labelKey: 'tabLayers' },
@@ -71,6 +78,8 @@ const TILE_TABS = [
     { id: 'tiles', icon: 'fa-solid fa-arrows-spin', labelKey: 'tabTiles' },
     { id: 'sets', icon: 'fa-solid fa-swatchbook', labelKey: 'tabSets' }
 ];
+/** The bar's choice when what is on matches no single group or collection. */
+const MIXED = '__mixed__';
 function readPrefs() {
     try {
         return JSON.parse(localStorage.getItem(PREFS_KEY)) ?? {};
@@ -155,6 +164,22 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         'move-up': (_event, target, app) => void app.manager.moveLayer(target.dataset.layerId, 1),
         'move-down': (_event, target, app) => void app.manager.moveLayer(target.dataset.layerId, -1),
         'select-set': (_event, target, app) => void app._groups().setActive(target.dataset.setId || null),
+        'toggle-group': (_event, target, app) => void app._groups().toggle(target.dataset.setId),
+        // Collections tab: both modes' groups, and the saved looks.
+        'toggle-layer-group': (_event, target, app) => void app.manager.toggleSet(target.dataset.setId),
+        'toggle-tile-group': (_event, target, _app) => void tileMotionManager.toggleGroup(target.dataset.setId),
+        'layer-groups-all': (_event, _target, app) => void app.manager.setActiveSets(null),
+        'layer-groups-none': (_event, _target, app) => void app.manager.setActiveSets([]),
+        'tile-groups-all': (_event, _target, _app) => void tileMotionManager.setActiveGroups(null),
+        'tile-groups-none': (_event, _target, _app) => void tileMotionManager.setActiveGroups([]),
+        'save-collection': (_event, _target, app) => app.promptCollectionName('saveCollection').then(name => name && collectionsManager.save(name)),
+        'apply-collection': (_event, target, _app) => void collectionsManager.apply(target.dataset.collectionId),
+        'update-collection': (_event, target, _app) => void collectionsManager.update(target.dataset.collectionId),
+        'rename-collection': (_event, target, app) => {
+            const collection = collectionsManager.find(target.dataset.collectionId);
+            if (collection) app.promptCollectionName('renameCollection', collection.name).then(name => name && collectionsManager.rename(collection.id, name));
+        },
+        'remove-collection': (_event, target, app) => app.confirmRemoveCollection(target.dataset.collectionId),
         'add-set': (_event, _target, app) => app.editSet(null),
         'edit-set': (_event, target, app) => app.editSet(target.dataset.setId),
         'toggle-set-expand': (_event, target, app) => app.toggleSetExpanded(target.dataset.setId),
@@ -230,8 +255,9 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             const motion = tileMotionManager.motion;
             return {
                 list: motion.groups.map(group => ({ id: group.id, name: group.name, items: group.tiles, off: group.hidden })),
-                activeId: motion.activeGroup,
+                active: motion.activeGroups,
                 setActive: id => tileMotionManager.setActiveGroup(id),
+                toggle: id => tileMotionManager.toggleGroup(id),
                 add: (name, items) => tileMotionManager.addGroup(name, items),
                 update: (id, { name, items }) => tileMotionManager.updateGroup(id, { name, tiles: items }),
                 remove: id => tileMotionManager.removeGroup(id)
@@ -240,8 +266,9 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const state = this.manager.state;
         return {
             list: state.sets.map(set => ({ id: set.id, name: set.name, items: set.layers, off: set.hidden })),
-            activeId: state.activeSet,
+            active: state.activeSets,
             setActive: id => this.manager.setActiveSet(id),
+            toggle: id => this.manager.toggleSet(id),
             add: (name, items) => this.manager.addSet(name, items),
             update: (id, { name, items }) => this.manager.updateSet(id, { name, layers: items }),
             remove: id => this.manager.removeSet(id)
@@ -334,6 +361,64 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         else await groups.add(name, result.items);
     }
 
+    async promptCollectionName(titleKey, value = '') {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const esc = text => foundry.utils.escapeHTML(String(text ?? ''));
+        const name = await foundry.applications.api.DialogV2.prompt({
+            window: { title: localize(titleKey), icon: 'fa-solid fa-boxes-stacked' },
+            content: `<input type="text" name="name" value="${esc(value)}" placeholder="${esc(localize('collectionNamePlaceholder'))}" autofocus>`,
+            ok: { callback: (_event, button) => button.form.elements.name.value },
+            rejectClose: false
+        });
+        return String(name ?? '').trim()
+            || (name === null ? '' : game.i18n.format(`${MODULE.ID}.parallax.collectionDefaultName`, { n: collectionsManager.list.length + 1 }));
+    }
+
+    async confirmRemoveCollection(id) {
+        const collection = collectionsManager.find(id);
+        if (!collection) return;
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const confirmed = await foundry.applications.api.DialogV2.confirm({
+            window: { title: localize('removeCollection') },
+            content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.parallax.removeCollectionConfirm`, { name: collection.name }))}</p>`,
+            rejectClose: false
+        });
+        if (confirmed) await collectionsManager.remove(id);
+    }
+
+    /**
+     * The Collections tab: every layer group and tile group with an on/off
+     * each, which together are the scene's current look, and the saved looks.
+     */
+    _collectionsContext(state) {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const layerOn = state.activeSets;
+        const tileOn = tileMotionManager.motion.activeGroups;
+        const describe = (on, groups, allKey, noneKey) => {
+            if (on === null) return localize(allKey);
+            if (!on.length) return localize(noneKey);
+            return on.map(id => groups.find(group => group.id === id)?.name).filter(Boolean).join(', ');
+        };
+        const now = collectionsManager.snapshot();
+        const collections = collectionsManager.list.map(collection => ({
+            ...collection,
+            current: collectionsManager.matches(collection, now),
+            summary: `${describe(collection.layerGroups ?? null, state.sets, 'allLayers', 'noLayers')} · ${describe(collection.tileGroups ?? null, tileMotionManager.motion.groups, 'allTiles', 'noTiles')}`
+        }));
+        return {
+            hasLayers: state.layers.length > 0,
+            hasTiles: tileMotionManager.configs.size > 0,
+            layerAll: layerOn === null,
+            layerNone: Array.isArray(layerOn) && !layerOn.length,
+            layerGroups: state.sets.map(set => ({ id: set.id, name: set.name, on: !!layerOn?.includes(set.id) })),
+            tileAll: tileOn === null,
+            tileNone: Array.isArray(tileOn) && !tileOn.length,
+            tileGroups: tileMotionManager.motion.groups.map(group => ({ id: group.id, name: group.name, on: !!tileOn?.includes(group.id) })),
+            collections,
+            hasCollections: collections.length > 0
+        };
+    }
+
     async confirmRemoveSet(id) {
         const groups = this._groups();
         const group = groups.list.find(entry => entry.id === id);
@@ -420,7 +505,27 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
 
     /** The motion the bar is running: the scene's parallax or its tiles. Both answer play/stop/speed alike. */
     _motion() {
-        return this.target === 'tiles' ? tileMotionManager : this.manager;
+        if (this.target === 'tiles') return tileMotionManager;
+        if (this.target === 'collections') return this._bothMotions();
+        return this.manager;
+    }
+
+    /**
+     * In collections mode, Play/Stop runs the layers and the tiles together.
+     * It reads as playing if either is, so Stop is offered whenever anything
+     * moves, and stops both.
+     */
+    _bothMotions() {
+        const parallax = this.manager;
+        const configured = [parallax.isConfigured && parallax, tileMotionManager.isConfigured && tileMotionManager].filter(Boolean);
+        const playing = configured.some(motion => motion === parallax ? parallax.state.playing : tileMotionManager.motion.playing);
+        return {
+            playing,
+            configured: configured.length > 0,
+            togglePlaying: async () => {
+                for (const motion of configured) await (playing ? motion.stop() : motion.play());
+            }
+        };
     }
 
     setTarget(target) {
@@ -484,6 +589,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             setNames: state.sets.filter(set => set.layers.includes(layer.id)).map(set => set.name)
         })).reverse();
         const isTiles = this.target === 'tiles';
+        const isCollections = this.target === 'collections';
         const tab = isTiles ? this.tileTab : this.tab;
         const tiles = this._tileContext(state);
         const tileById = new Map(tiles.managed.map(tile => [tile.id, tile]));
@@ -494,6 +600,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             {
                 state,
                 isTiles,
+                isCollections,
                 tiles,
                 tab,
                 tabs: (isTiles ? TILE_TABS : TABS).map(entry => ({
@@ -518,7 +625,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                     return {
                         id: group.id,
                         name: group.name,
-                        active: group.id === groups.activeId,
+                        active: !!groups.active?.includes(group.id),
                         itemCount: group.items.length,
                         expanded: this.expandedSets.has(group.id),
                         overheadMembers: isTiles ? [] : layers.filter(l => l.overhead && group.items.includes(l.id)).map(member),
@@ -526,14 +633,15 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                         tileMembers: isTiles ? group.items.map(id => tileById.get(id)).filter(Boolean).map(member) : []
                     };
                 }),
-                allActive: !groups.activeId,
-                noneActive: groups.activeId === NONE_GROUP,
+                allActive: groups.active === null,
+                noneActive: Array.isArray(groups.active) && !groups.active.length,
+                collections: this._collectionsContext(state),
                 noneId: NONE_GROUP,
                 noneLabel: localize(isTiles ? 'noTiles' : 'noLayers'),
                 noneHint: localize(isTiles ? 'noTilesHint' : 'noLayersHint'),
                 // Shown on the Layers or Tiles tab while None is chosen, since
                 // nothing there -- not even something just added -- will show.
-                noneShowing: groups.activeId === NONE_GROUP
+                noneShowing: Array.isArray(groups.active) && !groups.active.length
                     ? localize(isTiles ? 'noneShowingTiles' : 'noneShowingLayers')
                     : null,
                 itemTotal: isTiles ? tiles.managed.length : state.layers.length,
@@ -554,13 +662,10 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             // Which mode comes first, since it decides what everything after it drives.
             toolBarLeft: this._buildTargetSwitch(localize)
                 + '<span class="cartographer-parallax-divider"></span>'
-                + (isTiles
-                    ? this._buildPlayControl(tileMotionManager.motion, localize, tileMotionManager.isConfigured)
-                        + this._buildTileSpeedControl(tileMotionManager.motion, localize)
-                    : this._buildPlayControl(state, localize, this.manager.isConfigured)
-                        + this._buildSpeedControl(state, localize)),
-            // Sets cover layers and tiles alike, so the set choice is in both modes.
-            toolBarRight: this._buildSetControl(groups, localize) + this._buildSettingsToggle(localize),
+                + this._buildModeControls(state, localize),
+            // The look: this mode's groups, or in collections mode, a collection.
+            toolBarRight: (isCollections ? this._buildCollectionControl(localize) : this._buildSetControl(groups, localize))
+                + this._buildSettingsToggle(localize),
             showToolFooter: false
         };
     }
@@ -621,7 +726,42 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         </div>`;
     }
 
-    /** Scene or Tiles: which the bar and settings are running. */
+    /**
+     * What sits between the mode switch and the look: Play/Stop and the speed
+     * for this mode. In collections mode, Play/Stop runs both modes together;
+     * there is no speed, since each mode keeps its own.
+     */
+    _buildModeControls(state, localize) {
+        if (this.target === 'collections') {
+            const both = this._bothMotions();
+            return this._buildPlayControl(both, localize, both.configured);
+        }
+        if (this.target === 'tiles') {
+            return this._buildPlayControl(tileMotionManager.motion, localize, tileMotionManager.isConfigured)
+                + this._buildTileSpeedControl(tileMotionManager.motion, localize);
+        }
+        return this._buildPlayControl(state, localize, this.manager.isConfigured)
+            + this._buildSpeedControl(state, localize);
+    }
+
+    /**
+     * The collection the scene is showing, from the bar. When what is on
+     * matches no collection (a group changed by hand), it reads Custom rather
+     * than claim one.
+     */
+    _buildCollectionControl(localize) {
+        const collections = collectionsManager.list;
+        if (!collections.length) return '';
+        const esc = value => foundry.utils.escapeHTML(String(value));
+        const current = collectionsManager.current();
+        const label = esc(localize('activeCollection'));
+        const options = collections.map(collection =>
+            `<option value="${esc(collection.id)}"${current?.id === collection.id ? ' selected' : ''}>${esc(collection.name)}</option>`).join('');
+        const custom = current ? '' : `<option value="${MIXED}" selected disabled>${esc(localize('customLook'))}</option>`;
+        return `<select class="cartographer-parallax-set-select" data-field="collection" aria-label="${label}" data-tooltip="${label}">${custom}${options}</select>`;
+    }
+
+    /** Parallax, Tiles or Collections: which the bar and settings are running. */
     _buildTargetSwitch(localize) {
         const buttons = TARGETS.map(entry => this._button({
             action: 'set-target',
@@ -676,17 +816,25 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     }
 
     /** Which of this mode's groups is showing. Absent until there is a group to choose. */
+    /**
+     * This mode's groups, from the bar: All, None, or one group on its own.
+     * With several on (set by hand) it reads Mixed rather than claim one.
+     */
     _buildSetControl(groups, localize) {
+        const esc = value => foundry.utils.escapeHTML(String(value));
         // All and None are always there, so the choice is offered as soon as
         // the mode has anything to show or hide, groups or not.
         const isTiles = this.target === 'tiles';
         const hasItems = isTiles ? tileMotionManager.configs.size > 0 : this.manager.state.layers.length > 0;
         if (!hasItems) return '';
-        const esc = value => foundry.utils.escapeHTML(String(value));
-        const option = (id, name) => `<option value="${esc(id)}"${(groups.activeId ?? '') === id ? ' selected' : ''}>${esc(name)}</option>`;
+        const active = groups.active;
+        const selected = active === null ? ''
+            : (!active.length ? NONE_GROUP : (active.length === 1 ? active[0] : MIXED));
+        const option = (id, name) => `<option value="${esc(id)}"${selected === id ? ' selected' : ''}>${esc(name)}</option>`;
         const label = esc(localize('activeSet'));
+        const mixed = selected === MIXED ? `<option value="${MIXED}" selected disabled>${esc(localize('mixedGroups'))}</option>` : '';
         return `<select class="cartographer-parallax-set-select" data-field="activeSet" aria-label="${label}" data-tooltip="${label}">
-            ${option('', localize(isTiles ? 'allTiles' : 'allLayers'))}${option(NONE_GROUP, localize(isTiles ? 'noTiles' : 'noLayers'))}${groups.list.map(group => option(group.id, group.name)).join('')}
+            ${mixed}${option('', localize(isTiles ? 'allTiles' : 'allLayers'))}${option(NONE_GROUP, localize(isTiles ? 'noTiles' : 'noLayers'))}${groups.list.map(group => option(group.id, group.name)).join('')}
         </select>`;
     }
 
@@ -804,6 +952,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         else if (input.layerId) void this.manager.updateLayer(input.layerId, { [input.field]: input.value });
         else if (input.field === 'masterSpeed') void this.manager.setMasterSpeed(input.value);
         else if (input.field === 'activeSet') void this._groups().setActive(input.value);
+        else if (input.field === 'collection') void collectionsManager.apply(input.value);
         else if (input.field === 'angle') void this.manager.setAngle(input.value);
         else if (input.field === 'easeSeconds') void this.manager.setEaseSeconds(input.value);
     }

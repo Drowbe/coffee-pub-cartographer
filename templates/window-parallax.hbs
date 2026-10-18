@@ -224,8 +224,8 @@
             <div class="cartographer-parallax-set-row{{#if active}} is-active{{/if}}">
                 <button type="button" class="cartographer-parallax-button cartographer-parallax-collapse" data-action="toggle-set-expand" data-set-id="{{id}}"
                     data-tooltip="{{localize (ifThen expanded "coffee-pub-cartographer.parallax.collapse" "coffee-pub-cartographer.parallax.expand")}}"><i class="fa-solid {{#if expanded}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i></button>
-                <button type="button" class="cartographer-parallax-button{{#if active}} is-active{{/if}}" data-action="select-set" data-set-id="{{id}}"
-                    data-tooltip="{{localize "coffee-pub-cartographer.parallax.showSet"}}"><i class="fa-solid {{#if active}}fa-circle-dot{{else}}fa-circle{{/if}}"></i></button>
+                <button type="button" class="cartographer-parallax-button{{#if active}} is-active{{/if}}" data-action="toggle-group" data-set-id="{{id}}"
+                    data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleGroup"}}"><i class="fa-solid {{#if active}}fa-toggle-on{{else}}fa-toggle-off{{/if}}"></i></button>
                 <span class="cartographer-parallax-set-name">{{name}}</span>
                 <span class="cartographer-parallax-set-count">{{itemCount}}</span>
                 <button type="button" class="cartographer-parallax-button" data-action="edit-set" data-set-id="{{id}}"
@@ -253,9 +253,86 @@
 </div>
 {{/inline}}
 
+{{! ===== COLLECTIONS: the whole scene's look, both modes at once ===== }}
+{{#*inline "groupChips"}}
+<div class="cartographer-parallax-chips">
+    <button type="button" class="cartographer-parallax-chip{{#if all}} is-active{{/if}}" data-action="{{allAction}}">{{allLabel}}</button>
+    <button type="button" class="cartographer-parallax-chip{{#if none}} is-active{{/if}}" data-action="{{noneAction}}">{{noneLabel}}</button>
+    {{#each groups}}
+    <button type="button" class="cartographer-parallax-chip is-toggle{{#if on}} is-active{{/if}}" data-action="{{../toggleAction}}" data-set-id="{{id}}">
+        <i class="fa-solid {{#if on}}fa-toggle-on{{else}}fa-toggle-off{{/if}}"></i> {{name}}
+    </button>
+    {{/each}}
+</div>
+{{/inline}}
+
+{{#*inline "collectionsPanel"}}
+<div class="cartographer-parallax-panel">
+    <p class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.parallax.collectionsHint"}}</p>
+
+    {{! The look right now: every group of both modes, on or off. Groups add together. }}
+    <div class="cartographer-parallax-section-header">
+        <i class="fa-solid fa-layer-group"></i><span>{{localize "coffee-pub-cartographer.parallax.layerGroups"}}</span>
+    </div>
+    {{#if collections.hasLayers}}
+    {{> groupChips all=collections.layerAll none=collections.layerNone groups=collections.layerGroups
+        allAction="layer-groups-all" noneAction="layer-groups-none" toggleAction="toggle-layer-group"
+        allLabel=(localize "coffee-pub-cartographer.parallax.allLayers") noneLabel=(localize "coffee-pub-cartographer.parallax.noLayers")}}
+    {{else}}
+    <div class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.parallax.collectionsNoLayers"}}</div>
+    {{/if}}
+
+    <div class="cartographer-parallax-section-header">
+        <i class="fa-solid fa-arrows-spin"></i><span>{{localize "coffee-pub-cartographer.parallax.tileGroups"}}</span>
+    </div>
+    {{#if collections.hasTiles}}
+    {{> groupChips all=collections.tileAll none=collections.tileNone groups=collections.tileGroups
+        allAction="tile-groups-all" noneAction="tile-groups-none" toggleAction="toggle-tile-group"
+        allLabel=(localize "coffee-pub-cartographer.parallax.allTiles") noneLabel=(localize "coffee-pub-cartographer.parallax.noTiles")}}
+    {{else}}
+    <div class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.parallax.collectionsNoTiles"}}</div>
+    {{/if}}
+
+    {{! The saved looks. Current is whichever matches what is on now. }}
+    <div class="cartographer-parallax-section-header">
+        <i class="fa-solid fa-boxes-stacked"></i><span>{{localize "coffee-pub-cartographer.parallax.tabCollections"}}</span>
+    </div>
+    {{#if collections.hasCollections}}
+    <div class="cartographer-parallax-set-list">
+        {{#each collections.collections}}
+        <div class="cartographer-parallax-set-row{{#if current}} is-active{{/if}}">
+            <button type="button" class="cartographer-parallax-button{{#if current}} is-active{{/if}}" data-action="apply-collection" data-collection-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.applyCollection"}}"><i class="fa-solid {{#if current}}fa-circle-dot{{else}}fa-circle{{/if}}"></i></button>
+            <div class="cartographer-parallax-layer-title">
+                <span class="cartographer-parallax-set-name">{{name}}</span>
+                <span class="cartographer-parallax-layer-summary">{{summary}}</span>
+            </div>
+            <button type="button" class="cartographer-parallax-button" data-action="update-collection" data-collection-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.updateCollection"}}"><i class="fa-solid fa-floppy-disk"></i></button>
+            <button type="button" class="cartographer-parallax-button" data-action="rename-collection" data-collection-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.renameCollection"}}"><i class="fa-solid fa-pen"></i></button>
+            <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-collection" data-collection-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.removeCollection"}}"><i class="fa-solid fa-trash-can"></i></button>
+        </div>
+        {{/each}}
+    </div>
+    {{else}}
+    <div class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.parallax.noCollections"}}</div>
+    {{/if}}
+    <div class="cartographer-parallax-panel-actions">
+        <button type="button" class="cartographer-parallax-button is-labelled" data-action="save-collection"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.saveCollection"}}</span></button>
+    </div>
+</div>
+{{/inline}}
+
 <div class="cartographer-parallax-root">
     {{#unless hasScene}}
     <div class="cartographer-parallax-empty">{{localize "coffee-pub-cartographer.parallax.noScene"}}</div>
+    {{else}}
+
+    {{#if isCollections}}
+    {{! Collections mode: one panel, no tabs. }}
+    {{> collectionsPanel}}
     {{else}}
 
     {{! The settings, as tabs. Running the scene is the control bar's job. }}
@@ -374,6 +451,7 @@
     {{/if}}
 
     {{#if (eq tab "sets")}}{{> setsPanel}}{{/if}}
+    {{/if}}
 
     {{/unless}}
 </div>

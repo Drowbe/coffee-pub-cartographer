@@ -10,6 +10,8 @@ import { socketManager } from './manager-sockets.js';
 import { mappingManager } from './manager-mapping.js';
 import { parallaxManager } from './manager-parallax.js';
 import { tileMotionManager } from './manager-tilemotion.js';
+import { collectionsManager } from './manager-collections.js';
+import { motionBar } from './manager-motionbar.js';
 
 // ================================================================== 
 // ===== BLACKSMITH API INTEGRATION =================================
@@ -161,6 +163,9 @@ Hooks.once('canvasReady', async () => {
         }
         try {
             tileMotionManager.initialize();
+            collectionsManager.initialize();
+            // After the three it reports on.
+            motionBar.initialize();
         } catch (error) {
             console.error(`❌ ${MODULE.NAME}: Failed to initialize tile motion:`, error);
         }
