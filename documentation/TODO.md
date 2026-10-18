@@ -118,6 +118,37 @@ arrow points the wrong way half the time.
 **Expand the remaining official key symbols** that have no Foundry equivalent and must be
 author-placed: false door, trapped door, revolving door, portcullis, gate, arrow slit, illusory wall.
 
+## Scene motion
+
+**Walk scene motion in a running world.** Built and tested in node, but most of it has never been
+seen in Foundry. In rough order of risk: tile rotation, scrolling and fades; the Scene Motion
+sub-menubar buttons, including their lit state and the per-collection buttons rebuilding on a scene
+change; applying a collection; dragging layers and dropping them on the Tokens line; copy, export and
+import; and both confirmation prompts. Verified when each works on a GM client and a second, player
+client sees the same motion in step.
+
+**Check video layers and tiles.** Untested: whether a video plays and loops as a layer, as a
+scrolling tile, and as a spinning one. Videos keep Foundry's own texture, so they can show the repeat
+seam the still-image copy removes; if it shows, the fix is a render texture refreshed each frame.
+Verified with a looping WebM as each of the three.
+
+**Check scene motion on Foundry v13.** The module claims 13 as its minimum, and nothing here has run
+on it. The parts most likely to differ are tile documents without `shape` and anchors (handled by a
+fallback to the tile's middle) and the primary group's sort layers. Verified on a v13 client.
+
+**Reduce motion, per player.** A client setting that freezes scene motion and skips fades on that
+player's screen only, for anyone who finds scrolling scenery uncomfortable. The shared clock makes it
+simple: the setting draws everything at its rest position. Verified by a player enabling it while the
+GM's scene keeps moving for everyone else.
+
+**A macro pack.** A compendium of ready-made macros -- Play/Stop layers, Play/Stop tiles, next and
+previous collection, speed up, slow down -- to drag onto the hotbar. Everything they need is on the
+module's API already. Verified by importing the pack and running each.
+
+**Sound tied to Play/Stop.** Let a mode name an ambient sound -- wagon creaks, wind, rigging -- that
+fades in on Play and out on Stop with the motion's ease. Verified by the sound following Play and Stop
+on a second client.
+
 ## Ad-hoc map making
 
 The mapper is a recorder today: it turns a scene the GM already built into a drawing. The larger

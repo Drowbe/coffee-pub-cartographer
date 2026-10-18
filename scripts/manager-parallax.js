@@ -362,6 +362,58 @@ class ParallaxManager {
         });
     }
 
+    /**
+     * Copy a layer, just nearer than the original, as a separate layer with
+     * the same settings and in the same groups. Its position starts fresh.
+     */
+    duplicateLayer(id) {
+        return this._commit(s => {
+            const index = s.layers.findIndex(l => l.id === id);
+            if (index < 0) return;
+            const original = s.layers[index];
+            const copy = {
+                ...foundry.utils.deepClone(original),
+                id: foundry.utils.randomID(),
+                name: game.i18n.format(`${MODULE.ID}.parallax.copyName`, { name: original.name }),
+                offsetX: 0,
+                offsetY: 0
+            };
+            s.layers.splice(index + 1, 0, copy);
+            for (const set of s.sets) if (set.layers.includes(id)) set.layers.push(copy.id);
+        });
+    }
+
+    /**
+     * Drop a layer beside another, from a drag in the window. `nearer` puts it
+     * just nearer than the target (above it in the list), otherwise just
+     * farther. Dropped beside a layer on the other side of the token line, it
+     * crosses the line with it.
+     */
+    reorderLayer(id, targetId, nearer) {
+        if (id === targetId) return;
+        return this._commit(s => {
+            const layer = s.layers.find(l => l.id === id);
+            const target = s.layers.find(l => l.id === targetId);
+            if (!layer || !target) return;
+            layer.overhead = target.overhead;
+            s.layers.splice(s.layers.indexOf(layer), 1);
+            const at = s.layers.indexOf(target);
+            s.layers.splice(nearer ? at + 1 : at, 0, layer);
+        });
+    }
+
+    /**
+     * Put a layer on one side of the token line. It lands next to the line:
+     * the farthest overhead layer, or the nearest ground one, which is where
+     * normalizeOrder leaves a layer that has just changed side.
+     */
+    setOverhead(id, overhead) {
+        return this._commit(s => {
+            const layer = s.layers.find(l => l.id === id);
+            if (layer) layer.overhead = !!overhead;
+        });
+    }
+
     removeLayer(id) {
         return this._commit(s => {
             s.layers = s.layers.filter(l => l.id !== id);
@@ -427,6 +479,19 @@ class ParallaxManager {
             // Shown on its own, which looks exactly as things did when it was
             // made from what was showing.
             s.activeSets = [set.id];
+        });
+    }
+
+    /** Copy a group with the same layers and on/off, under a new name. It starts off. */
+    duplicateSet(id) {
+        return this._commit(s => {
+            const set = s.sets.find(entry => entry.id === id);
+            if (!set) return;
+            s.sets.push({
+                ...foundry.utils.deepClone(set),
+                id: foundry.utils.randomID(),
+                name: game.i18n.format(`${MODULE.ID}.parallax.copyName`, { name: set.name })
+            });
         });
     }
 
@@ -524,6 +589,86 @@ class ParallaxManager {
             for (const layer of s.layers) {
                 layer.offsetX = 0;
                 layer.offsetY = 0;
+            }
+        });
+    }
+
+    // ==================================================================
+    // ===== COPYING BETWEEN SCENES =====================================
+    // ==================================================================
+
+    /**
+     * The parts of a scene's parallax worth carrying to another scene: its
+     * layers, its groups and how it moves. Not where the layers stand, not
+     * whether it is playing, and not which groups are on -- those belong to
+     * the scene as it is being run.
+     */
+    exportData(scene = canvas.scene) {
+        const state = scene?.id === canvas.scene?.id ? this.state : this._readState(scene);
+        return {
+            format: 'coffee-pub-cartographer.parallax',
+            version: 1,
+            masterSpeed: state.masterSpeed,
+            angle: state.angle,
+            easeSeconds: state.easeSeconds,
+            layers: state.layers.map(layer => ({ ...foundry.utils.deepClone(layer), offsetX: 0, offsetY: 0 })),
+            sets: foundry.utils.deepClone(state.sets)
+        };
+    }
+
+    /** Scenes other than this one that have parallax layers, for "Copy from scene". */
+    scenesWithParallax() {
+        return game.scenes.filter(scene => scene.id !== canvas.scene?.id
+            && (scene.getFlag(MODULE.ID, FLAG_KEY)?.layers?.length ?? 0) > 0);
+    }
+
+    copyFromScene(sceneId, mode) {
+        const scene = game.scenes.get(sceneId);
+        if (!scene) return;
+        return this.importData(this.exportData(scene), mode);
+    }
+
+    /**
+     * Bring in exported parallax. 'append' adds the layers and groups to what
+     * is here; 'replace' swaps everything out, including the speed, angle and
+     * ease. Every layer and group gets a new id either way, so an import can
+     * never collide with what is already on the scene, and groups are pointed
+     * at the new ids of their layers.
+     */
+    importData(data, mode = 'append') {
+        if (data?.format !== 'coffee-pub-cartographer.parallax' || !Array.isArray(data.layers)) {
+            throw new Error(game.i18n.localize(`${MODULE.ID}.parallax.importInvalid`));
+        }
+        const newIds = new Map(data.layers.map(layer => [layer.id, foundry.utils.randomID()]));
+        const layers = data.layers.filter(layer => layer?.src).map(layer => ({
+            ...defaultLayer(layer.src),
+            ...layer,
+            id: newIds.get(layer.id),
+            offsetX: 0,
+            offsetY: 0
+        }));
+        const sets = (data.sets ?? []).map(set => ({
+            id: foundry.utils.randomID(),
+            name: String(set.name ?? ''),
+            layers: (set.layers ?? []).map(id => newIds.get(id)).filter(Boolean),
+            hidden: (set.hidden ?? []).map(id => newIds.get(id)).filter(Boolean)
+        }));
+        return this._commit(s => {
+            if (mode === 'replace') {
+                s.layers = layers;
+                s.sets = sets;
+                s.activeSets = null;
+                for (const key of ['masterSpeed', 'angle', 'easeSeconds']) {
+                    if (Number.isFinite(Number(data[key]))) s[key] = Number(data[key]);
+                }
+                return;
+            }
+            s.layers.push(...layers);
+            s.sets.push(...sets);
+            // With groups on, the new layers would be hidden; they join the
+            // groups that are on, as a single added layer does.
+            for (const set of s.sets) {
+                if (s.activeSets?.includes(set.id)) set.layers.push(...layers.map(layer => layer.id));
             }
         });
     }

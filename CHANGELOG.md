@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### ADDED
+
+- **Scene motion: parallax layers, animated tiles and collections** (`scripts/manager-parallax.js`, `scripts/manager-tilemotion.js`, `scripts/manager-collections.js`, `scripts/window-parallax.js`). A GM window, opened from a new Scene Motion section of the sub-menubar, with three modes. **Parallax** scrolls layers of scenery at their own speeds -- above or below tokens, tiled or as bands, with direction, depth that follows the camera, and a start position each. **Tiles** spins managed tiles about a chosen pivot and scrolls their images within their frames. **Collections** saves which layer groups and tile groups are on and switches both at once. Groups add together and fade in and out over the mode's ease time; Play and Stop ease rather than snap. Nothing streams: every client computes positions from a few shared numbers and the server clock, so all stay in step through reloads. Layers, groups and settings can be copied from another scene, exported to a file and imported. Documented in `documentation/userguides/userguide-scene-motion.md` and `documentation/architecture/architecture-scene-motion.md`. **Verified** by `tests/test-scene-motion-timing.mjs`, `tests/test-scene-motion-managers.mjs` and `tests/test-scene-motion-wiring.mjs`; not yet walked in a running world, which `documentation/TODO.md` tracks.
+
+### FIXED
+
+- **The map window offered Foundry's Detach and Re-attach Window twice on v14** (`scripts/window-mapping.js`). Its `DEFAULT_OPTIONS` copied the base class's options in before adding its own, and v14 concatenates the window controls each copying level re-contributes. It is now a plain object holding only this window's options, as Blacksmith's own windows declare theirs. **Verified** by inspection against `window-tool-base.js` in Blacksmith, whose comment records the same fault and measurement.
+
+
 ## [14.0.0]
 
 ### CHANGED

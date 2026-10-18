@@ -29,11 +29,15 @@ a corridor they walked without showing them the room beyond the door they never 
 - [For players](userguides/userguide-player.md) -- what you can do and what you cannot.
 - [For GMs](userguides/userguide-gm.md) -- what only you can do.
 - [Settings](userguides/userguide-settings.md) -- every setting, and who it affects.
+- [Scene motion](userguides/userguide-scene-motion.md) -- scrolling parallax layers, spinning and
+  scrolling tiles, and collections that switch a scene's look in one click.
 
 ## Working on it
 
 - [Drawing tool architecture](architecture/architecture-drawing.md) -- how sketches are rendered,
   synchronised across clients, and cleaned up.
+- [Scene motion architecture](architecture/architecture-scene-motion.md) -- the shared clock that
+  keeps every client in step, where the layers draw, and how the window is built.
 - [Known issues](known-issues.md) -- defects we have not fixed yet.
 
 ## Requirements

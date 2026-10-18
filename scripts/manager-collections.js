@@ -96,6 +96,20 @@ class CollectionsManager {
         await this._write(this.list.map(entry => (entry.id === id ? { ...entry, name: label } : entry)));
     }
 
+    /** Copy a collection under a new name, with the same look. */
+    async duplicate(id) {
+        const list = this.list;
+        const index = list.findIndex(entry => entry.id === id);
+        if (index < 0) return;
+        const copy = {
+            ...list[index],
+            id: foundry.utils.randomID(),
+            name: game.i18n.format(`${MODULE.ID}.parallax.copyName`, { name: list[index].name })
+        };
+        list.splice(index + 1, 0, copy);
+        await this._write(list);
+    }
+
     async remove(id) {
         await this._write(this.list.filter(entry => entry.id !== id));
     }

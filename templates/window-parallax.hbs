@@ -9,8 +9,10 @@
 {{! A layer in setup mode. Collapsed, it is one line: what it is, how fast,
     and the buttons. Expanded, its sliders follow. }}
 {{#*inline "layerRow"}}
-<div class="cartographer-parallax-layer{{#unless visible}} is-hidden{{/unless}}{{#if overhead}} is-overhead{{/if}}{{#if collapsed}} is-collapsed{{/if}}">
+<div class="cartographer-parallax-layer{{#unless visible}} is-hidden{{/unless}}{{#if overhead}} is-overhead{{/if}}{{#if collapsed}} is-collapsed{{/if}}" data-layer-row="{{id}}">
     <div class="cartographer-parallax-layer-header">
+        <span class="cartographer-parallax-grip" draggable="true" data-drag-layer="{{id}}"
+            data-tooltip="{{localize "coffee-pub-cartographer.parallax.dragToReorder"}}"><i class="fa-solid fa-grip-vertical"></i></span>
         <button type="button" class="cartographer-parallax-button cartographer-parallax-collapse" data-action="toggle-collapse" data-layer-id="{{id}}"
             data-tooltip="{{localize (ifThen collapsed "coffee-pub-cartographer.parallax.expand" "coffee-pub-cartographer.parallax.collapse")}}"><i class="fa-solid {{#if collapsed}}fa-chevron-right{{else}}fa-chevron-down{{/if}}"></i></button>
         <button type="button" class="cartographer-parallax-thumb" data-action="replace-layer" data-layer-id="{{id}}"
@@ -32,6 +34,8 @@
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.moveNearer"}}"><i class="fa-solid fa-chevron-up"></i></button>
             <button type="button" class="cartographer-parallax-button" data-action="move-down" data-layer-id="{{id}}" {{#if isLast}}disabled{{/if}}
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.moveFarther"}}"><i class="fa-solid fa-chevron-down"></i></button>
+            <button type="button" class="cartographer-parallax-button" data-action="duplicate-layer" data-layer-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.duplicateLayer"}}"><i class="fa-solid fa-clone"></i></button>
             <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-layer" data-layer-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.removeLayer"}}"><i class="fa-solid fa-trash-can"></i></button>
         </div>
@@ -105,7 +109,7 @@
 {{/inline}}
 
 {{#*inline "tokenLine"}}
-<div class="cartographer-parallax-token-line" data-tooltip="{{localize "coffee-pub-cartographer.parallax.tokenLineHint"}}">
+<div class="cartographer-parallax-token-line" data-drop-line data-tooltip="{{localize "coffee-pub-cartographer.parallax.tokenLineHint"}}">
     <span><i class="fa-solid fa-chess-pawn"></i> {{localize "coffee-pub-cartographer.parallax.tokenLine"}}</span>
 </div>
 {{/inline}}
@@ -230,6 +234,8 @@
                 <span class="cartographer-parallax-set-count">{{itemCount}}</span>
                 <button type="button" class="cartographer-parallax-button" data-action="edit-set" data-set-id="{{id}}"
                     data-tooltip="{{localize "coffee-pub-cartographer.parallax.editSet"}}"><i class="fa-solid fa-pen"></i></button>
+                <button type="button" class="cartographer-parallax-button" data-action="duplicate-set" data-set-id="{{id}}"
+                    data-tooltip="{{localize "coffee-pub-cartographer.parallax.duplicateSet"}}"><i class="fa-solid fa-clone"></i></button>
                 <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-set" data-set-id="{{id}}"
                     data-tooltip="{{localize "coffee-pub-cartographer.parallax.removeSet"}}"><i class="fa-solid fa-trash-can"></i></button>
             </div>
@@ -311,6 +317,8 @@
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.updateCollection"}}"><i class="fa-solid fa-floppy-disk"></i></button>
             <button type="button" class="cartographer-parallax-button" data-action="rename-collection" data-collection-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.renameCollection"}}"><i class="fa-solid fa-pen"></i></button>
+            <button type="button" class="cartographer-parallax-button" data-action="duplicate-collection" data-collection-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.duplicateCollection"}}"><i class="fa-solid fa-clone"></i></button>
             <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-collection" data-collection-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.removeCollection"}}"><i class="fa-solid fa-trash-can"></i></button>
         </div>
@@ -443,6 +451,12 @@
             <button type="button" class="cartographer-parallax-button" data-action="{{#if allCollapsed}}expand-all{{else}}collapse-all{{/if}}"
                 data-tooltip="{{localize (ifThen allCollapsed "coffee-pub-cartographer.parallax.expandAll" "coffee-pub-cartographer.parallax.collapseAll")}}"><i class="fa-solid {{#if allCollapsed}}fa-angles-down{{else}}fa-angles-up{{/if}}"></i></button>
             {{/if}}
+            <button type="button" class="cartographer-parallax-button" data-action="copy-from-scene"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.copyFromScene"}}"><i class="fa-solid fa-copy"></i></button>
+            <button type="button" class="cartographer-parallax-button" data-action="export-parallax"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.exportParallax"}}"><i class="fa-solid fa-file-export"></i></button>
+            <button type="button" class="cartographer-parallax-button" data-action="import-parallax"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.importParallax"}}"><i class="fa-solid fa-file-import"></i></button>
             <button type="button" class="cartographer-parallax-button is-labelled" data-action="add-layer"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.addLayer"}}</span></button>
         </div>
     </div>

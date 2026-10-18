@@ -1,0 +1,115 @@
+# Scene Motion Architecture
+
+**Audience:** anyone changing parallax, tile motion or collections, or adding another kind of motion
+to them.
+
+How scene motion keeps every client in step without streaming positions, where it draws on Foundry's
+canvas, and how the window is put together.
+
+## Files
+
+| File | Holds |
+| --- | --- |
+| `scripts/utils-motion.js` | The shared clock: easing, travel, rebasing, and the ticker priority. |
+| `scripts/utils-groups.js` | Which groups are on, and whether an item shows under them. |
+| `scripts/utils-textures.js` | The mipmap-free copies that repeating images draw from. |
+| `scripts/manager-parallax.js` | Parallax state, rendering, layer groups, copying between scenes, and the window's open state. |
+| `scripts/manager-tilemotion.js` | Tile motion state, rendering, and tile groups. |
+| `scripts/manager-collections.js` | Saved looks across both modes. |
+| `scripts/manager-motionbar.js` | The Scene Motion section of the sub-menubar. |
+| `scripts/window-parallax.js`, `templates/window-parallax.hbs`, `styles/tool-parallax.css` | The window. |
+
+## Where state lives
+
+| Where | Key | What |
+| --- | --- | --- |
+| Scene flag | `parallax` | Layers, layer groups (stored as `sets`), which are on (`activeSets`), and the parallax motion. |
+| Scene flag | `tileMotion` | The tiles' motion, each managed tile's position at the anchor (`offsets`), tile groups, and which are on (`activeGroups`). |
+| Scene flag | `collections` | `{ list }` of `{ id, name, layerGroups, tileGroups }`. |
+| Tile flag | `motion` | That tile's `visible`, `rotate` and `scroll` settings. A tile with this flag is managed. |
+| `localStorage` | `parallax.windowPrefs`, `parallax.windowOpen` | The window's mode, tabs, folded rows, height, and whether the GM wants it open. Per browser, never shared. |
+
+Only the GM writes. Players render whatever the flags say.
+
+## The shared clock
+
+A motion is five numbers: `playing`, `masterSpeed`, `easeSeconds`, `anchorAt` (server time) and
+`rampFrom` (the speed in effect at `anchorAt`). Speed eases from `rampFrom` to the target -- the
+master speed while playing, zero when stopped -- along a smoothstep curve.
+
+Position is never sent. Each thing that moves stores where it stood at `anchorAt`, and every client
+computes where it stands now as that plus `motionTravel(motion, now) * itsSpeed`. `motionTravel` is
+the closed-form integral of the eased speed, so every client arrives at the same number from the
+same five values, and a client that reloads mid-run is immediately in step.
+
+Every change is a **rebase**: fold the travel so far into each stored position, set `rampFrom` to the
+speed in effect now, move `anchorAt` to now, then apply the change. Position and speed are therefore
+continuous through any change, including one made partway through an ease. Layers store their
+positions as x and y rather than a distance, so turning the angle mid-run carries on rather than
+jumping.
+
+## Groups
+
+What is on is saved as `null` (All), `[]` (None) or a list of group ids. An item shows when any group
+that is on contains it and has not switched it off (`shownByGroups`). Older saves held a single id as
+`activeSet` or `activeGroup`; `normalizeActive` reads either. If every group that was on has been
+deleted, the scene falls back to All rather than going blank.
+
+A collection stores one such value per mode. Which collection is current is not stored: it is
+whichever matches what is on now, so it cannot disagree with the scene.
+
+## Rendering
+
+**Parallax layers** are `PIXI.TilingSprite`s in two containers added to `canvas.primary`, Foundry's
+primary group, which sorts its children by elevation, then sort layer, then sort.
+
+- **Ground** layers share the scene background's elevation and sort layer and sort one above it: over
+  the background, under every tile.
+- **Overhead** layers sit where Foundry puts its weather -- infinite elevation, so tokens at any
+  elevation are below them -- one sort layer under the weather, so rain still falls in front.
+
+Both containers are masked to the scene rectangle. Being in the primary group, they are lit.
+
+**Ticker priority.** Motion updates run at `NORMAL + 4`: after Foundry's placeable refreshes (`HIGH -
+2`), so a refresh that resets a tile's transform is overridden in the same frame, and before the
+primary update (`NORMAL + 3`) and perception (`NORMAL + 2`), so Foundry's depth and lighting work from
+this frame's positions. At the default priority they ran a frame behind, which showed as a fringe
+along the trailing edge of moving art.
+
+**Repeating images.** PIXI repeats an image that is not a power of two in the shader. Where it wraps,
+the GPU samples the smallest mipmap for one pixel, which flickers as a seam line. Foundry mipmaps its
+textures, so repeats draw from a copy rendered once into a render texture without mipmaps. Video
+cannot be copied that way (the copy would be one frozen frame) and keeps Foundry's texture.
+
+**Fades** -- a layer or tile coming into or out of view -- are timed on each client's own clock over
+the mode's ease time and never saved. Whatever is showing when a scene loads appears at once.
+
+**Depth** offsets a layer's tiling by the camera's distance from the scene's centre times its depth,
+each frame, from that client's own view.
+
+**Tiles.** A spinning tile turns its own mesh: the pivot's world position is worked out from the
+tile's anchor, size and rotation, and the mesh is re-anchored there, so it turns in place. A scrolling
+tile is drawn by a `TilingSprite` placed exactly where the mesh sorts, with the mesh kept but not
+rendered, so Foundry still selects and hovers it. A tile that stops being managed is handed back with
+`refreshTransform` and `refreshState`.
+
+## The window
+
+`window-parallax.js` extends Blacksmith's tool window. Its `DEFAULT_OPTIONS` is a plain object -- the
+class chain is merged by Foundry, and copying `super`'s options in duplicates v14's window controls --
+and its height is a number, because `'auto'` makes Foundry refit and reposition the window on every
+render.
+
+The bar is built in script; the settings body is the template. Parallax and Tiles share one shape
+through `_groups()`, an adapter over each mode's groups, so the Groups tab, the bar's dropdown and the
+group dialog are written once. Sliders preview locally on `input` and write the scene on `change`.
+
+The window follows the scene: on each scene load it opens if the scene has motion and the GM left it
+open, and closes otherwise, without forgetting that the GM wanted it.
+
+## Tests
+
+`tests/test-scene-motion-timing.mjs` covers the clock and the group rules,
+`tests/test-scene-motion-managers.mjs` drives the real managers through a GM's session, and
+`tests/test-scene-motion-wiring.mjs` checks that every button has a handler, every string exists and
+nothing in the stylesheet is unused.

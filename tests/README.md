@@ -28,6 +28,9 @@ of it looks, so **they are not a substitute for opening the map**.
 | `test-grid` | The grid-weight preference: that Medium still resolves to exactly what each theme was drawn at, and that no theme re-declares a whole grid colour and defeats the weight. |
 | `test-css-and-template` | Every mask data URI is valid SVG with a matching `-webkit-` twin and a `mask-size` agreeing with its tile; tints exist in all three themes. |
 | `test-wiring` | The joins where a typo fails silently: every `data-action` has a handler, every localisation key exists, every mutation sent is handled. |
+| `test-scene-motion-timing` | The shared clock behind scene motion -- position stays continuous through an ease and through a change made mid-ease -- and the rules for which groups are on. |
+| `test-scene-motion-managers` | The real parallax, tile-motion and collections managers driven through a GM's session: groups, duplicating, reordering, importing, a spinning tile's pivot, collections, and the window following the scene. |
+| `test-scene-motion-wiring` | Every scene-motion button has a handler, every field is acted on, every string exists, and no string or style goes unused. |
 
 ## Why the mutation suite exists
 

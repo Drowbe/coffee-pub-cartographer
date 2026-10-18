@@ -225,6 +225,19 @@ class TileMotionManager {
         });
     }
 
+    /** Copy a group with the same tiles and on/off, under a new name. It starts off. */
+    duplicateGroup(id) {
+        return this._commit(m => {
+            const group = m.groups.find(entry => entry.id === id);
+            if (!group) return;
+            m.groups = [...m.groups, {
+                ...foundry.utils.deepClone(group),
+                id: foundry.utils.randomID(),
+                name: game.i18n.format(`${MODULE.ID}.parallax.copyName`, { name: group.name })
+            }];
+        });
+    }
+
     /** Remove a group. Its tiles are untouched; only the combination goes. */
     removeGroup(id) {
         return this._commit(m => {

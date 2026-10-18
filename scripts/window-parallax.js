@@ -146,7 +146,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         'manage-selected-tile': (_event, target, _app) => void tileMotionManager.setTileMotion(target.dataset.tileId, 'visible', true),
         'toggle-set-tile': (_event, target, _app) => void tileMotionManager.toggleGroupTile(target.dataset.setId, target.dataset.tileId),
         'select-tile': (_event, target, app) => app.selectTile(target.dataset.tileId),
-        'clear-tile-motion': (_event, target, _app) => void tileMotionManager.clearTileMotion(target.dataset.tileId),
+        'clear-tile-motion': (_event, target, app) => app.confirmClearTile(target.dataset.tileId),
         'reset-tile-positions': (_event, _target, _app) => void tileMotionManager.resetPositions(),
         'reset-positions': (_event, _target, app) => void app.manager.resetPositions(),
         'set-direction': (_event, target, app) => void app.manager.setAngle(target.dataset.direction),
@@ -160,7 +160,11 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             const layer = app._layer(target.dataset.layerId);
             if (layer) app.pickImage(src => app.manager.updateLayer(layer.id, { src }), layer.src);
         },
-        'remove-layer': (_event, target, app) => void app.manager.removeLayer(target.dataset.layerId),
+        'remove-layer': (_event, target, app) => app.confirmRemoveLayer(target.dataset.layerId),
+        'duplicate-layer': (_event, target, app) => void app.manager.duplicateLayer(target.dataset.layerId),
+        'copy-from-scene': (_event, _target, app) => app.promptCopyFromScene(),
+        'export-parallax': (_event, _target, app) => app.exportParallax(),
+        'import-parallax': (_event, _target, app) => app.promptImportParallax(),
         'move-up': (_event, target, app) => void app.manager.moveLayer(target.dataset.layerId, 1),
         'move-down': (_event, target, app) => void app.manager.moveLayer(target.dataset.layerId, -1),
         'select-set': (_event, target, app) => void app._groups().setActive(target.dataset.setId || null),
@@ -180,8 +184,10 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             if (collection) app.promptCollectionName('renameCollection', collection.name).then(name => name && collectionsManager.rename(collection.id, name));
         },
         'remove-collection': (_event, target, app) => app.confirmRemoveCollection(target.dataset.collectionId),
+        'duplicate-collection': (_event, target, _app) => void collectionsManager.duplicate(target.dataset.collectionId),
         'add-set': (_event, _target, app) => app.editSet(null),
         'edit-set': (_event, target, app) => app.editSet(target.dataset.setId),
+        'duplicate-set': (_event, target, app) => void app._groups().duplicate(target.dataset.setId),
         'toggle-set-expand': (_event, target, app) => app.toggleSetExpanded(target.dataset.setId),
         'toggle-set-layer': (_event, target, app) => void app.manager.toggleSetLayer(target.dataset.setId, target.dataset.layerId),
         'remove-set': (_event, target, app) => app.confirmRemoveSet(target.dataset.setId),
@@ -215,6 +221,12 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         this.target = TARGETS.some(entry => entry.id === prefs.target) ? prefs.target : 'scene';
         this._onInput = this._onInput.bind(this);
         this._onChange = this._onChange.bind(this);
+        this._onDragStart = this._onDragStart.bind(this);
+        this._onDragOver = this._onDragOver.bind(this);
+        this._onDrop = this._onDrop.bind(this);
+        this._onDragEnd = this._onDragEnd.bind(this);
+        /** The layer being dragged in the Layers tab, while a drag is under way. */
+        this._dragLayerId = null;
     }
 
     static async open(manager) {
@@ -258,6 +270,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                 active: motion.activeGroups,
                 setActive: id => tileMotionManager.setActiveGroup(id),
                 toggle: id => tileMotionManager.toggleGroup(id),
+                duplicate: id => tileMotionManager.duplicateGroup(id),
                 add: (name, items) => tileMotionManager.addGroup(name, items),
                 update: (id, { name, items }) => tileMotionManager.updateGroup(id, { name, tiles: items }),
                 remove: id => tileMotionManager.removeGroup(id)
@@ -269,6 +282,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             active: state.activeSets,
             setActive: id => this.manager.setActiveSet(id),
             toggle: id => this.manager.toggleSet(id),
+            duplicate: id => this.manager.duplicateSet(id),
             add: (name, items) => this.manager.addSet(name, items),
             update: (id, { name, items }) => this.manager.updateSet(id, { name, layers: items }),
             remove: id => this.manager.removeSet(id)
@@ -372,6 +386,95 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         });
         return String(name ?? '').trim()
             || (name === null ? '' : game.i18n.format(`${MODULE.ID}.parallax.collectionDefaultName`, { n: collectionsManager.list.length + 1 }));
+    }
+
+    async _confirm(titleKey, bodyKey, data) {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        return foundry.applications.api.DialogV2.confirm({
+            window: { title: localize(titleKey) },
+            content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.parallax.${bodyKey}`, data))}</p>`,
+            rejectClose: false
+        });
+    }
+
+    async confirmRemoveLayer(id) {
+        const layer = this._layer(id);
+        if (layer && await this._confirm('removeLayer', 'removeLayerConfirm', { name: layer.name })) {
+            await this.manager.removeLayer(id);
+        }
+    }
+
+    async confirmClearTile(id) {
+        const tile = canvas.scene?.tiles.get(id);
+        if (tile && await this._confirm('clearTileMotion', 'clearTileConfirm', { name: tileName(tile) })) {
+            await tileMotionManager.clearTileMotion(id);
+        }
+    }
+
+    /** The Append / Replace choice shared by Copy from Scene and Import. */
+    _importModeField() {
+        const localize = key => foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.parallax.${key}`));
+        return `<fieldset class="cartographer-parallax-import-mode">
+            <label><input type="radio" name="mode" value="append" checked> ${localize('importAppend')}</label>
+            <label><input type="radio" name="mode" value="replace"> ${localize('importReplace')}</label>
+        </fieldset>`;
+    }
+
+    /** Bring the layers, groups and motion settings over from another scene. */
+    async promptCopyFromScene() {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const esc = text => foundry.utils.escapeHTML(String(text ?? ''));
+        const scenes = this.manager.scenesWithParallax();
+        if (!scenes.length) {
+            ui.notifications.info(localize('copyNoScenes'));
+            return;
+        }
+        const options = scenes.map(scene => {
+            const count = scene.getFlag(MODULE.ID, 'parallax')?.layers?.length ?? 0;
+            return `<option value="${esc(scene.id)}">${esc(scene.name)} (${count})</option>`;
+        }).join('');
+        const result = await foundry.applications.api.DialogV2.prompt({
+            window: { title: localize('copyFromScene'), icon: 'fa-solid fa-copy' },
+            content: `<div class="cartographer-parallax-import-body">
+                <label>${esc(localize('copySourceScene'))} <select name="scene">${options}</select></label>
+                ${this._importModeField()}
+            </div>`,
+            ok: {
+                label: localize('copyFromScene'),
+                callback: (_event, button) => ({ scene: button.form.elements.scene.value, mode: button.form.elements.mode.value })
+            },
+            rejectClose: false
+        });
+        if (result) await this.manager.copyFromScene(result.scene, result.mode);
+    }
+
+    /** Save this scene's layers, groups and motion settings to a file. */
+    exportParallax() {
+        const name = (canvas.scene?.name ?? 'scene').replace(/[^\w-]+/g, '-').toLowerCase();
+        foundry.utils.saveDataToFile(JSON.stringify(this.manager.exportData(), null, 2), 'text/json', `${name}-parallax.json`);
+    }
+
+    async promptImportParallax() {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const result = await foundry.applications.api.DialogV2.prompt({
+            window: { title: localize('importParallax'), icon: 'fa-solid fa-file-import' },
+            content: `<div class="cartographer-parallax-import-body">
+                <input type="file" name="file" accept=".json,application/json">
+                ${this._importModeField()}
+            </div>`,
+            ok: {
+                label: localize('importParallax'),
+                callback: (_event, button) => ({ file: button.form.elements.file.files?.[0], mode: button.form.elements.mode.value })
+            },
+            rejectClose: false
+        });
+        if (!result?.file) return;
+        try {
+            const data = JSON.parse(await foundry.utils.readTextFromFile(result.file));
+            await this.manager.importData(data, result.mode);
+        } catch (error) {
+            ui.notifications.error(`${localize('importFailed')} ${error.message}`);
+        }
     }
 
     async confirmRemoveCollection(id) {
@@ -872,7 +975,81 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         if (this._inputsBound || !this.element) return;
         this.element.addEventListener('input', this._onInput);
         this.element.addEventListener('change', this._onChange);
+        this.element.addEventListener('dragstart', this._onDragStart);
+        this.element.addEventListener('dragover', this._onDragOver);
+        this.element.addEventListener('drop', this._onDrop);
+        this.element.addEventListener('dragend', this._onDragEnd);
         this._inputsBound = true;
+    }
+
+    // ==================================================================
+    // ===== DRAG TO REORDER ============================================
+    // ==================================================================
+
+    /**
+     * Layers are dragged by their grip. Dropped on another layer they land
+     * just above or below it, by which half of it the pointer is over, and
+     * cross the token line with it if it is on the other side. Dropped on the
+     * token line itself, a layer crosses to the other side and sits next to
+     * the line.
+     */
+    _onDragStart(event) {
+        const handle = event.target.closest?.('[data-drag-layer]');
+        if (!handle) return;
+        this._dragLayerId = handle.dataset.dragLayer;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', this._dragLayerId);
+        handle.closest('[data-layer-row]')?.classList.add('is-dragging');
+    }
+
+    _dropTarget(event) {
+        const row = event.target.closest?.('[data-layer-row]');
+        if (row) {
+            const rect = row.getBoundingClientRect();
+            return { row, layerId: row.dataset.layerRow, nearer: event.clientY < rect.top + rect.height / 2 };
+        }
+        const line = event.target.closest?.('[data-drop-line]');
+        return line ? { line } : null;
+    }
+
+    _clearDropMarks() {
+        for (const el of this.element?.querySelectorAll('.is-drop-above, .is-drop-below, .is-drop-line') ?? []) {
+            el.classList.remove('is-drop-above', 'is-drop-below', 'is-drop-line');
+        }
+    }
+
+    _onDragOver(event) {
+        if (!this._dragLayerId) return;
+        const target = this._dropTarget(event);
+        if (!target || target.layerId === this._dragLayerId) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        this._clearDropMarks();
+        if (target.row) target.row.classList.add(target.nearer ? 'is-drop-above' : 'is-drop-below');
+        else target.line.classList.add('is-drop-line');
+    }
+
+    _onDrop(event) {
+        if (!this._dragLayerId) return;
+        const target = this._dropTarget(event);
+        const layerId = this._dragLayerId;
+        this._onDragEnd();
+        if (!target) return;
+        event.preventDefault();
+        // The drop is ours; nothing behind the window should also act on it.
+        event.stopPropagation();
+        if (target.row) {
+            if (target.layerId !== layerId) void this.manager.reorderLayer(layerId, target.layerId, target.nearer);
+            return;
+        }
+        const layer = this._layer(layerId);
+        if (layer) void this.manager.setOverhead(layerId, !layer.overhead);
+    }
+
+    _onDragEnd() {
+        this._dragLayerId = null;
+        this._clearDropMarks();
+        for (const el of this.element?.querySelectorAll('.is-dragging') ?? []) el.classList.remove('is-dragging');
     }
 
     _readInput(target) {
