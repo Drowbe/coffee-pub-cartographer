@@ -373,8 +373,15 @@
 /* --- Control bar ------------------- */
 /* The bar is the whole window with settings hidden, so the speed slider takes
    whatever width is left after Play/Stop, the set and the gear. */
+/* The left zone takes whatever width there is; the right zone (the look and
+   the gear) is always its natural width. Blacksmith lets both zones shrink,
+   and the right one shrinking is what pushed the gear past the window edge. */
 .cartographer-parallax-window .blacksmith-window-tool-bar-left {
-    flex: 1 1 auto;
+    flex: 1 1 0;
+}
+
+.cartographer-parallax-window .blacksmith-window-tool-bar-right {
+    flex: 0 0 auto;
 }
 
 /* Bar items keep their natural width, so the window's minimum (measured from
@@ -389,7 +396,8 @@
    grid is declared later; the doubled class keeps this one in charge. */
 .cartographer-parallax-window .cartographer-parallax-field.cartographer-parallax-bar-speed {
     display: flex;
-    flex: 1 1 auto;
+    /* Grows into the spare width and gives it back first, down to min-width. */
+    flex: 1 1 0;
     align-items: center;
     gap: 6px;
     /* Two arrows, a usable slider and the readout. Read by the script as the
@@ -408,8 +416,13 @@
     font-weight: bold;
 }
 
+/* A fixed width, not Foundry's width: 100%. A percentage inside a group sized
+   to its content is counted at the select's natural width when the group is
+   sized, then laid out at 100% of the result -- wider than it was counted --
+   which pushed the gear past the window's edge by the difference. */
 .cartographer-parallax-window .cartographer-parallax-set-select {
-    max-width: 130px;
+    flex: 0 0 auto;
+    width: 130px;
     height: 24px;
 }
 
