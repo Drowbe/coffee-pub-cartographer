@@ -14,8 +14,9 @@ need nothing installed beyond the module.
 ## Open the window
 
 In Cartographer's sub-menubar, the **Scene Motion** section starts with a sliders button that opens
-the window. The same section has quick buttons to play and stop the layers and the tiles, and one
-button per collection.
+the window. The same section has quick buttons to play and stop the layers and the tiles -- each lit
+while its motion runs -- and a button for the scene's look, which opens a menu of collections, layer
+groups and tile groups. Pick a collection to switch to it; click a group to turn it on or off.
 
 The window remembers whether you left it open. It opens itself on scenes that have scene motion and
 steps aside on scenes that do not; you can still open it on an empty scene to set one up.
@@ -121,7 +122,7 @@ is made. The pen edits a collection the same way; editing the one that is showin
 
 In Collections mode, the settings also show every layer group and tile group as a chip, which switch
 groups on and off live. Choosing a collection -- from the bar's dropdown, the Collections settings, or
-its button in the sub-menubar -- switches both at once, and everything fades to match.
+the look menu in the sub-menubar -- switches both at once, and everything fades to match.
 
 The current collection is the one that matches what is on now; if two save the same look, the one
 made or chosen last. Change a group by hand and the bar reads **Custom** until the look matches a

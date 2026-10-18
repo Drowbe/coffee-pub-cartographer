@@ -346,6 +346,7 @@
 	"parallax.barOpenWindow": "Scene motion: parallax, tiles and collections",
 	"parallax.barPlayLayers": "Play / Stop the parallax layers",
 	"parallax.barPlayTiles": "Play / Stop the animated tiles",
+	"parallax.barLooks": "The scene's look: collections, layer groups and tile groups",
 	"parallax.toggleGroup": "Turn this group on or off. Groups that are on add together.",
 	"parallax.layerGroups": "Layer groups",
 	"parallax.tileGroups": "Tile groups",

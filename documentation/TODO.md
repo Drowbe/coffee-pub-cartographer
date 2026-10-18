@@ -122,8 +122,8 @@ author-placed: false door, trapped door, revolving door, portcullis, gate, arrow
 
 **Walk scene motion in a running world.** Built and tested in node, but most of it has never been
 seen in Foundry. In rough order of risk: tile rotation, scrolling and fades; the Scene Motion
-sub-menubar buttons, including their lit state and the per-collection buttons rebuilding on a scene
-change; applying a collection; dragging layers and dropping them on the Tokens line; copy, export and
+sub-menubar buttons, including their lit state and the look menu opening on both left and right
+click; applying a collection; dragging layers and dropping them on the Tokens line; copy, export and
 import; and both confirmation prompts. Verified when each works on a GM client and a second, player
 client sees the same motion in step.
 

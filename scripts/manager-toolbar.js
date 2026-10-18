@@ -505,6 +505,12 @@ class CartographerToolbar {
             if (toolConfig.group) {
                 itemData.group = toolConfig.group; // Group ID, e.g., 'line-width'
             }
+
+            // Optional right-click menu: an array of { name, icon, onClick, submenu? },
+            // or a function returning one, read each time the menu opens.
+            if (toolConfig.contextMenuItems) {
+                itemData.contextMenuItems = toolConfig.contextMenuItems;
+            }
             
             // Log the complete itemData being sent to Blacksmith API
             console.log(`${MODULE.NAME}: Registering secondary bar item:`, {
