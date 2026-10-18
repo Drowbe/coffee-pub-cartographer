@@ -568,14 +568,20 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         await this.render();
         if (this.minimized) return;
         // Width and place are left alone; only the height follows the settings.
-        if (this.settingsOpen) {
-            this.setPosition({ height: this._settingsHeight ?? this.options.position.height });
-            return;
-        }
-        // Closed, fit the bar, then pin that number so later renders leave it be.
-        this.setPosition({ height: 'auto' });
-        const barHeight = this.element?.getBoundingClientRect().height;
-        if (barHeight) this.setPosition({ height: barHeight });
+        // Closed, setPosition below fits it to the bar whatever height is asked.
+        this.setPosition({ height: this.settingsOpen ? (this._settingsHeight ?? this.options.position.height) : 'auto' });
+    }
+
+    /**
+     * With settings hidden the window is only its bar, so its height is the
+     * bar's and nothing else: a drag on the resize handle changes the width
+     * alone, and opening it collapsed -- or Blacksmith restoring a saved
+     * position -- fits the bar rather than the last saved height. Every way
+     * the frame is sized comes through here, so this is the one place to say it.
+     */
+    setPosition(position = {}) {
+        if (this.settingsOpen || !this.element || this.minimized) return super.setPosition(position);
+        return super.setPosition({ ...position, height: 'auto' });
     }
 
     /** Each mode remembers its own tab. */
