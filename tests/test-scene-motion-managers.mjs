@@ -229,6 +229,12 @@ await cm.duplicate(cm.list[0].id);
 check(cm.list[1].name === 'Everything (copy)', 'a collection copies just after its original');
 await cm.remove(cm.list[1].id);
 check(cm.list.map(c => c.name).join(',') === 'Everything,Windmills Only', 'a collection is removed');
+// Two collections saving the same look: only one is current, the one last saved or applied.
+await cm.apply('everything');
+await cm.save('Also Everything');
+check(cm.current()?.name === 'Also Everything', 'of two identical looks, the one just saved is current');
+await cm.apply('everything');
+check(cm.current()?.name === 'Everything', 'applying the other makes it the current one');
 
 console.log('\nthe window follows the scene');
 const configured = flags.parallax;

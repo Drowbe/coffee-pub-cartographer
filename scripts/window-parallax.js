@@ -504,10 +504,10 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             if (!on.length) return localize(noneKey);
             return on.map(id => groups.find(group => group.id === id)?.name).filter(Boolean).join(', ');
         };
-        const now = collectionsManager.snapshot();
+        const currentId = collectionsManager.current()?.id ?? null;
         const collections = collectionsManager.list.map(collection => ({
             ...collection,
-            current: collectionsManager.matches(collection, now),
+            current: collection.id === currentId,
             summary: `${describe(collection.layerGroups ?? null, state.sets, 'allLayers', 'noLayers')} · ${describe(collection.tileGroups ?? null, tileMotionManager.motion.groups, 'allTiles', 'noTiles')}`
         }));
         return {

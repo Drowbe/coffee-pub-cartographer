@@ -20,9 +20,11 @@ const FLAG_KEY = 'collections';
  * Each of layerGroups and tileGroups is saved the way the modes save what is
  * on -- null for All, [] for None, else group ids (see utils-groups.js).
  *
- * Which collection is "current" is not saved. It is whichever one matches
- * what is on now, so it can never disagree with the scene: change a group by
- * hand and no collection is current until the look matches one again.
+ * Which collection is "current" is worked out, not saved: it is one that
+ * matches what is on now, so it can never disagree with the scene -- change a
+ * group by hand and no collection is current until the look matches one again.
+ * Two collections can save the same look, though, so the flag also keeps the
+ * one last saved or applied (`lastId`), which wins when more than one matches.
  */
 class CollectionsManager {
     initialize() {
@@ -58,10 +60,15 @@ class CollectionsManager {
             && sameActive(collection.tileGroups ?? null, now.tileGroups);
     }
 
-    /** The collection that matches what is on now, if any. */
+    /**
+     * The collection that matches what is on now, if any. When several do,
+     * the one last saved or applied; failing that, the first.
+     */
     current() {
         const now = this.snapshot();
-        return this.list.find(collection => this.matches(collection, now)) ?? null;
+        const matching = this.list.filter(collection => this.matches(collection, now));
+        const lastId = canvas.scene?.getFlag(MODULE.ID, FLAG_KEY)?.lastId;
+        return matching.find(collection => collection.id === lastId) ?? matching[0] ?? null;
     }
 
     find(nameOrId) {
@@ -73,21 +80,24 @@ class CollectionsManager {
             ?? null;
     }
 
-    async _write(list) {
+    /** Save the list, and which collection was last saved or applied (kept unless given). */
+    async _write(list, lastId = canvas.scene?.getFlag(MODULE.ID, FLAG_KEY)?.lastId ?? null) {
         if (!game.user.isGM || !canvas.scene) return;
-        await canvas.scene.setFlag(MODULE.ID, FLAG_KEY, { list });
+        const kept = list.some(entry => entry.id === lastId) ? lastId : null;
+        await canvas.scene.setFlag(MODULE.ID, FLAG_KEY, { list, lastId: kept });
     }
 
     /** Save what is on now as a new collection. */
     async save(name) {
         const label = String(name ?? '').trim();
         if (!label) return;
-        await this._write([...this.list, { id: foundry.utils.randomID(), name: label, ...this.snapshot() }]);
+        const collection = { id: foundry.utils.randomID(), name: label, ...this.snapshot() };
+        await this._write([...this.list, collection], collection.id);
     }
 
     /** Replace a collection's look with what is on now. */
     async update(id) {
-        await this._write(this.list.map(entry => (entry.id === id ? { ...entry, ...this.snapshot() } : entry)));
+        await this._write(this.list.map(entry => (entry.id === id ? { ...entry, ...this.snapshot() } : entry)), id);
     }
 
     async rename(id, name) {
@@ -122,6 +132,7 @@ class CollectionsManager {
         if (!game.user.isGM) return;
         const collection = this.find(nameOrId);
         if (!collection) return;
+        await this._write(this.list, collection.id);
         await parallaxManager.setActiveSets(collection.layerGroups ?? null);
         await tileMotionManager.setActiveGroups(collection.tileGroups ?? null);
     }
