@@ -313,10 +313,8 @@
                 <span class="cartographer-parallax-set-name">{{name}}</span>
                 <span class="cartographer-parallax-layer-summary">{{summary}}</span>
             </div>
-            <button type="button" class="cartographer-parallax-button" data-action="update-collection" data-collection-id="{{id}}"
-                data-tooltip="{{localize "coffee-pub-cartographer.parallax.updateCollection"}}"><i class="fa-solid fa-floppy-disk"></i></button>
-            <button type="button" class="cartographer-parallax-button" data-action="rename-collection" data-collection-id="{{id}}"
-                data-tooltip="{{localize "coffee-pub-cartographer.parallax.renameCollection"}}"><i class="fa-solid fa-pen"></i></button>
+            <button type="button" class="cartographer-parallax-button" data-action="edit-collection" data-collection-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.editCollection"}}"><i class="fa-solid fa-pen"></i></button>
             <button type="button" class="cartographer-parallax-button" data-action="duplicate-collection" data-collection-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.duplicateCollection"}}"><i class="fa-solid fa-clone"></i></button>
             <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-collection" data-collection-id="{{id}}"
@@ -328,7 +326,7 @@
     <div class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.parallax.noCollections"}}</div>
     {{/if}}
     <div class="cartographer-parallax-panel-actions">
-        <button type="button" class="cartographer-parallax-button is-labelled" data-action="save-collection"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.saveCollection"}}</span></button>
+        <button type="button" class="cartographer-parallax-button is-labelled" data-action="add-collection"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.addCollection"}}</span></button>
     </div>
 </div>
 {{/inline}}

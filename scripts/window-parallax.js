@@ -178,13 +178,9 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         'layer-groups-none': (_event, _target, app) => void app.manager.setActiveSets([]),
         'tile-groups-all': (_event, _target, _app) => void tileMotionManager.setActiveGroups(null),
         'tile-groups-none': (_event, _target, _app) => void tileMotionManager.setActiveGroups([]),
-        'save-collection': (_event, _target, app) => app.promptCollectionName('saveCollection').then(name => name && collectionsManager.save(name)),
+        'add-collection': (_event, _target, app) => app.editCollection(null),
+        'edit-collection': (_event, target, app) => app.editCollection(target.dataset.collectionId),
         'apply-collection': (_event, target, _app) => void collectionsManager.apply(target.dataset.collectionId),
-        'update-collection': (_event, target, _app) => void collectionsManager.update(target.dataset.collectionId),
-        'rename-collection': (_event, target, app) => {
-            const collection = collectionsManager.find(target.dataset.collectionId);
-            if (collection) app.promptCollectionName('renameCollection', collection.name).then(name => name && collectionsManager.rename(collection.id, name));
-        },
         'remove-collection': (_event, target, app) => app.confirmRemoveCollection(target.dataset.collectionId),
         'duplicate-collection': (_event, target, _app) => void collectionsManager.duplicate(target.dataset.collectionId),
         'add-set': (_event, _target, app) => app.editSet(null),
@@ -377,17 +373,81 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         else await groups.add(name, result.items);
     }
 
-    async promptCollectionName(titleKey, value = '') {
+    /**
+     * Add a collection (id null) or edit one, the way groups are made: a name,
+     * then for layers and for tiles, All, None, or a checkbox per group. A new
+     * one starts from the scene's current look, so the usual case -- keep what
+     * is showing -- is just a name.
+     */
+    async editCollection(id) {
+        const collection = id ? collectionsManager.find(id) : null;
+        if (id && !collection) return;
         const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
         const esc = text => foundry.utils.escapeHTML(String(text ?? ''));
-        const name = await foundry.applications.api.DialogV2.prompt({
-            window: { title: localize(titleKey), icon: 'fa-solid fa-boxes-stacked' },
-            content: `<input type="text" name="name" value="${esc(value)}" placeholder="${esc(localize('collectionNamePlaceholder'))}" autofocus>`,
-            ok: { callback: (_event, button) => button.form.elements.name.value },
+        const look = collection ?? collectionsManager.snapshot();
+
+        // One section per mode. "Groups" with nothing ticked is None.
+        const section = (kind, title, groups, value, allKey, noneKey) => {
+            const mode = value === null ? 'all' : (value.length ? 'groups' : 'none');
+            const radio = (choice, labelKey) => `<label><input type="radio" name="${kind}Mode" value="${choice}" ${mode === choice ? 'checked' : ''}> ${esc(localize(labelKey))}</label>`;
+            const boxes = groups.length
+                ? groups.map(group => `<label class="cartographer-parallax-set-dialog-row">
+                    <input type="checkbox" name="${kind}" value="${esc(group.id)}" ${value?.includes(group.id) ? 'checked' : ''}>
+                    <span class="cartographer-parallax-set-dialog-name">${esc(group.name)}</span>
+                </label>`).join('')
+                : `<p class="cartographer-parallax-set-dialog-empty">${esc(localize('collectionNoGroups'))}</p>`;
+            return `<div class="cartographer-parallax-set-dialog-head"><span>${esc(localize(title))}</span></div>
+                <div class="cartographer-parallax-collection-modes" data-kind="${kind}">
+                    ${radio('all', allKey)}${radio('none', noneKey)}${radio('groups', 'collectionTheseGroups')}
+                </div>
+                <div class="cartographer-parallax-set-dialog-list" data-kind-list="${kind}">${boxes}</div>`;
+        };
+        const content = `
+            <div class="cartographer-parallax-set-dialog-body">
+                <label class="cartographer-parallax-set-dialog-field">
+                    <span>${esc(localize('setName'))}</span>
+                    <input type="text" name="name" value="${esc(collection?.name ?? '')}" placeholder="${esc(localize('collectionNamePlaceholder'))}" autofocus>
+                </label>
+                ${section('layers', 'layerGroups', this.manager.state.sets, look.layerGroups ?? null, 'allLayers', 'noLayers')}
+                ${section('tiles', 'tileGroups', tileMotionManager.motion.groups, look.tileGroups ?? null, 'allTiles', 'noTiles')}
+            </div>`;
+
+        const readLook = (form, kind) => {
+            const mode = form.elements[`${kind}Mode`].value;
+            if (mode === 'all') return null;
+            if (mode === 'none') return [];
+            return new FormData(form).getAll(kind);
+        };
+        const result = await foundry.applications.api.DialogV2.prompt({
+            classes: ['cartographer-parallax-set-dialog'],
+            window: { title: localize(collection ? 'editCollection' : 'addCollection'), icon: 'fa-solid fa-boxes-stacked' },
+            position: { width: 380 },
+            content,
+            ok: {
+                label: localize(collection ? 'saveCollection' : 'addCollection'),
+                callback: (_event, button) => ({
+                    name: button.form.elements.name.value,
+                    layerGroups: readLook(button.form, 'layers'),
+                    tileGroups: readLook(button.form, 'tiles')
+                })
+            },
+            render: (_event, dialog) => {
+                // Ticking a group chooses "these groups"; the checkboxes are
+                // only read under that choice, so this keeps the two in step.
+                dialog.element.querySelectorAll('input[type="checkbox"]').forEach(box => box.addEventListener('change', () => {
+                    const groupsRadio = dialog.element.querySelector(`input[name="${box.name}Mode"][value="groups"]`);
+                    if (box.checked && groupsRadio) groupsRadio.checked = true;
+                }));
+            },
             rejectClose: false
         });
-        return String(name ?? '').trim()
-            || (name === null ? '' : game.i18n.format(`${MODULE.ID}.parallax.collectionDefaultName`, { n: collectionsManager.list.length + 1 }));
+        if (!result) return;
+        const name = result.name.trim()
+            || collection?.name
+            || game.i18n.format(`${MODULE.ID}.parallax.collectionDefaultName`, { n: collectionsManager.list.length + 1 });
+        const look2 = { layerGroups: result.layerGroups, tileGroups: result.tileGroups };
+        if (collection) await collectionsManager.edit(collection.id, { name, ...look2 });
+        else await collectionsManager.create(name, look2);
     }
 
     async _confirm(titleKey, bodyKey, data) {

@@ -214,25 +214,31 @@ console.log('\nthe pivot stays put as a tile turns');
 }
 
 console.log('\ncollections');
-pm.state.activeSets = null;
-tm.motion.activeGroups = null;
-await cm.save('Everything');
-pm.state.activeSets = [];
-tm.motion.activeGroups = [windmills];
-await cm.save('Windmills Only');
-check(cm.current()?.name === 'Windmills Only', 'the current collection is the one matching the scene');
+// The stand-in managers apply a look by assigning it, which is all a
+// collection needs from them.
+await cm.create('Everything', { layerGroups: null, tileGroups: null });
+check(cm.current()?.name === 'Everything', 'a new collection is applied, so it is current');
+await cm.create('Windmills Only', { layerGroups: [], tileGroups: [windmills] });
+check(pm.state.activeSets.length === 0 && tm.motion.activeGroups[0] === windmills && cm.current()?.name === 'Windmills Only',
+    'creating one switches both modes to its look');
 await cm.apply('everything');
 check(pm.state.activeSets === null && tm.motion.activeGroups === null && cm.current()?.name === 'Everything', 'applying a collection switches both modes');
 tm.motion.activeGroups = [];
 check(cm.current() === null, 'a change by hand leaves no collection current');
+await cm.apply('everything');
+await cm.edit(cm.find('Windmills Only').id, { name: 'Windmills', layerGroups: null, tileGroups: [windmills] });
+check(cm.current()?.name === 'Everything' && cm.find('windmills')?.layerGroups === null,
+    'editing a collection that is not showing changes it without touching the scene');
+await cm.edit(cm.find('Everything').id, { name: 'Everything', layerGroups: [], tileGroups: null });
+check(Array.isArray(pm.state.activeSets) && pm.state.activeSets.length === 0 && cm.current()?.name === 'Everything',
+    'editing the one showing makes the scene follow');
 await cm.duplicate(cm.list[0].id);
 check(cm.list[1].name === 'Everything (copy)', 'a collection copies just after its original');
 await cm.remove(cm.list[1].id);
-check(cm.list.map(c => c.name).join(',') === 'Everything,Windmills Only', 'a collection is removed');
-// Two collections saving the same look: only one is current, the one last saved or applied.
-await cm.apply('everything');
-await cm.save('Also Everything');
-check(cm.current()?.name === 'Also Everything', 'of two identical looks, the one just saved is current');
+check(cm.list.map(c => c.name).join(',') === 'Everything,Windmills', 'a collection is removed');
+// Two collections with the same look: only one is current, the one last made or applied.
+await cm.create('Also Everything', { layerGroups: [], tileGroups: null });
+check(cm.current()?.name === 'Also Everything', 'of two identical looks, the one just made is current');
 await cm.apply('everything');
 check(cm.current()?.name === 'Everything', 'applying the other makes it the current one');
 

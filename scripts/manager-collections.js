@@ -87,23 +87,30 @@ class CollectionsManager {
         await canvas.scene.setFlag(MODULE.ID, FLAG_KEY, { list, lastId: kept });
     }
 
-    /** Save what is on now as a new collection. */
-    async save(name) {
+    /**
+     * Add a collection with the given look -- `layerGroups` and `tileGroups`,
+     * each null (All), [] (None) or group ids -- and switch to it, so the GM
+     * sees what they just made, as a new group shows itself.
+     */
+    async create(name, { layerGroups = null, tileGroups = null } = {}) {
         const label = String(name ?? '').trim();
         if (!label) return;
-        const collection = { id: foundry.utils.randomID(), name: label, ...this.snapshot() };
+        const collection = { id: foundry.utils.randomID(), name: label, layerGroups, tileGroups };
         await this._write([...this.list, collection], collection.id);
+        await this.apply(collection.id);
     }
 
-    /** Replace a collection's look with what is on now. */
-    async update(id) {
-        await this._write(this.list.map(entry => (entry.id === id ? { ...entry, ...this.snapshot() } : entry)), id);
-    }
-
-    async rename(id, name) {
+    /**
+     * Change a collection's name and look. If it is the one showing, the scene
+     * follows the change, so it does not quietly stop matching.
+     */
+    async edit(id, { name, layerGroups, tileGroups }) {
+        const wasCurrent = this.current()?.id === id;
         const label = String(name ?? '').trim();
-        if (!label) return;
-        await this._write(this.list.map(entry => (entry.id === id ? { ...entry, name: label } : entry)));
+        await this._write(this.list.map(entry => (entry.id === id
+            ? { ...entry, name: label || entry.name, layerGroups, tileGroups }
+            : entry)));
+        if (wasCurrent) await this.apply(id);
     }
 
     /** Copy a collection under a new name, with the same look. */

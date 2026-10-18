@@ -114,14 +114,18 @@ tile's motion settings are saved on the tile, so a copied tile brings them along
 
 A collection is a saved look for the whole scene: which layer groups and which tile groups are on.
 
-In Collections mode, the settings show every layer group and tile group as a chip. Set the look you
-want, then **Save Look as Collection**. Choosing a collection later -- from the bar's dropdown, the
-Collections settings, or its button in the sub-menubar -- switches both at once, and everything fades
-to match.
+**Add Collection** opens a dialog like the group one: a name, then for layers and for tiles, **All**,
+**None**, or **These groups** with a checkbox per group. It starts from the look on the scene now, so
+keeping what is showing is just a matter of naming it. A new collection is switched to as soon as it
+is made. The pen edits a collection the same way; editing the one that is showing updates the scene.
 
-The current collection is whichever matches what is on now. Change a group by hand and the bar reads
-**Custom** until the look matches a collection again. A collection's save button replaces its look
-with the current one.
+In Collections mode, the settings also show every layer group and tile group as a chip, which switch
+groups on and off live. Choosing a collection -- from the bar's dropdown, the Collections settings, or
+its button in the sub-menubar -- switches both at once, and everything fades to match.
+
+The current collection is the one that matches what is on now; if two save the same look, the one
+made or chosen last. Change a group by hand and the bar reads **Custom** until the look matches a
+collection again.
 
 Play / Stop in Collections mode runs the layers and the tiles together.
 
