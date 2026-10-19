@@ -4,6 +4,7 @@
 
 import { MODULE } from './const.js';
 import { parallaxManager } from './manager-parallax.js';
+import { routesManager } from './manager-routes.js';
 import { formatDistance, formatSpan } from './utils-travel.js';
 
 const HUD_ID = `${MODULE.ID}-travel-hud`;
@@ -35,6 +36,12 @@ class TravelManager {
         on('canvasReady', () => {
             this._start();
             this._recordClockRate();
+            this._syncRoute();
+        });
+        // A route this journey follows was redrawn, on whatever scene.
+        on(`${MODULE.ID}.routesChanged`, () => {
+            this._syncRoute();
+            parallaxManager.window?.render();
         });
         on('canvasTearDown', () => this._stop());
         // Blacksmith's world clock. Its rate is the same on every client, but
@@ -60,6 +67,23 @@ class TravelManager {
         if (!game.user.isGM || !canvas?.scene || rate === undefined) return;
         if (!parallaxManager.state.travel?.followClock) return;
         void parallaxManager.syncClockRate(rate);
+    }
+
+    /**
+     * Keep a followed route's length as the destination, in this scene's
+     * units. The GM writes it, when the scene loads and when a route changes;
+     * a route that is gone, or in units that do not convert, leaves the
+     * destination as it was.
+     */
+    _syncRoute() {
+        if (!game.user.isGM || !canvas?.scene) return;
+        const travel = parallaxManager.state.travel;
+        if (!travel?.route) return;
+        const linked = routesManager.linked(travel.route, canvas.scene.grid?.units);
+        if (!linked || linked.converted === null) return;
+        if (Math.abs(linked.converted - (Number(travel.destination) || 0)) > 1e-6) {
+            void parallaxManager.setTravel({ destination: linked.converted });
+        }
     }
 
     _start() {

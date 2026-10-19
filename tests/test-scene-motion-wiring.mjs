@@ -86,6 +86,53 @@ console.log('\nno style in tool-parallax.css goes unused');
     else ok(`${classes.length} classes, all referenced`);
 }
 
+console.log('\nthe routes window: actions, strings and styles');
+{
+    const rhbs = fs.readFileSync('templates/window-routes.hbs', 'utf8');
+    const rjs = fs.readFileSync('scripts/window-routes.js', 'utf8');
+    const rman = fs.readFileSync('scripts/manager-routes.js', 'utf8');
+    const all = rhbs + rjs + rman;
+    const actions = new Set([...all.matchAll(/data-action="([a-z-]+)"/g)].map(m => m[1]));
+    const unhandled = [...actions].filter(action => !rjs.includes(`'${action}':`));
+    if (unhandled.length) fail(`routes actions with no handler: ${unhandled.join(', ')}`);
+    else ok(`${actions.size} actions, all handled`);
+
+    // Keys in full in the template; `${MODULE.ID}.routes.x` and localize('x') in the scripts.
+    const used = new Set();
+    for (const m of rhbs.matchAll(/"coffee-pub-cartographer\.((?:routes|parallax)\.[A-Za-z.]+)"/g)) used.add(m[1]);
+    for (const m of (rjs + rman).matchAll(/\$\{MODULE\.ID\}\.((?:routes|parallax)\.[A-Za-z.]+)[`'"]/g)) used.add(m[1]);
+    for (const m of (rjs + rman).matchAll(/localize\('([A-Za-z]+)'\)/g)) used.add(`routes.${m[1]}`);
+    for (const m of (rjs + rman).matchAll(/localize\(drawing \? '([A-Za-z]+)' : '([A-Za-z]+)'\)/g)) { used.add(`routes.${m[1]}`); used.add(`routes.${m[2]}`); }
+    for (const m of rjs.matchAll(/'oneLeg' : 'legs'/g)) { used.add('routes.oneLeg'); used.add('routes.legs'); }
+    for (const m of rman.matchAll(/_KEY = `\$\{MODULE\.ID\}\.(routes\.[A-Za-z]+)`/g)) used.delete(m[1]);
+    for (const m of rjs.matchAll(/_KEY = `\$\{MODULE\.ID\}\.(routes\.[A-Za-z]+)`/g)) used.delete(m[1]);
+    const missing = [...used].filter(key => !(key in lang));
+    if (missing.length) fail(`missing strings: ${missing.join(', ')}`);
+    else ok(`${used.size} keys, all present`);
+    const unusedRoutes = Object.keys(lang).filter(key => key.startsWith('routes.') && !used.has(key));
+    if (unusedRoutes.length) fail(`unused routes strings: ${unusedRoutes.join(', ')}`);
+    else ok('every routes string is referenced');
+
+    const routeClasses = [...new Set([...css.matchAll(/\.(cartographer-routes-[a-z-]+)/g)].map(m => m[1]))];
+    const unusedClasses = routeClasses.filter(name => !all.includes(name));
+    if (unusedClasses.length) fail(`unused classes: ${unusedClasses.join(', ')}`);
+    else ok(`${routeClasses.length} route classes, all referenced`);
+
+    // Every name the window imports from utils-travel is exported there, and
+    // every one it calls is imported: a missing import is a crash on render.
+    const travel = fs.readFileSync('scripts/utils-travel.js', 'utf8');
+    const exported = new Set([...travel.matchAll(/^export (?:const|function) ([A-Za-z_]+)/gm)].map(m => m[1]));
+    for (const [file, source] of [['window-routes.js', rjs], ['window-parallax.js', windowJs], ['manager-routes.js', rman]]) {
+        const block = source.match(/import \{([^}]*)\} from '\.\/utils-travel\.js'/);
+        const imported = new Set((block?.[1] ?? '').split(',').map(name => name.trim()).filter(Boolean));
+        const body = source.replace(/import [\s\S]*?from '[^']+';/g, '');
+        const notExported = [...imported].filter(name => !exported.has(name));
+        const notImported = [...exported].filter(name => !imported.has(name) && new RegExp(`[^.\\w]${name}\\(`).test(body));
+        if (notExported.length || notImported.length) fail(`${file}: imports missing from utils-travel ${notExported.join(', ')}; calls without import ${notImported.join(', ')}`);
+        else ok(`${file} imports what it uses from utils-travel`);
+    }
+}
+
 console.log('\nthe window declares only its own options');
 {
     // Copying super's DEFAULT_OPTIONS in duplicates core's v14 window controls;

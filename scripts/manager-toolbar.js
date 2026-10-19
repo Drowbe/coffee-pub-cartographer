@@ -107,6 +107,11 @@ class CartographerToolbar {
                     'Scene Motion': {
                         mode: 'default', // Independent buttons; Play/Stop and collections are toggleable
                         order: 25
+                    },
+                    // Drawing and listing routes on a map: see manager-routes.js.
+                    'Routes': {
+                        mode: 'default',
+                        order: 30
                     }
                     // 'default' group is automatically created for items without a group
                 },

@@ -31,6 +31,8 @@ a corridor they walked without showing them the room beyond the door they never 
 - [Settings](userguides/userguide-settings.md) -- every setting, and who it affects.
 - [Scene motion](userguides/userguide-scene-motion.md) -- scrolling parallax layers, spinning and
   scrolling tiles, and collections that switch a scene's look in one click.
+- [Routes](userguides/userguide-routes.md) -- drawing a journey on a map, its length and travel time,
+  and following it with the scene-motion odometer.
 
 ## Working on it
 

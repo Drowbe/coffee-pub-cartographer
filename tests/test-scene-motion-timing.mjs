@@ -17,6 +17,9 @@ import {
     REAL_WORLD_PACES, rulesPaces, paceToSceneUnits, paceUnit, sceneUnitsToPace,
     paceInputToSceneUnits, unitsPerHourToPixels, pixelsToUnitsPerHour
 } from '../scripts/utils-travel.js';
+import {
+    convertDistance, legPixels, routePixels, gridDistance, pointAlong, cleanPoints
+} from '../scripts/utils-routes.js';
 
 let bad = 0;
 const fail = (m) => { bad++; console.log('  FAIL  ' + m); };
@@ -180,6 +183,32 @@ console.log('\npaces');
     else ok('a system without paces falls back to real-world ones');
     if (REAL_WORLD_PACES.some(p => !(p.mph > 0)) || new Set(REAL_WORLD_PACES.map(p => p.id)).size !== REAL_WORLD_PACES.length) fail('real-world paces are malformed');
     else ok(`${REAL_WORLD_PACES.length} real-world paces, each with a speed`);
+}
+
+console.log('\nroutes');
+{
+    const close = (a, b) => Math.abs(a - b) < 1e-9;
+    // A 3-4-5 triangle's two legs, on a 100 px, 5 mi grid.
+    const points = [[0, 0], [300, 0], [300, 400]];
+    if (JSON.stringify(legPixels(points)) !== '[300,400]' || routePixels(points) !== 700) fail('leg lengths are wrong');
+    else ok('a route is the sum of its legs');
+    if (!close(routePixels([[0, 0], [300, 400]]), 500)) fail('a diagonal is not its true length');
+    else ok('a diagonal leg is as long as it looks');
+    if (gridDistance(700, { size: 100, distance: 5 }) !== 35 || gridDistance(700, { size: 0 }) !== 0) fail('pixels do not convert on the grid');
+    else ok('700 px on a 100 px, 5 mi grid is 35 mi');
+    const mid = pointAlong(points, 350);
+    if (!close(mid.x, 300) || !close(mid.y, 50) || !close(mid.angle, Math.PI / 2)) fail(`350 px along lands at ${mid.x}, ${mid.y}`);
+    else ok('a distance along the route lands on the right leg, heading its way');
+    const end = pointAlong(points, 10000);
+    const start = pointAlong(points, -5);
+    if (end.x !== 300 || end.y !== 400 || start.x !== 0 || start.y !== 0) fail('positions past the ends are not clamped');
+    else ok('past either end, the position stays at that end');
+    if (JSON.stringify(cleanPoints([[0.4, 0.2], [100.2, 0], [101, 1], [101, 1]])) !== '[[0,0],[100,0]]') fail('a double-click leaves duplicate points');
+    else ok('points a double-click lands on twice are dropped');
+    if (!close(convertDistance(1, 'mi', 'ft'), 5280) || !close(convertDistance(1, 'km', 'm'), 1000) || !close(convertDistance(1609.344, 'm', 'mi'), 1)) fail('distances do not convert between units');
+    else ok('a route in miles converts to an odometer in feet or metres');
+    if (convertDistance(3, 'hexes', 'ft') !== null || convertDistance(3, 'days', 'days') !== 3) fail('incomparable units convert');
+    else ok('units that cannot be compared do not convert; the same unit always does');
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');

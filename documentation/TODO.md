@@ -149,6 +149,21 @@ module's API already. Verified by importing the pack and running each.
 fades in on Play and out on Stop with the motion's ease. Verified by the sound following Play and Stop
 on a second client.
 
+## Routes
+
+**Walk routes in a running world.** Drawing (click, double-click, Enter, Backspace, Escape, and
+that a click on a token does not select it), the label sizes on a real map, the Routes window, and an
+odometer following a route from another scene. Built from source and tested in node only.
+
+**A progress marker on the map.** A token-like marker that stands at
+`routesManager.pointAt(routeId, distance)` and moves as the odometer counts, for everyone. The
+geometry is done; it needs drawing on the map scene from the animated scene's odometer, which is
+not loaded there -- read the animated scene's `travel` flag and compute its distance with the same
+shared clock.
+
+**Editing a route's waypoints.** Routes can be renamed, recoloured and deleted, not reshaped; a
+mis-drawn one is deleted and drawn again.
+
 ## Ad-hoc map making
 
 The mapper is a recorder today: it turns a scene the GM already built into a drawing. The larger

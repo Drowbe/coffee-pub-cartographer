@@ -107,6 +107,9 @@ function defaultState() {
  *   stopOnArrival   ease to a stop on reaching it
  *   arrived         reached this destination already, so arriving is not repeated
  *   followClock     take time from Blacksmith's world clock rather than real time
+ *   route           { sceneId, routeId } of a route drawn on a map that this journey
+ *                   follows, or null: its length is the destination (kept in step by
+ *                   manager-travel.js), and the distance is how far along it the party is
  *
  * Not following the clock, distance is the ground layer's scroll on the grid
  * -- the pace times real time, times the master speed. Following it, distance
@@ -129,6 +132,7 @@ function defaultTravel() {
         stopOnArrival: true,
         arrived: false,
         followClock: false,
+        route: null,
         clockRate: 0,
         clockMotion: { playing: false, masterSpeed: 0, easeSeconds: 0, anchorAt: 0, rampFrom: null }
     };

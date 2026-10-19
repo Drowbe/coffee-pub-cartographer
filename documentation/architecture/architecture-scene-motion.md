@@ -18,7 +18,9 @@ canvas, and how the window is put together.
 | `scripts/manager-collections.js` | Saved looks across both modes. |
 | `scripts/manager-motionbar.js` | The Scene Motion section of the sub-menubar. |
 | `scripts/utils-travel.js` | Distances on the grid, paces, and their units. |
-| `scripts/manager-travel.js` | The on-screen odometer, arrival, and the world clock's rate. |
+| `scripts/manager-travel.js` | The on-screen odometer, arrival, the world clock's rate, and a followed route's length. |
+| `scripts/utils-routes.js` | Route geometry: lengths, a point along a route, unit conversion. |
+| `scripts/manager-routes.js`, `scripts/window-routes.js`, `templates/window-routes.hbs` | Routes: saving, drawing on the canvas, the click-to-place tool, and the Routes window. |
 | `scripts/window-parallax.js`, `templates/window-parallax.hbs`, `styles/tool-parallax.css` | The window. |
 
 ## Where state lives
@@ -28,6 +30,7 @@ canvas, and how the window is put together.
 | Scene flag | `parallax` | Layers, layer groups (stored as `sets`), which are on (`activeSets`), and the parallax motion. |
 | Scene flag | `tileMotion` | The tiles' motion, each managed tile's position at the anchor (`offsets`), tile groups, and which are on (`activeGroups`). |
 | Scene flag | `collections` | `{ list }` of `{ id, name, layerGroups, tileGroups }`. |
+| Scene flag | `routes` | `{ list }` of `{ id, name, color, points }`, points as `[[x, y], ...]` in scene pixels. On map scenes. |
 | Tile flag | `motion` | That tile's `visible`, `rotate` and `scroll` settings. A tile with this flag is managed. |
 | `localStorage` | `parallax.windowPrefs`, `parallax.windowOpen` | The window's mode, tabs, folded rows, height, and whether the GM wants it open. Per browser, never shared. |
 
@@ -97,6 +100,17 @@ clock, the GM records the clock's rate (`api.worldClock.rate`, and again on
 `blacksmith.worldClockRateChanged`) in `travel.clockRate`; distance is then the pace per second
 times `motionTravel(travel.clockMotion)`, a second motion whose speed is the rate, and the scenery's
 speeds are multiplied by `clockFactor`, the rate capped at four. A rate of 0 stops both.
+
+**Routes.** A route lives on its map scene; the journey lives on the animated scene, as
+`travel.route = { sceneId, routeId }`. Its length, converted from the map's units to the scene's,
+is written into `travel.destination` when it is chosen, and again by the GM (`_syncRoute` in
+manager-travel.js) when the scene loads or any route changes -- `updateScene` on the map fires
+`coffee-pub-cartographer.routesChanged`. Storing the length rather than reading it live keeps the
+odometer working when the map is not loaded and after the route is deleted. Where the party is on
+the route is `routesManager.pointAt(routeId, distance)`, the odometer's distance converted back to
+the map's units: what the planned marker will read. Routes draw in `canvas.interface`, above tokens;
+the drawing tool captures left clicks in the capture phase, as the sketch tool does, and leaves
+right-drag to pan.
 
 **Tiles.** A spinning tile turns its own mesh: the pivot's world position is worked out from the
 tile's anchor, size and rotation, and the mesh is re-anchored there, so it turns in place. A scrolling

@@ -446,6 +446,11 @@
             <div class="cartographer-parallax-travel-bar"><div class="cartographer-parallax-travel-fill" data-travel-readout="progress"></div></div>
             {{/if}}
 
+            {{! What the odometer reads from the scene: read-only. }}
+            <dl class="cartographer-parallax-measures">
+                {{#each travel.measures}}<dt>{{label}}</dt><dd>{{value}}</dd>{{/each}}
+            </dl>
+
             {{> switchRow label=(localize "coffee-pub-cartographer.parallax.travelShow") hint=(localize "coffee-pub-cartographer.parallax.travelShowHint")
                 action="travel-hud" on=travel.showHud}}
 
@@ -486,8 +491,30 @@
             <p class="cartographer-parallax-hint">{{travel.clockText}}</p>
             {{/if}}
 
+            {{! A route drawn on a map: its length is the destination. }}
+            {{#if travel.hasRoutes}}
+            <label class="cartographer-parallax-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelRouteHint"}}">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelRoute"}}</span>
+                <select data-field="travelRoute">
+                    <option value="">{{localize "coffee-pub-cartographer.parallax.travelNoRoute"}}</option>
+                    {{#each travel.routeGroups}}
+                    <optgroup label="{{label}}">
+                        {{#each routes}}<option value="{{value}}" {{#if selected}}selected{{/if}} {{#if disabled}}disabled{{/if}}>{{label}}</option>{{/each}}
+                    </optgroup>
+                    {{/each}}
+                </select>
+            </label>
+            {{/if}}
+
             <div class="cartographer-parallax-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelDestinationHint"}}">
                 <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelDestination"}}</span>
+                {{#if travel.routeLinked}}
+                <span class="cartographer-parallax-travel-inline">
+                    <span>{{travel.routeText}}</span>
+                    <button type="button" class="cartographer-parallax-button" data-action="travel-unlink-route"
+                        data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelUnlinkRoute"}}"><i class="fa-solid fa-link-slash"></i></button>
+                </span>
+                {{else}}
                 <span class="cartographer-parallax-travel-inline">
                     <input type="number" data-field="travelDestination" value="{{travel.destinationAmount}}" min="0" step="any"
                         placeholder="{{localize "coffee-pub-cartographer.parallax.travelNoDestination"}}">
@@ -499,11 +526,11 @@
                         data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelClearDestination"}}"><i class="fa-solid fa-xmark"></i></button>
                     {{/if}}
                 </span>
+                {{/if}}
             </div>
             {{#if travel.hasDestination}}
             {{> switchRow label=(localize "coffee-pub-cartographer.parallax.travelStopOnArrival") action="travel-stop" on=travel.stopOnArrival}}
             {{/if}}
-            <p class="cartographer-parallax-hint">{{travel.gridText}}</p>
         </div>
         <div class="cartographer-parallax-panel-actions">
             <button type="button" class="cartographer-parallax-button is-labelled" data-action="travel-reset"

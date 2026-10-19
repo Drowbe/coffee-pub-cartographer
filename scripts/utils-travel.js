@@ -159,6 +159,26 @@ export function rulesPaces(systemId, config) {
     return null;
 }
 
+/** The headings paces are listed under, in order. */
+export const PACE_GROUPS = ['foot', 'mount', 'water', 'air'];
+
+/**
+ * The paces to offer on a scene, as { id, group, perHour, label }: the game
+ * system's own when its rules define them, or real-world ones, with perHour
+ * in the scene's units and each label carrying its speed, "Normal (3 mph)".
+ * `nameOf(pace)` gives a pace's name (localizing is the caller's business).
+ * Empty when the scene's units have no pace (hexes, squares).
+ */
+export function paceChoices(systemId, config, sceneUnits, nameOf) {
+    if (paceToSceneUnits(1, sceneUnits) === null) return [];
+    const unit = paceUnit(sceneUnits);
+    return (rulesPaces(systemId, config) ?? REAL_WORLD_PACES).map(pace => {
+        const perHour = paceToSceneUnits(pace.mph, sceneUnits);
+        const shown = Math.round(sceneUnitsToPace(perHour, sceneUnits) * 10) / 10;
+        return { id: pace.id, group: pace.group, perHour, label: `${nameOf(pace)} (${shown} ${unit})` };
+    });
+}
+
 /**
  * Scene units per in-world hour for a pace in miles per hour. Feet and yards
  * take it in miles; metres in kilometres. A scene in some other unit (hexes,

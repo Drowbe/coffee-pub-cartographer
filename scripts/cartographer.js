@@ -13,6 +13,7 @@ import { tileMotionManager } from './manager-tilemotion.js';
 import { collectionsManager } from './manager-collections.js';
 import { motionBar } from './manager-motionbar.js';
 import { travelManager } from './manager-travel.js';
+import { routesManager } from './manager-routes.js';
 
 // ================================================================== 
 // ===== BLACKSMITH API INTEGRATION =================================
@@ -168,6 +169,7 @@ Hooks.once('canvasReady', async () => {
             travelManager.initialize();
             // After the three it reports on.
             motionBar.initialize();
+            routesManager.initialize();
         } catch (error) {
             console.error(`❌ ${MODULE.NAME}: Failed to initialize tile motion:`, error);
         }

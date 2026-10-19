@@ -1,0 +1,45 @@
+{{! The scene's routes. Built by window-routes.js; styled in tool-parallax.css. }}
+<div class="cartographer-parallax-panel cartographer-routes-panel">
+    {{#unless hasGrid}}
+    <p class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.routes.noGrid"}}</p>
+    {{else}}
+    <dl class="cartographer-parallax-measures">
+        <dt>{{localize "coffee-pub-cartographer.parallax.measureGrid"}}</dt><dd>{{gridText}}</dd>
+        {{#if pace}}<dt>{{localize "coffee-pub-cartographer.routes.timesAt"}}</dt><dd>{{pace}}</dd>{{/if}}
+    </dl>
+
+    {{#if drawing}}
+    <p class="cartographer-parallax-hint cartographer-routes-drawing">{{localize "coffee-pub-cartographer.routes.drawHint"}}</p>
+    {{/if}}
+
+    {{#each routes}}
+    <div class="cartographer-routes-route">
+        <div class="cartographer-routes-head">
+            <button type="button" class="cartographer-routes-swatch" style="background: {{color}}" data-action="route-color" data-route-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.routes.color"}}"></button>
+            <span class="cartographer-routes-name">{{name}}</span>
+            <strong class="cartographer-routes-length">{{length}}</strong>
+            <button type="button" class="cartographer-parallax-button" data-action="route-focus" data-route-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.routes.focus"}}"><i class="fa-solid fa-crosshairs"></i></button>
+            <button type="button" class="cartographer-parallax-button" data-action="route-rename" data-route-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.routes.rename"}}"><i class="fa-solid fa-pen"></i></button>
+            <button type="button" class="cartographer-parallax-button is-danger" data-action="route-remove" data-route-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.routes.remove"}}"><i class="fa-solid fa-trash"></i></button>
+        </div>
+        <div class="cartographer-routes-meta">
+            <button type="button" class="cartographer-routes-legs-toggle" data-action="route-legs" data-route-id="{{id}}">
+                <i class="fa-solid {{#if expanded}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i> {{legsText}}
+            </button>
+            {{#if timeText}}<span>{{timeText}}</span>{{/if}}
+        </div>
+        {{#if expanded}}
+        <ol class="cartographer-routes-legs">
+            {{#each legs}}<li><span>{{localize "coffee-pub-cartographer.routes.leg"}} {{number}}</span><span>{{length}}</span></li>{{/each}}
+        </ol>
+        {{/if}}
+    </div>
+    {{else}}
+    <p class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.routes.empty"}}</p>
+    {{/each}}
+    {{/unless}}
+</div>

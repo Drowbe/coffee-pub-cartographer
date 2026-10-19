@@ -8,10 +8,11 @@ import { defaultTileMotion, tileMotionManager } from './manager-tilemotion.js';
 import { collectionsManager } from './manager-collections.js';
 import { NONE_GROUP } from './utils-groups.js';
 import {
-    displayDistance, toSceneUnits, unitChoices, REAL_WORLD_PACES, rulesPaces,
+    displayDistance, formatDistance, toSceneUnits, unitChoices, paceChoices, PACE_GROUPS,
     paceToSceneUnits, paceUnit, sceneUnitsToPace, paceInputToSceneUnits
 } from './utils-travel.js';
 import { travelManager } from './manager-travel.js';
+import { routesManager } from './manager-routes.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -175,6 +176,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         'travel-clock': (_event, _target, app) => app.toggleFollowClock(),
         'travel-reset': (_event, _target, app) => void app.manager.resetOdometer(),
         'travel-clear-destination': (_event, _target, app) => void app.manager.setTravel({ destination: null }),
+        'travel-unlink-route': (_event, _target, app) => void app.manager.setTravel({ route: null }),
         'rename-layer': (_event, target, app) => app.promptRenameLayer(target.dataset.layerId),
         'copy-from-scene': (_event, _target, app) => app.promptCopyFromScene(),
         'export-parallax': (_event, _target, app) => app.exportParallax(),
@@ -509,7 +511,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             paceValue: Math.round(shownPace * 10) / 10,
             customPace: !chosen,
             paceGroups: [
-                ...['foot', 'mount', 'water', 'air'].map(group => ({
+                ...PACE_GROUPS.map(group => ({
                     label: localize(`paceGroup.${group}`),
                     paces: presets.filter(p => p.group === group).map(p => ({ id: p.id, label: p.label, selected: p === chosen }))
                 })).filter(g => g.paces.length)
@@ -518,37 +520,85 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             showHud: !!travel.showHud,
             stopOnArrival: !!travel.stopOnArrival,
             hasDestination,
+            ...this._routeContext(travel, units),
             destinationAmount: shown.amount,
             unitOptions: choices.map(unit => ({ unit, selected: unit === shown.unit })),
             references: [
                 { id: '', name: localize('travelNearestGround'), selected: !travel.referenceLayer },
                 ...nearestFirst.map(layer => ({ id: layer.id, name: layer.name, selected: layer.id === travel.referenceLayer }))
             ],
-            gridText: grid?.size
-                ? game.i18n.format(`${MODULE.ID}.parallax.travelGrid`, { size: grid.size, distance: grid.distance, units })
-                : ''
+            measures: this._sceneMeasures(state, grid, units)
         };
     }
 
     /**
-     * The paces to choose from, as { id, label, perHour } with perHour in
-     * scene units: the game system's own when its rules define them, or
-     * real-world ones. Each label carries its speed, "Normal (3 mph)".
+     * What the odometer reads from the scene, shown read-only so the numbers
+     * behind a pace are visible: the grid, the scene's size on it, and the
+     * ground layer's speed in pixels and as a pace.
      */
-    _paceChoices(units) {
-        const unit = paceUnit(units);
-        const rules = rulesPaces(game.system?.id, CONFIG);
-        const paces = (rules ?? REAL_WORLD_PACES).map(p => ({
-            id: p.id,
-            group: p.group,
-            mph: p.mph,
-            name: game.i18n.localize(p.label ?? `${MODULE.ID}.parallax.pace.${p.id}`)
+    _sceneMeasures(state, grid, units) {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const format = (key, data) => game.i18n.format(`${MODULE.ID}.parallax.${key}`, data);
+        if (!grid?.size) return [{ label: localize('measureGrid'), value: localize('measureNoGrid') }];
+        const round = n => Math.round(n * 10) / 10;
+        const measures = [{ label: localize('measureGrid'), value: format('measureGridValue', { size: grid.size, distance: grid.distance, units }) }];
+        const dims = canvas.dimensions;
+        if (dims?.sceneWidth && dims?.sceneHeight) {
+            const across = round(dims.sceneWidth / grid.size);
+            const down = round(dims.sceneHeight / grid.size);
+            measures.push({ label: localize('measureScene'), value: format('measureSceneValue', {
+                across, down,
+                width: displayDistance(across * grid.distance, units).amount.toLocaleString(),
+                height: displayDistance(down * grid.distance, units).amount.toLocaleString(),
+                units: displayDistance(across * grid.distance, units).unit
+            }) });
+        }
+        const ground = this.manager.referenceLayer(state);
+        if (ground) {
+            const pace = sceneUnitsToPace(this.manager.groundPace(state), units);
+            measures.push({ label: localize('measureGround'), value: pace === null
+                ? format('measureGroundPixels', { speed: round(Number(ground.speed) || 0) })
+                : format('measureGroundValue', { speed: round(Number(ground.speed) || 0), pace: round(pace), unit: paceUnit(units) }) });
+        }
+        return measures;
+    }
+
+    /**
+     * The routes this journey can follow, from every map with routes, and
+     * the one it follows. A route in units that cannot be converted to this
+     * scene's is listed but cannot be chosen.
+     */
+    _routeContext(travel, units) {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const link = travel.route;
+        const routeGroups = routesManager.allRoutes().map(({ scene, routes }) => ({
+            label: scene.name,
+            routes: routes.map(route => {
+                const linked = routesManager.linked({ sceneId: scene.id, routeId: route.id }, units);
+                return {
+                    value: `${scene.id}|${route.id}`,
+                    label: `${route.name} (${formatDistance(linked.distance, linked.units)})`,
+                    disabled: linked.converted === null,
+                    selected: link?.sceneId === scene.id && link?.routeId === route.id
+                };
+            })
         }));
-        return paces.map(p => {
-            const perHour = paceToSceneUnits(p.mph, units);
-            const shown = Math.round(sceneUnitsToPace(perHour, units) * 10) / 10;
-            return { id: p.id, group: p.group, perHour, label: `${p.name} (${shown} ${unit})` };
-        });
+        const linked = link ? routesManager.linked(link, units) : null;
+        return {
+            routeGroups,
+            hasRoutes: routeGroups.length > 0 || !!link,
+            routeLinked: !!link,
+            routeText: !link ? ''
+                : !linked ? localize('travelRouteMissing')
+                : linked.converted === null ? localize('travelRouteUnits')
+                : game.i18n.format(`${MODULE.ID}.parallax.travelRouteLength`, { length: formatDistance(linked.converted, units), scene: linked.scene.name })
+        };
+    }
+
+    /** The paces to choose from on this scene; see paceChoices. */
+    _paceChoices(units) {
+        return paceChoices(game.system?.id, CONFIG, units,
+            pace => game.i18n.localize(pace.label ?? `${MODULE.ID}.parallax.pace.${pace.id}`));
     }
 
     async promptRenameLayer(id) {
@@ -1363,6 +1413,18 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         box?.querySelector('input')?.focus();
     }
 
+    /** Follow a route: its length, in this scene's units, becomes the destination. */
+    _saveRoute(value) {
+        if (!value) {
+            void this.manager.setTravel({ route: null });
+            return;
+        }
+        const [sceneId, routeId] = String(value).split('|');
+        const linked = routesManager.linked({ sceneId, routeId }, canvas.scene?.grid?.units);
+        if (!linked || linked.converted === null) return;
+        void this.manager.setTravel({ route: { sceneId, routeId }, destination: linked.converted });
+    }
+
     /** A pace typed in mph or km/h sets the ground layer's speed. */
     _saveTypedPace(value) {
         if (!(value >= 0)) return;
@@ -1418,6 +1480,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         else if (input.field === 'travelPace') this._savePace(input.value);
         else if (input.field === 'travelPaceValue') this._saveTypedPace(input.value);
         else if (input.field === 'travelDestination' || input.field === 'travelDestinationUnit') this._saveDestination();
+        else if (input.field === 'travelRoute') this._saveRoute(input.value);
         else if (input.field === 'angle') void this.manager.setAngle(input.value);
         else if (input.field === 'easeSeconds') void this.manager.setEaseSeconds(input.value);
     }
