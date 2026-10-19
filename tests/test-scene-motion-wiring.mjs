@@ -90,7 +90,8 @@ console.log('\nthe routes window: actions, strings and styles');
 {
     const rhbs = fs.readFileSync('templates/window-routes.hbs', 'utf8');
     const rjs = fs.readFileSync('scripts/window-routes.js', 'utf8');
-    const rman = fs.readFileSync('scripts/manager-routes.js', 'utf8');
+    // The routes manager and the marker manager, read as one for strings and imports.
+    const rman = fs.readFileSync('scripts/manager-routes.js', 'utf8') + fs.readFileSync('scripts/manager-travelpins.js', 'utf8');
     const all = rhbs + rjs + rman;
     const actions = new Set([...all.matchAll(/data-action="([a-z-]+)"/g)].map(m => m[1]));
     const unhandled = [...actions].filter(action => !rjs.includes(`'${action}':`));

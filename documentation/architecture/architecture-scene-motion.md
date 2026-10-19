@@ -21,6 +21,7 @@ canvas, and how the window is put together.
 | `scripts/manager-travel.js` | The on-screen odometer, arrival, the world clock's rate, and a followed route's length. |
 | `scripts/utils-routes.js` | Route geometry: lengths, a point along a route, unit conversion. |
 | `scripts/manager-routes.js`, `scripts/window-routes.js`, `templates/window-routes.hbs` | Routes: saving, drawing on the canvas, the click-to-place tool, and the Routes window. |
+| `scripts/manager-travelpins.js` | The party's marker: a Blacksmith pin per route or journey that has set out, moved along it. |
 | `scripts/window-parallax.js`, `templates/window-parallax.hbs`, `styles/tool-parallax.css` | The window. |
 
 ## Where state lives
@@ -30,7 +31,7 @@ canvas, and how the window is put together.
 | Scene flag | `parallax` | Layers, layer groups (stored as `sets`), which are on (`activeSets`), and the parallax motion. |
 | Scene flag | `tileMotion` | The tiles' motion, each managed tile's position at the anchor (`offsets`), tile groups, and which are on (`activeGroups`). |
 | Scene flag | `collections` | `{ list }` of `{ id, name, layerGroups, tileGroups }`. |
-| Scene flag | `routes` | `{ list, journeys }`. A route is `{ id, name, color, points, terrain, userId, hidden }`, points as `[[x, y], ...]` in scene pixels and terrain one id per leg; a journey is `{ id, name, routeIds, userId }`. On map scenes. |
+| Scene flag | `routes` | `{ list, journeys }`. A route is `{ id, name, color, points, terrain, userId, hidden, travel? }`, points as `[[x, y], ...]` in scene pixels and terrain one id per leg; a journey is `{ id, name, routeIds, userId, travel? }`. `travel` is the progress along it (below). On map scenes. |
 | Tile flag | `motion` | That tile's `visible`, `rotate` and `scroll` settings. A tile with this flag is managed. |
 | `localStorage` | `parallax.windowPrefs`, `parallax.windowOpen` | The window's mode, tabs, folded rows, height, and whether the GM wants it open. Per browser, never shared. |
 
@@ -104,7 +105,34 @@ speeds are multiplied by `clockFactor`, the rate capped at four. A rate of 0 sto
 **Routes.** A route or journey lives on its map scene; the travel lives on the animated scene, as
 `travel.route = { sceneId, routeId }` or `{ sceneId, journeyId }`. A journey is turned into one
 path by `chainRoutes` (utils-routes.js), which runs each route whichever way meets the last and
-crosses any gap in a straight line. Its length, converted from the map's units to the scene's,
+crosses any gap in a straight line.
+
+**Progress lives on the path**, as `travel = { effort, pace, arrived, motion }` on the route or
+journey record: a map outlasts any one animated scene, which is reused for many journeys. Progress
+is kept as **effort** -- distance as if it were all open ground, in the map's units -- which grows
+at the pace (map units an hour) times `motionTravel(motion)`, the same eased maths as the scenery,
+with the world clock's full rate as the motion's `clockFactor`. `distanceForEffort` walks the
+legs to turn it into distance, a difficult leg costing twice its length, so every client gets the
+same place without anything streaming. `routesManager.progress(link)` gives the distance, the leg
+and its terrain, and the point on the map; `setPathTravel` (GM) folds the effort and re-anchors.
+
+The animated scene is a view. `_commit` in manager-parallax.js pushes its playing, master speed,
+ease, clock and pace (its ground pace converted to the map's units) to the linked path whenever
+they change, anchored at the same moment as the scene's own motion, and stops the path it stops
+showing. Its odometer reads the path. The scenery's speed is multiplied by `terrainFactor` in
+`targetSpeed` (utils-motion.js); the GM's client sets it as the party crosses into a leg of other
+terrain (`_checkTerrain` in manager-travel.js), so it eases like any change of speed. The
+distance never waits on that: it is exact from the effort; only the picture follows.
+
+**The marker** is a Blacksmith pin, id `coffee-pub-cartographer-travel-j-<journeyId>` (or
+`-r-<routeId>`), type `journey`, created by the GM's client the first time the path's travel is
+written (`coffee-pub-cartographer.pathTravelChanged`, fired by `_apply` on the GM's client). Every
+client puts it at `progress().point` each frame with Blacksmith's client-local
+`pins.setLivePosition`, which is never saved or sent and locks the pin against dragging. At rest
+(stopped and its ease run out) the GM's client saves the point with `pins.update`, and each client
+clears its live position once the saved one matches, so nothing jumps. Without
+`setLivePosition` (an older Blacksmith) the pin moves only at those saves. Shown or hidden is the
+pin's own `config.blacksmithVisibility`. Its length, converted from the map's units to the scene's,
 is written into `travel.destination` when it is chosen, and again by the GM (`_syncRoute` in
 manager-travel.js) when the scene loads or any route changes -- `updateScene` on the map fires
 `coffee-pub-cartographer.routesChanged`. Storing the length rather than reading it live keeps the

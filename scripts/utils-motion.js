@@ -14,6 +14,8 @@
  *   rampFrom     the speed actually in effect at anchorAt, eased from
  *   clockFactor  optional multiplier on the master speed, for a motion that follows the
  *                world clock (1 when absent); see manager-parallax.js
+ *   terrainFactor optional multiplier for the ground the party is crossing on a route
+ *                (1 when absent): difficult terrain halves the scenery's speed
  *
  * Positions are never streamed. Each client works out where things stand from
  * these numbers and the server clock, so everyone sees the same thing and a
@@ -55,7 +57,7 @@ export function easeProgress(u) {
 
 /** The master speed a motion is heading for: its setting while playing, zero when stopped. */
 export function targetSpeed(motion) {
-    return motion.playing ? motion.masterSpeed * (motion.clockFactor ?? 1) : 0;
+    return motion.playing ? motion.masterSpeed * (motion.clockFactor ?? 1) * (motion.terrainFactor ?? 1) : 0;
 }
 
 /** The master speed actually in effect at `now`, partway through any ease. */

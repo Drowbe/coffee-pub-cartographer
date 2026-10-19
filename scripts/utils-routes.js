@@ -11,6 +11,7 @@
  */
 
 import { gridStep } from './utils-travel.js';
+import { motionTravel } from './utils-motion.js';
 
 /** Metres in one of each unit a distance can be converted between. */
 const METRES = {
@@ -196,6 +197,26 @@ export function removeWaypoint(points, terrain, index) {
     return { points: next, terrain: legs.filter((_, i) => i !== index) };
 }
 
+/** Hours of travel in a day, unless the map says otherwise: D&D's travel day. */
+export const DEFAULT_HOURS_PER_DAY = 8;
+/** Past this many hours a day, mounts are pushed too hard. */
+export const MOUNT_HOURS_PER_DAY = 6;
+/** Past this many hours a day, it is a forced march (D&D: exhaustion saves). */
+export const FORCED_MARCH_HOURS = 8;
+
+/**
+ * Hours of travel as days of a planned length: 30 h at 8 h a day is 3 days
+ * and 6 h more. `days` is whole travel days; `rest` the hours left over.
+ */
+export function travelPlan(hours, perDay = DEFAULT_HOURS_PER_DAY) {
+    const day = Number(perDay) > 0 ? Number(perDay) : DEFAULT_HOURS_PER_DAY;
+    const total = Math.max(0, Number(hours) || 0);
+    // A hair under a whole day counts as the whole day.
+    const days = Math.floor(total / day + 1e-6);
+    const rest = Math.max(0, total - days * day);
+    return { hours: total, days, rest: rest < 0.05 ? 0 : rest, perDay: day };
+}
+
 // ==================================================================
 // ===== SNAPPING AND JOURNEYS ======================================
 // ==================================================================
@@ -259,4 +280,85 @@ export function chainRoutes(routes, tolerance = 1) {
         parts.push({ route, reversed });
     });
     return { parts, points, terrain, gaps };
+}
+
+// ==================================================================
+// ===== PROGRESS ALONG A PATH ======================================
+// ==================================================================
+
+/**
+ * Progress along a route or journey is kept as **effort**: distance as if it
+ * were all open ground, in the map's units. A leg of difficult terrain costs
+ * twice its length in effort, so at a steady pace the party covers it at half
+ * the speed. Effort grows steadily with time -- the pace times the eased
+ * master speed, from the same motion maths as the scenery -- and is turned
+ * into distance by walking the legs, so every client works out the same
+ * place from the same few numbers.
+ */
+
+/** A path's legs as { distance, factor }: length in the map's units and how fast its terrain lets the party go. */
+export function pathLegs(points, terrain, grid) {
+    const kinds = legTerrains(points, terrain);
+    return legPixels(points).map((pixels, i) => ({ distance: gridDistance(pixels, grid), factor: terrainFactor(kinds[i]) }));
+}
+
+/** The effort a whole path takes. */
+export function totalEffort(legs) {
+    return (legs ?? []).reduce((sum, leg) => sum + leg.distance / leg.factor, 0);
+}
+
+/** How far along the path an amount of effort reaches, clamped to its ends. */
+export function distanceForEffort(legs, effort) {
+    let left = Math.max(0, Number(effort) || 0);
+    let distance = 0;
+    for (const leg of legs ?? []) {
+        const cost = leg.distance / leg.factor;
+        if (left <= cost) return distance + left * leg.factor;
+        left -= cost;
+        distance += leg.distance;
+    }
+    return distance;
+}
+
+/** The effort it takes to reach a distance along the path. */
+export function effortForDistance(legs, distance) {
+    let left = Math.max(0, Number(distance) || 0);
+    let effort = 0;
+    for (const leg of legs ?? []) {
+        if (left <= leg.distance) return effort + left / leg.factor;
+        left -= leg.distance;
+        effort += leg.distance / leg.factor;
+    }
+    return effort;
+}
+
+/** The leg a distance along the path is on; past the end, the last. */
+export function legIndexAt(legs, distance) {
+    let left = Math.max(0, Number(distance) || 0);
+    for (let i = 0; i < (legs?.length ?? 0); i++) {
+        if (left < legs[i].distance) return i;
+        left -= legs[i].distance;
+    }
+    return Math.max(0, (legs?.length ?? 0) - 1);
+}
+
+/**
+ * A path's travel, as stored on the route or journey: the effort at the
+ * anchor, the pace (map units an hour), whether it has been reached, and the
+ * motion -- playing, master speed, ease, anchor -- whose clockFactor is the
+ * world clock's rate when following it (in-world time drives the effort).
+ */
+export function defaultPathTravel() {
+    return {
+        effort: 0,
+        pace: 0,
+        arrived: false,
+        motion: { playing: false, masterSpeed: 1, easeSeconds: 0, anchorAt: 0, rampFrom: null, clockFactor: 1 }
+    };
+}
+
+/** The effort a path's travel has reached at `now`, unclamped. */
+export function travelEffort(travel, now) {
+    const pace = Number(travel?.pace) || 0;
+    return (Number(travel?.effort) || 0) + (pace / 3600) * motionTravel(travel?.motion ?? {}, now);
 }

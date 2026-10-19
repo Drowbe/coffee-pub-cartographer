@@ -8,8 +8,10 @@ import { socketManager } from './manager-sockets.js';
 import {
     cleanPoints, legPixels, routePixels, gridDistance, distancePixels, pointAlong, convertDistance,
     nearestWaypoint, nearestOnRoute, legTerrains, terrainFactor, insertWaypoint, removeWaypoint,
-    snapTo, chainRoutes, TERRAINS
+    snapTo, chainRoutes, TERRAINS, pathLegs, totalEffort, distanceForEffort, legIndexAt,
+    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY
 } from './utils-routes.js';
+import { motionSpeed } from './utils-motion.js';
 import { formatDistance } from './utils-travel.js';
 
 /** Scene flag holding `{ list, journeys }`. */
@@ -31,6 +33,11 @@ const HIT_PIXELS = 12;
 const SNAP_PIXELS = 18;
 /** Two routes whose ends are this close, in scene pixels, meet: a snapped join is exact, this allows for rounding. */
 const JOIN_TOLERANCE = 2;
+
+/** Just the route or journey a link names, without its scene. */
+function pathRef(link) {
+    return link?.journeyId ? { journeyId: link.journeyId } : { routeId: link?.routeId };
+}
 
 function readShow() {
     try {
@@ -214,6 +221,19 @@ class RoutesManager {
         return foundry.utils.deepClone(scene?.getFlag(MODULE.ID, FLAG_KEY)?.list ?? []);
     }
 
+    /** A map's travel plan: { hoursPerDay }. */
+    settings(scene = canvas.scene) {
+        const stored = scene?.getFlag(MODULE.ID, FLAG_KEY)?.settings ?? {};
+        const hours = Number(stored.hoursPerDay);
+        return { hoursPerDay: hours > 0 && hours <= 24 ? hours : DEFAULT_HOURS_PER_DAY };
+    }
+
+    /** Change the map's travel plan. The GM's; it is the same plan for everyone. */
+    async setSettings(changes) {
+        if (!game.user.isGM) return null;
+        return this._apply({ action: 'settings', sceneId: canvas.scene?.id, changes }, game.user);
+    }
+
     /** A scene's journeys. */
     journeys(scene = canvas.scene) {
         return foundry.utils.deepClone(scene?.getFlag(MODULE.ID, FLAG_KEY)?.journeys ?? []);
@@ -294,6 +314,66 @@ class RoutesManager {
         if (!path) return null;
         const { distance, units: own } = this.measure(path, scene);
         return { path, scene, name: path.name, distance, units: own, converted: convertDistance(distance, own, units) };
+    }
+
+    // ==================================================================
+    // ===== PROGRESS ===================================================
+    // ==================================================================
+
+    /** The route or journey a link names, as stored: the record that holds its travel. */
+    _pathItem(link, scene) {
+        if (link?.journeyId) return this.getJourney(link.journeyId, scene);
+        if (link?.routeId) return this.get(link.routeId, scene);
+        return null;
+    }
+
+    /**
+     * Where the party is on a route or journey at `now`: its travel, as
+     * stored on the path, worked out into distance, the leg and its terrain,
+     * and the point on the map. Progress lives here, with the path on the
+     * map; an animated scene that shows the journey reads it.
+     *
+     * Returns { scene, path, legs, travel, effort, totalEffort, distance,
+     * length, leg, factor, terrain, point } in the map's units, or null.
+     */
+    progress(link, now = game.time.serverTime) {
+        const scene = link?.sceneId ? game.scenes.get(link.sceneId) : null;
+        const item = scene ? this._pathItem(link, scene) : null;
+        const path = item ? this.path(link, scene) : null;
+        if (!path || !scene.grid?.distance) return null;
+        const legs = pathLegs(path.points, path.terrain, scene.grid);
+        const travel = { ...defaultPathTravel(), ...(item.travel ?? {}) };
+        travel.motion = { ...defaultPathTravel().motion, ...(item.travel?.motion ?? {}) };
+        const total = totalEffort(legs);
+        const effort = Math.min(total, Math.max(0, travelEffort(travel, now)));
+        const distance = distanceForEffort(legs, effort);
+        const leg = legIndexAt(legs, distance);
+        return {
+            scene,
+            path,
+            legs,
+            travel,
+            effort,
+            totalEffort: total,
+            distance,
+            length: legs.reduce((sum, l) => sum + l.distance, 0),
+            leg,
+            factor: legs[leg]?.factor ?? 1,
+            terrain: path.terrain[leg] ?? null,
+            point: pointAlong(path.points, distancePixels(distance, scene.grid))
+        };
+    }
+
+    /**
+     * Change a path's travel, GM only: fold the effort so far into it (within
+     * the path's ends, so running back from past the end starts back at once),
+     * re-anchor the motion at `now` so a change of speed eases from the speed
+     * in effect, then apply `changes` -- any of playing, masterSpeed,
+     * easeSeconds, clockFactor (on the motion) and effort, pace, arrived.
+     */
+    async setPathTravel(link, changes, now = game.time.serverTime) {
+        if (!game.user.isGM || !link?.sceneId) return null;
+        return this._apply({ action: 'travel', sceneId: link.sceneId, link, changes, now }, game.user);
     }
 
     /** Where a distance in the scene's units along a route or journey reaches: { x, y, angle } in pixels. */
@@ -396,6 +476,41 @@ class RoutesManager {
                 return route;
             }
 
+            if (data.action === 'settings') {
+                if (!user.isGM) return null;
+                const stored = scene.getFlag(MODULE.ID, FLAG_KEY)?.settings ?? {};
+                const hours = Number(data.changes?.hoursPerDay);
+                const settings = { ...stored, ...(hours > 0 && hours <= 24 ? { hoursPerDay: Math.round(hours * 4) / 4 } : {}) };
+                await scene.setFlag(MODULE.ID, FLAG_KEY, { list, journeys, settings });
+                return settings;
+            }
+
+            if (data.action === 'travel') {
+                if (!user.isGM) return null;
+                const item = data.link?.journeyId ? journeys.find(j => j.id === data.link.journeyId) : list.find(r => r.id === data.link?.routeId);
+                if (!item) return null;
+                const travel = { ...defaultPathTravel(), ...(item.travel ?? {}) };
+                travel.motion = { ...defaultPathTravel().motion, ...(item.travel?.motion ?? {}) };
+                const now = Number(data.now) || game.time.serverTime;
+                const path = this.path(data.link, scene);
+                const total = path ? totalEffort(pathLegs(path.points, path.terrain, scene.grid)) : 0;
+                travel.effort = Math.min(total, Math.max(0, travelEffort(travel, now)));
+                travel.motion.rampFrom = motionSpeed(travel.motion, now);
+                travel.motion.anchorAt = now;
+                const changes = data.changes ?? {};
+                for (const key of ['playing', 'masterSpeed', 'easeSeconds', 'clockFactor']) {
+                    if (key in changes) travel.motion[key] = key === 'playing' ? !!changes[key] : Number(changes[key]) || 0;
+                }
+                if ('effort' in changes) travel.effort = Math.min(total, Math.max(0, Number(changes.effort) || 0));
+                if ('pace' in changes) travel.pace = Math.max(0, Number(changes.pace) || 0);
+                if ('arrived' in changes) travel.arrived = !!changes.arrived;
+                item.travel = travel;
+                await save();
+                // For the journey's marker on the map (manager-travelpins.js), on the GM's client.
+                Hooks.callAll(`${MODULE.ID}.pathTravelChanged`, { link: { sceneId: scene.id, ...pathRef(data.link) }, travel });
+                return travel;
+            }
+
             if (data.action === 'journey-create') {
                 const journey = {
                     id: foundry.utils.randomID(),
@@ -414,6 +529,7 @@ class RoutesManager {
                 if (data.action === 'journey-remove') {
                     journeys = journeys.filter(j => j.id !== data.id);
                     await save();
+                    Hooks.callAll(`${MODULE.ID}.pathRemoved`, { sceneId: scene.id, journeyId: data.id });
                     return null;
                 }
                 const changes = data.changes ?? {};
@@ -431,6 +547,7 @@ class RoutesManager {
                 list.splice(at, 1);
                 for (const journey of journeys) journey.routeIds = journey.routeIds.filter(id => id !== data.id);
                 await save();
+                Hooks.callAll(`${MODULE.ID}.pathRemoved`, { sceneId: scene.id, routeId: data.id });
                 return null;
             }
             const changes = data.changes ?? {};

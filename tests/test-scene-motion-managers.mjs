@@ -64,7 +64,7 @@ const scene = {
     setFlag: async (_m, k, v) => { flags[k] = structuredClone(v); }
 };
 globalThis.canvas = { ready: true, scene, app: { ticker: { add() {}, remove() {} } }, tiles: { get: () => null } };
-globalThis.Hooks = { on: () => 0 };
+globalThis.Hooks = { on: () => 0, callAll: (name, ...args) => { (globalThis.hookCalls ??= []).push([name, ...args]); return true; } };
 // A stand-in window that reports its close the way the real one does.
 globalThis.fakeWindowModule = { ParallaxWindow: { open: async manager => ({
     rendered: true, render() {}, bringToFront() {},
@@ -73,7 +73,9 @@ globalThis.fakeWindowModule = { ParallaxWindow: { open: async manager => ({
 
 await load(`const MODULE={ID:'m',NAME:'M'}; const repeatingTexture=t=>t;\n${shared}`
     + strip('manager-tilemotion.js').replace('const tileMotionManager', 'globalThis.tm'));
-await load(`const MODULE={ID:'m',NAME:'M'}; const tileMotionManager=globalThis.tm; const releaseRepeatingTextures=()=>{}; const repeatingTexture=t=>t;\n${shared}`
+// The routes manager is loaded later; parallax reaches it when it gets there.
+const lateRoutes = `const routesManager = new Proxy({}, { get: (_, key) => (...args) => globalThis.rm?.[key]?.(...args) ?? null });\n`;
+await load(`const MODULE={ID:'m',NAME:'M'}; const tileMotionManager=globalThis.tm; const releaseRepeatingTextures=()=>{}; const repeatingTexture=t=>t;\n${shared}\n${strip('utils-routes.js')}\n${lateRoutes}`
     + strip('manager-parallax.js').replace('const parallaxManager', 'globalThis.pm')
         .replace("await import('./window-parallax.js')", 'globalThis.fakeWindowModule'));
 await load(`const MODULE={ID:'m',NAME:'M'}; const parallaxManager=globalThis.pm; const tileMotionManager=globalThis.tm;\n${shared}`
@@ -412,6 +414,89 @@ console.log('\nroutes: who may change what');
     check(rm.getJourney(j.id).routeIds.join() === r2.id, 'a deleted route leaves the journeys it was in');
     await rm._apply({ action: 'journey-remove', sceneId: 'here', id: j.id }, ana);
     check(!rm.getJourney(j.id) && rm.get(r2.id), 'deleting a journey leaves its routes');
+
+    console.log('\nprogress lives on the journey');
+    // 50 ft of road, then 50 ft of forest, on a 140 px, 5 ft grid.
+    flags.routes = { list: [], journeys: [] };
+    const road = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Road', points: [[0, 0], [1400, 0]] } }, gm);
+    const wood = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Wood', points: [[1400, 0], [2800, 0]], terrain: ['forest'] } }, gm);
+    const trip = await rm._apply({ action: 'journey-create', sceneId: 'here', journey: { name: 'Trip', routeIds: [road.id, wood.id] } }, gm);
+    const link = { sceneId: 'here', journeyId: trip.id };
+    // The ground scrolls 140 px a second: 5 ft a second, 18,000 ft an hour.
+    flags.parallax = { layers: [layer('ground', { speed: 140 })], sets: [], easeSeconds: 0, masterSpeed: 1 };
+    pm.state = pm._readState();
+    pm._pushed = null;
+    await pm.setTravel({ route: link, destination: 100 });
+    check(rm.getJourney(trip.id).travel.pace === 18000, 'the scene\'s pace is written to the journey');
+    await pm.play();
+    check(rm.getJourney(trip.id).travel.motion.playing === true, 'Play on the scene plays the journey');
+    now += 5000;
+    check(Math.abs(pm.travelDistance(now) - 25) < 1e-6, 'the odometer reads the journey: 5 s on the road is 25 ft');
+    now += 10000;
+    // 50 ft of road in 10 s, then 5 s of forest at half pace: 12.5 ft more.
+    check(Math.abs(pm.travelDistance(now) - 62.5) < 1e-6, 'difficult terrain halves the pace: 15 s is 62.5 ft');
+    const at = rm.progress(link, now);
+    check(at.factor === 0.5 && at.terrain === 'forest' && Math.abs(at.point.x - 1750) < 1e-6, 'the journey knows the leg, its terrain and the point on the map');
+    await pm.setTerrainFactor(0.5);
+    const { motionSpeed } = await import('../scripts/utils-motion.js');
+    check(Math.abs(motionSpeed(pm.state, now) - 0.5) < 1e-12, 'the scenery slows to the terrain\'s pace');
+    now += 30000;
+    check(Math.abs(pm.travelDistance(now) - 100) < 1e-6, 'it stops counting at the journey\'s end');
+    await pm.setTravel({ route: null });
+    const kept = rm.progress(link, now + 60000);
+    check(kept.travel.motion.playing === false && Math.abs(kept.distance - 100) < 1e-6, 'unlinked, the journey stops and keeps its progress');
+    check((pm.state.terrainFactor ?? 1) === 1, 'and the scenery runs at its own pace again');
+    await pm.setTravel({ route: link });
+    await pm.resetOdometer();
+    check(rm.progress(link, now).distance === 0, 'resetting the odometer resets the journey');
+    await pm.stop();
+
+    console.log('\nthe party\'s marker');
+    // A stand-in for Blacksmith's pins API: placed pins, and the live positions it is given.
+    const stored = new Map();
+    const live = new Map();
+    const pinsApi = {
+        isAvailable: () => true,
+        registerPinType() {},
+        exists: id => stored.has(id),
+        get: id => structuredClone(stored.get(id) ?? null),
+        create: async (data, { sceneId }) => { stored.set(data.id, { ...structuredClone(data), sceneId }); return data; },
+        update: async (id, patch) => { stored.set(id, { ...stored.get(id), ...structuredClone(patch) }); return stored.get(id); },
+        delete: async id => { stored.delete(id); },
+        setLivePosition: (id, point) => live.set(id, { ...point }),
+        clearLivePosition: id => live.delete(id)
+    };
+    game.modules = { get: id => (id === 'coffee-pub-blacksmith' ? { api: { pins: pinsApi } } : null) };
+    globalThis.CONST = { DOCUMENT_OWNERSHIP_LEVELS: { OBSERVER: 2 } };
+    await load(`const MODULE={ID:'m',NAME:'M'}; const routesManager=globalThis.rm;\n`
+        + strip('manager-travelpins.js').replace('const travelPinsManager', 'globalThis.tp').replace(/^export \{[^}]*\};?$/m, ''));
+    const pinId = `m-travel-j-${trip.id}`;
+    await pm.setTravel({ route: link });
+    await tp._onTravelChanged(link, rm.getJourney(trip.id).travel);
+    check(stored.get(pinId)?.x === 0 && stored.get(pinId)?.type === 'journey', 'a journey that sets out gets a marker, at the start of the road');
+    await pm.play();
+    now += 5000;
+    tp._tick();
+    check(live.get(pinId)?.x === 700 && stored.get(pinId).x === 0, 'while it travels, the marker moves live and nothing is saved');
+    await pm.stop();
+    tp._tick();
+    await tp.savePosition(link);
+    check(stored.get(pinId).x === 700, 'at rest, the GM saves where it stopped');
+    tp._tick();
+    check(!live.has(pinId), 'and each client lets go of the live position once the saved one has caught up');
+    await tp.setShown(link, false);
+    check(stored.get(pinId).config.blacksmithVisibility === 'hidden' && !tp.isShown(link), 'the marker can be hidden from players');
+    const withoutLive = pinsApi.setLivePosition;
+    delete pinsApi.setLivePosition;
+    await pm.play();
+    now += 2000;
+    tp._tick();
+    check(!live.has(pinId), 'without Blacksmith\'s live position, the marker waits to be saved at rest');
+    pinsApi.setLivePosition = withoutLive;
+    await pm.stop();
+    await tp._onPathRemoved(link);
+    check(!stored.has(pinId), 'deleting the journey deletes its marker');
+    game.modules = { get: () => null };
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');

@@ -20,7 +20,8 @@ import {
 import {
     convertDistance, legPixels, routePixels, gridDistance, pointAlong, cleanPoints,
     distancePixels, nearestWaypoint, nearestOnRoute, legTerrains, travelHours, insertWaypoint,
-    removeWaypoint, snapTo, chainRoutes
+    removeWaypoint, snapTo, chainRoutes, pathLegs, totalEffort, distanceForEffort, effortForDistance,
+    legIndexAt, travelEffort, defaultPathTravel, travelPlan
 } from '../scripts/utils-routes.js';
 
 let bad = 0;
@@ -263,6 +264,40 @@ console.log('\nsnapping and journeys');
     const flipped = chainRoutes([{ points: [[100, 0], [0, 0]] }, b], 2);
     if (!flipped.parts[0].reversed || JSON.stringify(flipped.points) !== '[[0,0],[100,0],[100,100]]') fail('the first route is not turned to meet the second');
     else ok('the first route runs whichever way meets the second');
+}
+
+console.log('\neffort along a path');
+{
+    const close = (a, b) => Math.abs(a - b) < 1e-9;
+    // 10 mi of road, then 10 of forest, on a 100 px, 5 mi grid.
+    const legs = pathLegs([[0, 0], [200, 0], [400, 0]], ['road', 'forest'], { size: 100, distance: 5 });
+    if (JSON.stringify(legs) !== '[{"distance":10,"factor":1},{"distance":10,"factor":0.5}]') fail(`legs read as ${JSON.stringify(legs)}`);
+    else ok('a path\'s legs carry their length and how fast their terrain allows');
+    if (totalEffort(legs) !== 30) fail('the forest does not cost double');
+    else ok('20 mi with 10 of it forest is 30 mi of effort');
+    const cases = [[5, 5], [10, 10], [20, 15], [30, 20], [99, 20], [-4, 0]];
+    const wrong = cases.filter(([effort, distance]) => !close(distanceForEffort(legs, effort), distance));
+    if (wrong.length) fail(`effort to distance is wrong at ${wrong.map(c => c[0]).join(', ')}`);
+    else ok('effort turns into distance, at half rate in the forest, clamped to the ends');
+    if (!close(effortForDistance(legs, 15), 20) || !close(effortForDistance(legs, 5), 5)) fail('distance to effort is wrong');
+    else ok('and back again');
+    if (legIndexAt(legs, 9.99) !== 0 || legIndexAt(legs, 10) !== 1 || legIndexAt(legs, 50) !== 1) fail('the leg at a distance is wrong');
+    else ok('the leg at a distance is found, the last one past the end');
+    const travel = { ...defaultPathTravel(), effort: 2, pace: 3600, motion: { ...defaultPathTravel().motion, playing: true, anchorAt: 1000 } };
+    if (!close(travelEffort(travel, 11000), 12)) fail(`effort after 10 s at 1 unit/s is ${travelEffort(travel, 11000)}`);
+    else ok('effort grows at the pace from where it was anchored');
+    travel.motion.clockFactor = 60;
+    if (!close(travelEffort(travel, 11000), 602)) fail('the world clock does not speed up effort');
+    else ok('following the clock at x60, a real second is a minute of travel');
+}
+
+console.log('\nplanning travel days');
+{
+    const plan = (hours, perDay) => { const p = travelPlan(hours, perDay); return `${p.days}+${Math.round(p.rest * 10) / 10}`; };
+    const cases = [[30, 8, '3+6'], [24, 8, '3+0'], [5, 8, '0+5'], [23.99999999, 8, '3+0'], [30, 6, '5+0'], [30, 0, '3+6']];
+    const wrong = cases.filter(([hours, perDay, want]) => plan(hours, perDay) !== want);
+    if (wrong.length) fail(`travel days are wrong for ${wrong.map(c => `${c[0]} h at ${c[1]}`).join(', ')}`);
+    else ok('hours of travel split into days of the planned length, with the rest left over');
 }
 
 console.log('\nhex grids');

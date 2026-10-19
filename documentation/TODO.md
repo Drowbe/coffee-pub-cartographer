@@ -162,11 +162,13 @@ walked by the GM on a square map and worked.
 odometer counts, using the same shared clock, speed and ease as the scenery -- so the map scene
 and the animated scene are two views of one journey ("on the map" and "zoomed in on the road").
 The geometry is done: `routesManager.pointAt(id, distance)` gives the point and heading.
-Decided: terrain slows the token and the scenery leg by leg, as the time estimates already do.
-Proposed, awaiting the GM's word: progress lives on the journey, on the map scene (a map outlasts
-any one animated scene, which is reused for many journeys); the animated scene keeps its look and
-a link to the journey it shows. Progress is kept as effort (difficult legs cost double), turned
-into distance by walking the legs, so every client agrees without anything streaming.
+Done: progress lives on the journey, on the map scene, as effort; the animated scene is a view that
+drives it; terrain slows the party and the scenery. The marker is built: a Blacksmith pin per journey, moved with
+`pins.setLivePosition`, which Blacksmith is adding (agreed: a pin with a live position cannot be
+dragged; no heading in v1). **When Blacksmith releases it, raise Cartographer's minimum Blacksmith
+version** in `module.json`. Still to do: controls for a journey on the map itself -- a Play/Stop
+bar in the Routes window and the sub-menubar, like the animated scene's -- which means the GM's
+client writing a linked animated scene's motion while it is not the scene on the canvas.
 
 **Exhaustion on the road.** As the party travels, they -- or their mounts and draft animals --
 tire. Track hours travelled per in-world day (the odometer and world clock already give both),

@@ -90,8 +90,12 @@ The window lists the map's routes. Each shows its colour, its name and its total
 that how many legs it has and how long it takes at a pace.
 
 - **Times at** -- the pace the times are worked out at, chosen at the top right: with D&D 5e, the
-  rules' paces, mounts and vehicles; in other systems, everyday ones. The time is shown as hours of
-  travel and as travel days of 8 hours.
+  rules' paces, mounts and vehicles; in other systems, everyday ones.
+- **Travel day** -- how many hours a day the party plans to travel (8 to start). The GM sets it for
+  the map, so everyone plans with the same day. Each time is the hours of travel the trip takes, and,
+  when that is more than a day, the days it fills: "30 h of travel: 3 days of 8 h + 6 h". More than
+  6 hours a day at a mounted pace warns that it is hard on the mounts; more than 8 warns that it is a
+  forced march.
 - Click a route's legs to list each leg's length.
 - The coloured dot changes the route's colour; the crosshairs show the whole route on the map; the
   eye hides it from players; the bezier curve edits its waypoints; the pen renames it; the bin
@@ -108,7 +112,18 @@ so a 60-mile route on a map in miles is 60 miles on a scene measured in feet. Th
 then how far along the route the party has come.
 
 While the odometer follows a route or journey, its destination is its length and cannot be typed,
-and it keeps up as routes are reshaped. If it is deleted, the destination stays as it was. The
+and it keeps up as routes are reshaped. If it is deleted, the destination stays as it was.
+
+The journey keeps its own progress, on the map. The animated scene is a view of it: its Play and
+Stop, speed, ease, world clock and pace drive the journey, and its odometer reads how far the
+journey has come. So a road scene can be reused for one journey after another -- choose a
+different journey, and the first stops where it is and keeps its progress until you come back to
+it. **Reset odometer** resets the journey too.
+
+Terrain slows the party: a leg of forest takes twice as long as a leg of road, and when the party
+reaches one, the scenery eases down to half speed until they are out of it. The arrival time counts
+the difficult terrain still ahead. The Routes window shows each route's and journey's progress,
+and the terrain the party is in, once it has set out. The
 link-slash button stops following the route and keeps its length as the destination.
 
 A route on a map in hexes or squares, or any unit that cannot be converted to the scene's, is listed
@@ -116,6 +131,22 @@ but cannot be chosen.
 
 The map does not yet show where along the route the party is; the odometer's distance is the only
 measure of progress for now.
+
+## The party's marker
+
+The first time a route or journey moves, a marker appears on its map where the party is, and moves
+along it as they travel -- for everyone, in step with the odometer. It is a Coffee Pub Blacksmith pin,
+so the GM styles it from the pin's own menu (Configure Pin): an icon, a portrait, a wagon, its label
+and size.
+
+- The location-dot button beside a journey's progress in the Routes window shows the marker to
+  players or hides it from them. The GM always sees it.
+- While the party is moving, the marker cannot be dragged. When they stop or arrive, it stays where
+  they are.
+- Deleting the route or journey deletes its marker.
+
+With an older Blacksmith, the marker jumps to where the party is each time they stop, rather than
+moving smoothly.
 
 ## For macros
 

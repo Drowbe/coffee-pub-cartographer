@@ -7,6 +7,8 @@ import { tileMotionManager } from './manager-tilemotion.js';
 import { releaseRepeatingTextures, repeatingTexture } from './utils-textures.js';
 import { NONE_GROUP, normalizeActive, shownByGroups, toggledActive } from './utils-groups.js';
 import { pixelsToDistance, unitsPerHourToPixels } from './utils-travel.js';
+import { convertDistance } from './utils-routes.js';
+import { routesManager } from './manager-routes.js';
 
 /**
  * How much faster than real time the scenery may run when following a fast
@@ -374,6 +376,7 @@ class ParallaxManager {
      */
     async _commit(mutate) {
         if (!game.user.isGM || !canvas.scene) return;
+        const before = this.state;
         const state = this._rebase();
         mutate(state);
         state.layers = normalizeOrder(state.layers);
@@ -381,6 +384,64 @@ class ParallaxManager {
         this.state = state;
         this._applyState();
         await canvas.scene.setFlag(MODULE.ID, FLAG_KEY, state);
+        await this._pushJourney(before, state);
+    }
+
+    // ==================================================================
+    // ===== A JOURNEY ON A MAP =========================================
+    // ==================================================================
+
+    /**
+     * Following a route or journey (`travel.route`), this scene is a view of
+     * it: the journey's progress is kept with it, on the map, and this
+     * scene's Play and Stop, master speed, ease, world clock and pace drive
+     * it. They are written to the journey whenever they change, anchored at
+     * the same moment as this scene's own motion, so the two run together.
+     * Terrain is the journey's: it slows the party, and the GM's client slows
+     * the scenery to match (see manager-travel.js).
+     */
+    _journeyMotion(state) {
+        const travel = state.travel;
+        const map = game.scenes.get(travel.route?.sceneId);
+        const pace = convertDistance(this.groundPace(state), canvas.scene?.grid?.units, map?.grid?.units);
+        return {
+            playing: !!state.playing,
+            masterSpeed: Number(state.masterSpeed) || 0,
+            easeSeconds: Math.max(0, Number(state.easeSeconds) || 0),
+            // In-world time drives the journey at the clock's full rate; only the scenery is capped.
+            clockFactor: travel.followClock ? Math.max(0, Number(travel.clockRate) || 0) : 1,
+            pace: pace ?? 0
+        };
+    }
+
+    async _pushJourney(before, state) {
+        const key = link => (link ? `${link.sceneId}|${link.routeId ?? ''}|${link.journeyId ?? ''}` : '');
+        const was = before?.travel?.route;
+        const link = state.travel?.route;
+        // A journey this scene stops showing stops where it is; it keeps its progress.
+        if (was && key(was) !== key(link)) await routesManager.setPathTravel(was, { playing: false }, state.anchorAt);
+        if (!link) {
+            this._pushed = null;
+            return;
+        }
+        const motion = this._journeyMotion(state);
+        const signature = key(link) + JSON.stringify(motion);
+        if (signature === this._pushed) return;
+        this._pushed = signature;
+        await routesManager.setPathTravel(link, motion, state.anchorAt);
+    }
+
+    /** The followed journey's progress (see RoutesManager.progress), or null. */
+    journeyProgress(now = game.time.serverTime, state = this.state) {
+        const link = state.travel?.route;
+        return link ? routesManager.progress(link, now) : null;
+    }
+
+    /** The scenery's speed for the terrain the party is crossing. The GM's client sets it as legs change. */
+    setTerrainFactor(factor) {
+        const value = Number(factor) > 0 ? Number(factor) : 1;
+        if ((this.state.terrainFactor ?? 1) === value) return;
+        return this._commit(s => { s.terrainFactor = value; });
     }
 
     /**
@@ -396,6 +457,8 @@ class ParallaxManager {
         travel.clockMotion.playing = following && state.playing;
         travel.clockMotion.masterSpeed = rate * (Number(state.masterSpeed) || 0);
         state.clockFactor = following ? Math.min(rate, MAX_CLOCK_SCENERY) : 1;
+        // Terrain only slows the scenery while it follows a journey.
+        if (!travel.route) state.terrainFactor = 1;
     }
 
     // ==================================================================
@@ -432,6 +495,12 @@ class ParallaxManager {
      */
     travelDistance(now = game.time.serverTime, state = this.state) {
         const travel = state.travel ?? defaultTravel();
+        // Following a journey, how far is the journey's, from its map.
+        const progress = this.journeyProgress(now, state);
+        if (progress) {
+            const distance = convertDistance(progress.distance, progress.scene.grid.units, canvas.scene?.grid?.units);
+            if (distance !== null) return distance;
+        }
         const layer = this.referenceLayer(state);
         if (!layer) return travel.distance;
         const grid = canvas.scene?.grid;
@@ -496,6 +565,8 @@ class ParallaxManager {
     }
 
     resetOdometer() {
+        const link = this.state.travel?.route;
+        if (link) void routesManager.setPathTravel(link, { effort: 0, arrived: false });
         return this._commit(s => {
             s.travel.distance = 0;
             s.travel.arrived = false;
@@ -504,6 +575,8 @@ class ParallaxManager {
 
     /** The destination was reached: mark it, and stop if asked to. GM only, through _commit. */
     arrive() {
+        const link = this.state.travel?.route;
+        if (link) void routesManager.setPathTravel(link, { arrived: true });
         return this._commit(s => {
             s.travel.arrived = true;
             if (s.travel.stopOnArrival) s.playing = false;

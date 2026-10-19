@@ -1,4 +1,16 @@
 {{! The map's routes and journeys. Built by window-routes.js; styled in tool-parallax.css. }}
+
+{{! How far the party has come, and for the GM, the marker on the map shown to players or not. }}
+{{#*inline "pathProgress"}}
+<p class="cartographer-parallax-hint cartographer-routes-progress">
+    <span><i class="fa-solid fa-person-walking"></i> {{progressText}}</span>
+    {{#if marker}}
+    <button type="button" class="cartographer-parallax-button{{#if marker.shown}} is-active{{/if}}" data-action="path-marker"
+        {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}
+        data-tooltip="{{#if marker.shown}}{{localize "coffee-pub-cartographer.routes.markerShown"}}{{else}}{{localize "coffee-pub-cartographer.routes.markerHidden"}}{{/if}}"><i class="fa-solid fa-location-dot"></i></button>
+    {{/if}}
+</p>
+{{/inline}}
 <nav class="cartographer-parallax-tabs" role="tablist">
     {{#each tabs}}
     <button type="button" role="tab" class="cartographer-parallax-tab{{#if active}} is-active{{/if}}" data-action="routes-tab" data-tab="{{id}}" aria-selected="{{active}}">
@@ -13,7 +25,17 @@
     <dl class="cartographer-parallax-measures">
         <dt>{{localize "coffee-pub-cartographer.parallax.measureGrid"}}</dt><dd>{{gridText}}</dd>
         {{#if pace}}<dt>{{localize "coffee-pub-cartographer.routes.timesAt"}}</dt><dd>{{pace}}</dd>{{/if}}
+        <dt>{{localize "coffee-pub-cartographer.routes.travelDay"}}</dt>
+        <dd>
+            {{#if canPlan}}
+            <input type="number" class="cartographer-routes-hours" data-field="hoursPerDay" value="{{hoursPerDay}}" min="1" max="24" step="0.5"
+                data-tooltip="{{localize "coffee-pub-cartographer.routes.travelDayHint"}}"> {{localize "coffee-pub-cartographer.routes.hoursADay"}}
+            {{else}}
+            {{hoursPerDay}} {{localize "coffee-pub-cartographer.routes.hoursADay"}}
+            {{/if}}
+        </dd>
     </dl>
+    {{#if dayWarning}}<p class="cartographer-parallax-hint cartographer-routes-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{dayWarning}}</p>{{/if}}
 
     {{#if drawing}}
     <p class="cartographer-parallax-hint cartographer-routes-drawing">{{localize "coffee-pub-cartographer.routes.drawHint"}}</p>
@@ -50,6 +72,7 @@
         {{#if editing}}
         <p class="cartographer-parallax-hint cartographer-routes-drawing">{{localize "coffee-pub-cartographer.routes.editHint"}}</p>
         {{/if}}
+        {{#if progressText}}{{> pathProgress kind="routeId"}}{{/if}}
         <div class="cartographer-routes-meta">
             <button type="button" class="cartographer-routes-legs-toggle" data-action="route-legs" data-route-id="{{id}}">
                 <i class="fa-solid {{#if expanded}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i> {{legsText}}{{#if difficult}} · {{localize "coffee-pub-cartographer.routes.someDifficult"}}{{/if}}
@@ -108,6 +131,7 @@
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.removeJourney"}}"><i class="fa-solid fa-trash"></i></button>
             {{/if}}
         </div>
+        {{#if progressText}}{{> pathProgress kind="journeyId"}}{{/if}}
         <div class="cartographer-routes-meta">
             <span>{{#if gapText}}<i class="fa-solid fa-triangle-exclamation"></i> {{gapText}}{{/if}}</span>
             {{#if timeText}}<span>{{timeText}}</span>{{/if}}

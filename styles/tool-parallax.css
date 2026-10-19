@@ -917,6 +917,22 @@
     height: 24px;
 }
 
+.cartographer-parallax-window .cartographer-routes-progress {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.cartographer-parallax-window .cartographer-routes-hours {
+    width: 56px;
+    height: 20px;
+}
+
+.cartographer-parallax-window .cartographer-routes-warning {
+    color: var(--blacksmith-status-warning, #c9a227);
+}
+
 .cartographer-parallax-window .cartographer-routes-drawing {
     color: var(--blacksmith-color-brand-accent);
 }

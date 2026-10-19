@@ -109,9 +109,18 @@ class TravelManager {
         const progress = destination === null ? null : Math.min(1, Math.max(0, distance / destination));
         // The rest of the way at the party's pace -- the ground layer's speed
         // on the grid, times the master speed -- is an in-world time: an ETA.
-        // Without the clock, in-world time is real time.
-        const perHour = parallaxManager.groundPace() * Math.abs(Number(state.masterSpeed) || 0);
-        const etaSeconds = remaining !== null && perHour > 0 ? (remaining / perHour) * 3600 : null;
+        // Without the clock, in-world time is real time. Following a journey,
+        // the rest of the way is counted in effort, so difficult terrain ahead
+        // makes it longer.
+        const speed = Math.abs(Number(state.masterSpeed) || 0);
+        const journey = parallaxManager.journeyProgress(now);
+        let etaSeconds = null;
+        if (journey && journey.travel.pace > 0 && speed > 0) {
+            etaSeconds = ((journey.totalEffort - journey.effort) / (journey.travel.pace * speed)) * 3600;
+        } else {
+            const perHour = parallaxManager.groundPace() * speed;
+            etaSeconds = remaining !== null && perHour > 0 ? (remaining / perHour) * 3600 : null;
+        }
         return {
             configured: parallaxManager.isConfigured,
             showHud: !!travel?.showHud,
@@ -119,7 +128,9 @@ class TravelManager {
             destination,
             remaining,
             progress,
-            arrived: destination !== null && distance >= destination,
+            // Within a hair of it: a converted journey length and a converted
+            // distance can differ in the last decimal place.
+            arrived: destination !== null && distance >= destination * (1 - 1e-9) - 1e-9,
             traveledText: formatDistance(distance, units),
             remainingText: remaining === null ? '' : formatDistance(remaining, units),
             destinationText: destination === null ? '' : formatDistance(destination, units),
@@ -136,6 +147,23 @@ class TravelManager {
         this._drawHud(summary);
         this._drawReadouts(summary);
         this._checkArrival(summary);
+        this._checkTerrain();
+    }
+
+    /**
+     * Following a journey, the scenery runs at the speed the ground allows:
+     * the GM's client watches for the party crossing into a leg of other
+     * terrain and eases the scenery to it. The distance itself never waits
+     * on this; it is worked out from the journey's effort on every client.
+     */
+    _checkTerrain() {
+        if (!game.user.isGM || this._terrainBusy) return;
+        const state = parallaxManager.state;
+        if (!state.travel?.route || !state.playing) return;
+        const factor = parallaxManager.journeyProgress()?.factor ?? 1;
+        if ((state.terrainFactor ?? 1) === factor) return;
+        this._terrainBusy = true;
+        Promise.resolve(parallaxManager.setTerrainFactor(factor)).finally(() => { this._terrainBusy = false; });
     }
 
     _drawHud(summary) {

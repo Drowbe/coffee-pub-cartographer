@@ -4,16 +4,17 @@
 
 import { MODULE } from './const.js';
 import { ROUTE_COLORS } from './manager-routes.js';
+import { travelPinsManager } from './manager-travelpins.js';
 import { formatDistance, formatSpan, paceChoices, PACE_GROUPS, gridStep } from './utils-travel.js';
-import { legTerrains, travelHours, terrainFactor, TERRAINS } from './utils-routes.js';
+import {
+    legTerrains, travelHours, terrainFactor, TERRAINS, travelPlan, MOUNT_HOURS_PER_DAY, FORCED_MARCH_HOURS
+} from './utils-routes.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
 const APP_ID = `${MODULE.ID}-routes`;
 /** The window's choices, per browser: the tab, the pace times are shown at, and which routes show their legs. */
 const PREFS_KEY = `${MODULE.ID}.routes.windowPrefs`;
-/** Hours of travel in a day, for "travel days". */
-const TRAVEL_HOURS_PER_DAY = 8;
 const TABS = [
     { id: 'routes', icon: 'fa-solid fa-route', labelKey: 'tabRoutes' },
     { id: 'journeys', icon: 'fa-solid fa-map-signs', labelKey: 'tabJourneys' }
@@ -73,7 +74,8 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         'journey-rename': (_event, target, app) => app.promptRenameJourney(target.dataset.journeyId),
         'journey-remove': (_event, target, app) => app.confirmRemoveJourney(target.dataset.journeyId),
         'journey-move': (_event, target, app) => app.moveJourneyRoute(target.dataset.journeyId, Number(target.dataset.index), Number(target.dataset.by)),
-        'journey-drop': (_event, target, app) => app.dropJourneyRoute(target.dataset.journeyId, Number(target.dataset.index))
+        'journey-drop': (_event, target, app) => app.dropJourneyRoute(target.dataset.journeyId, Number(target.dataset.index)),
+        'path-marker': (_event, target, app) => app.toggleMarker(target.dataset)
     };
 
     static async open(manager) {
@@ -107,12 +109,44 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             pace => game.i18n.localize(pace.label ?? `${MODULE.ID}.parallax.pace.${pace.id}`));
     }
 
-    /** "20.7 h of travel (~2.6 days at 8 h)", or nothing without a pace. */
-    _timeText(hours) {
+    /**
+     * A trip's time: the hours of travel it takes, and -- when that is more
+     * than a travel day -- the days of the map's planned length it fills,
+     * "30 h of travel: 3 days of 8 h + 6 h". Nothing without a pace.
+     */
+    _timeText(hours, perDay) {
         if (hours === null || hours === undefined) return '';
-        return game.i18n.format(`${MODULE.ID}.routes.time`, {
-            time: formatSpan(hours * 3600),
-            days: Math.round((hours / TRAVEL_HOURS_PER_DAY) * 10) / 10
+        const format = (key, data) => game.i18n.format(`${MODULE.ID}.routes.${key}`, data);
+        const plan = travelPlan(hours, perDay);
+        const total = plan.hours < 1 ? formatSpan(plan.hours * 3600) : `${Math.round(plan.hours * 10) / 10} h`;
+        if (plan.hours <= plan.perDay) return format('time', { hours: total });
+        const days = format(plan.days === 1 ? 'oneDay' : 'days', { days: plan.days, perDay: plan.perDay });
+        return format(plan.rest ? 'timeDaysRest' : 'timeDays', { hours: total, days, rest: `${Math.round(plan.rest * 10) / 10} h` });
+    }
+
+    /**
+     * The party's marker for a route or journey, for the GM: whether it
+     * exists (it is made the first time the journey moves) and whether
+     * players see it.
+     */
+    _marker(link) {
+        if (!game.user.isGM || !travelPinsManager.pinFor(link)) return null;
+        return { shown: travelPinsManager.isShown(link) };
+    }
+
+    async toggleMarker({ routeId, journeyId }) {
+        const link = { sceneId: canvas.scene?.id, ...(journeyId ? { journeyId } : { routeId }) };
+        await travelPinsManager.setShown(link, !travelPinsManager.isShown(link));
+    }
+
+    /** How far along a route or journey the party is, once it has set out; empty before. */
+    _progressText(link, units) {
+        const progress = this.manager.progress(link);
+        if (!progress || (progress.effort <= 0 && !progress.travel.motion.playing)) return '';
+        return game.i18n.format(`${MODULE.ID}.routes.${progress.travel.arrived ? 'progressArrived' : 'progress'}`, {
+            traveled: formatDistance(progress.distance, units),
+            length: formatDistance(progress.length, units),
+            terrain: game.i18n.localize(`${MODULE.ID}.routes.terrain.${progress.terrain ?? 'open'}`)
         });
     }
 
@@ -138,6 +172,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const pace = paces.find(p => p.id === this.paceId)
             ?? paces.find(p => p.id === 'dnd5e.normal') ?? paces.find(p => p.id === 'walking') ?? paces[0] ?? null;
 
+        const { hoursPerDay } = this.manager.settings(scene);
         const visible = this.manager.visibleRoutes(scene);
         const routes = visible.map(route => {
             const { distance, legs } = this.manager.measure(route, scene);
@@ -153,10 +188,12 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
                 hidden: !!route.hidden,
                 editing: this.manager.editing?.id === route.id,
                 maker,
+                progressText: this._progressText({ sceneId: scene.id, routeId: route.id }, units),
+                marker: this._marker({ sceneId: scene.id, routeId: route.id }),
                 length: formatDistance(distance, units),
                 legsText: game.i18n.format(`${MODULE.ID}.routes.${legs.length === 1 ? 'oneLeg' : 'legs'}`, { count: legs.length }),
                 difficult: terrain.some(t => terrainFactor(t) < 1),
-                timeText: this._timeText(travelHours(legs, terrain, pace?.perHour)),
+                timeText: this._timeText(travelHours(legs, terrain, pace?.perHour), hoursPerDay),
                 expanded: this.expanded.has(route.id),
                 // One choice for every leg; "mixed" when the legs differ.
                 allTerrain: allSame ? this._terrainOptions(terrain[0]) : [
@@ -183,7 +220,9 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
                 name: journey.name,
                 canEdit,
                 length: formatDistance(distance, units),
-                timeText: this._timeText(travelHours(legs, path.terrain, pace?.perHour)),
+                progressText: this._progressText({ sceneId: scene.id, journeyId: journey.id }, units),
+                marker: this._marker({ sceneId: scene.id, journeyId: journey.id }),
+                timeText: this._timeText(travelHours(legs, path.terrain, pace?.perHour), hoursPerDay),
                 gapText: path.gaps.length
                     ? game.i18n.format(`${MODULE.ID}.routes.${path.gaps.length === 1 ? 'oneGap' : 'gaps'}`, { count: path.gaps.length })
                     : '',
@@ -219,6 +258,11 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
                 gridText: grid?.size ? game.i18n.format(`${MODULE.ID}.parallax.${grid.isHexagonal ? 'measureHexValue' : 'measureGridValue'}`,
                     { size: Math.round(gridStep(grid) * 10) / 10, distance: grid.distance, units }) : '',
                 pace: pace?.label ?? '',
+                hoursPerDay,
+                canPlan: game.user.isGM,
+                // Too long a day: hard on mounts past 6 h at a mounted pace, a forced march past 8 h.
+                dayWarning: hoursPerDay > FORCED_MARCH_HOURS ? localize('warnForcedMarch')
+                    : pace?.group === 'mount' && hoursPerDay > MOUNT_HOURS_PER_DAY ? localize('warnMounts') : '',
                 drawing: !!this.manager.draft,
                 showing: this.manager.show
             }
@@ -257,6 +301,9 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             this.paceId = target.value;
             this._savePrefs();
             this.render();
+        } else if (field === 'hoursPerDay') {
+            const hours = Number(target.value);
+            if (hours > 0 && hours <= 24) void this.manager.setSettings({ hoursPerDay: hours });
         } else if (field === 'legTerrain') {
             void this.manager.setTerrain(target.dataset.routeId, Number(target.dataset.leg), target.value);
         } else if (field === 'routeTerrain' && target.value) {
