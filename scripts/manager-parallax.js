@@ -6,7 +6,15 @@ import { MODULE } from './const.js';
 import { tileMotionManager } from './manager-tilemotion.js';
 import { releaseRepeatingTextures, repeatingTexture } from './utils-textures.js';
 import { NONE_GROUP, normalizeActive, shownByGroups, toggledActive } from './utils-groups.js';
-import { pixelsToDistance } from './utils-travel.js';
+import { pixelsToDistance, unitsPerHourToPixels } from './utils-travel.js';
+
+/**
+ * How much faster than real time the scenery may run when following a fast
+ * world clock. The odometer follows the clock exactly -- at x60 a real minute
+ * is an hour of road -- but scenery scrolling sixty times its pace is a blur,
+ * so past this the picture stops speeding up and only the numbers do.
+ */
+const MAX_CLOCK_SCENERY = 4;
 import { angleVector, DEFAULT_EASE_SECONDS, easeProgress, motionSpeed, motionTickerPriority, motionTravel, rebaseMotion, wrap } from './utils-motion.js';
 
 const FLAG_KEY = 'parallax';
@@ -85,46 +93,43 @@ function defaultState() {
 }
 
 /**
- * The odometer: how far the scenery has carried the party, read from one
- * layer's travel on the scene's grid. Distances are in scene units.
+ * The odometer: how far the party has come, in scene units.
  *
- *   showHud         the on-screen display, which every client shows
- *   referenceLayer  the layer whose movement is the party's; null for the nearest ground layer
- *   scale           distance multiplier, so a journey fits in a scene: x60 makes one real
- *                   second of scrolling count as a minute of travel at that speed
+ * The party travels over the **ground layer** (`referenceLayer`; null for the
+ * nearest layer below the Tokens line), and its pace is that layer's scroll
+ * speed read on the scene's grid: 140 px a second on a 140 px, 5 ft grid is
+ * 5 ft a second. Choosing a pace in the window sets that speed from the grid,
+ * so the scenery and the odometer always agree.
+ *
+ *   showHud         the odometer on screen, which every client shows
  *   distance        how far, as of the state's anchorAt -- folded forward at every rebase
  *   destination     how far there is to go in total, or null for none
  *   stopOnArrival   ease to a stop on reaching it
  *   arrived         reached this destination already, so arriving is not repeated
+ *   followClock     take time from Blacksmith's world clock rather than real time
  *
- * Distance comes from one of two sources (`source`):
- *
- *   'scenery'  how far the reference layer has scrolled, on the grid, times `scale`
- *   'clock'    an in-world travel speed (`speedPerHour`, scene units per in-world
- *              hour) times the in-world time that passes while playing, read from
- *              Blacksmith's world clock. The scenery then follows the clock too: its
- *              speed is multiplied by the clock's rate over `clockBaseRate`, the rate
- *              the GM's speeds were set for, so fast time scrolls faster and a stopped
- *              clock (paused, combat) eases the scenery to a halt.
+ * Not following the clock, distance is the ground layer's scroll on the grid
+ * -- the pace times real time, times the master speed. Following it, distance
+ * is the pace times the in-world time that passes while playing, so at x60 a
+ * real minute is an hour of road; the scenery speeds up and slows with the
+ * clock too, up to MAX_CLOCK_SCENERY times real time, and a stopped clock
+ * (paused, combat) eases it to a halt.
  *
  *   clockRate    Blacksmith's rate (in-world seconds per real second) as last recorded
  *                by the GM, so every client works from the same number
- *   clockMotion  a motion whose speed is the rate, signed by the direction of travel,
- *                with no ease: its travel is in-world seconds of travel since the anchor
+ *   clockMotion  a motion whose speed is the rate times the master speed, with no ease:
+ *                its travel is in-world seconds of travel since the anchor
  */
 function defaultTravel() {
     return {
         showHud: false,
         referenceLayer: null,
-        scale: 1,
         distance: 0,
         destination: null,
         stopOnArrival: true,
         arrived: false,
-        source: 'scenery',
-        speedPerHour: 0,
+        followClock: false,
         clockRate: 0,
-        clockBaseRate: 1,
         clockMotion: { playing: false, masterSpeed: 0, easeSeconds: 0, anchorAt: 0, rampFrom: null }
     };
 }
@@ -303,6 +308,10 @@ class ParallaxManager {
         delete state.activeSet;
         state.travel = { ...defaultTravel(), ...(stored?.travel ?? {}) };
         state.travel.clockMotion = { ...defaultTravel().clockMotion, ...(stored?.travel?.clockMotion ?? {}) };
+        // An earlier version chose the clock with `source` and had a scale and
+        // a separate speed; the pace now lives in the ground layer's speed.
+        if (stored?.travel?.source === 'clock') state.travel.followClock = true;
+        for (const gone of ['source', 'scale', 'speedPerHour', 'clockBaseRate']) delete state.travel[gone];
         return state;
     }
 
@@ -377,11 +386,11 @@ class ParallaxManager {
      */
     _syncClock(state) {
         const travel = state.travel;
-        const following = travel.source === 'clock';
+        const following = !!travel.followClock;
         const rate = following ? Math.max(0, Number(travel.clockRate) || 0) : 0;
         travel.clockMotion.playing = following && state.playing;
-        travel.clockMotion.masterSpeed = rate * Math.sign(Number(state.masterSpeed) || 0);
-        state.clockFactor = following ? rate / (Number(travel.clockBaseRate) || 1) : 1;
+        travel.clockMotion.masterSpeed = rate * (Number(state.masterSpeed) || 0);
+        state.clockFactor = following ? Math.min(rate, MAX_CLOCK_SCENERY) : 1;
     }
 
     // ==================================================================
@@ -418,21 +427,50 @@ class ParallaxManager {
      */
     travelDistance(now = game.time.serverTime, state = this.state) {
         const travel = state.travel ?? defaultTravel();
-        if (travel.source === 'clock') {
-            const worldSeconds = motionTravel(travel.clockMotion, now);
-            return travel.distance + worldSeconds * ((Number(travel.speedPerHour) || 0) / 3600);
-        }
         const layer = this.referenceLayer(state);
         if (!layer) return travel.distance;
+        const grid = canvas.scene?.grid;
+        if (travel.followClock) {
+            // The pace, per in-world second, times in-world seconds of travel.
+            const perSecond = pixelsToDistance(Number(layer.speed) || 0, grid);
+            return travel.distance + perSecond * motionTravel(travel.clockMotion, now);
+        }
         const pixels = motionTravel(state, now) * (Number(layer.speed) || 0);
-        return travel.distance + pixelsToDistance(pixels, canvas.scene?.grid, travel.scale);
+        return travel.distance + pixelsToDistance(pixels, grid);
+    }
+
+    /** The ground layer's pace, in scene units per hour, from its scroll speed on the grid. */
+    groundPace(state = this.state) {
+        const layer = this.referenceLayer(state);
+        return layer ? pixelsToDistance(Number(layer.speed) || 0, canvas.scene?.grid) * 3600 : 0;
+    }
+
+    /**
+     * Set the party's pace, in scene units per hour: the ground layer's speed
+     * becomes that pace on the grid, and every other layer scales with it, so
+     * the depth between them is kept. With the ground standing still there is
+     * nothing to scale by, so only the ground changes.
+     */
+    setGroundPace(unitsPerHour) {
+        const target = unitsPerHourToPixels(Math.max(0, Number(unitsPerHour) || 0), canvas.scene?.grid);
+        return this._commit(s => {
+            const ground = this.referenceLayer(s);
+            if (!ground) return;
+            const was = Number(ground.speed) || 0;
+            const round = speed => Math.round(speed * 10) / 10;
+            if (was !== 0 && target !== 0) {
+                const factor = target / was;
+                for (const layer of s.layers) layer.speed = round((Number(layer.speed) || 0) * factor);
+            }
+            ground.speed = round(target);
+        });
     }
 
     /** Change travel settings. A new destination or scale means it has not been reached yet. */
     setTravel(changes) {
         return this._commit(s => {
             Object.assign(s.travel, changes);
-            if ('destination' in changes || 'scale' in changes) s.travel.arrived = false;
+            if ('destination' in changes) s.travel.arrived = false;
         });
     }
 
@@ -447,23 +485,9 @@ class ParallaxManager {
         return this._commit(s => { s.travel.clockRate = value; });
     }
 
-    /**
-     * Follow the world clock, or the scenery, for distance. Switching to the
-     * clock takes the rate now as the one the scenery speeds were set for, so
-     * nothing changes speed at the moment of switching.
-     */
-    setTravelSource(source) {
-        return this._commit(s => {
-            s.travel.source = source === 'clock' ? 'clock' : 'scenery';
-            if (s.travel.source === 'clock') s.travel.clockBaseRate = s.travel.clockRate > 0 ? s.travel.clockRate : 1;
-        });
-    }
-
-    /** Take the clock's rate now as the one the scenery speeds are set for. */
-    retuneToClock() {
-        return this._commit(s => {
-            if (s.travel.clockRate > 0) s.travel.clockBaseRate = s.travel.clockRate;
-        });
+    /** Take time from Blacksmith's world clock, or from real time. */
+    setFollowClock(follow) {
+        return this._commit(s => { s.travel.followClock = !!follow; });
     }
 
     resetOdometer() {

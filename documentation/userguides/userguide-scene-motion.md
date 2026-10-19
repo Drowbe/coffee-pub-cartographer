@@ -74,42 +74,35 @@ right, up and down -- the **Ease** time, and **Reset Positions**.
 
 ### Travel
 
-Also on the Movement tab, an odometer counts how far the party has come. **Distance from** chooses
-how it is measured.
+Also on the Movement tab, an odometer counts how far the party has come. It reads the scroll of the
+ground on the scene's grid: with a 140-pixel, 5-foot grid, every 140 pixels the ground scrolls is 5
+feet.
 
-**Scenery** reads it from the scroll, on the scene's grid: with a 140-pixel, 5-foot grid, every 140
-pixels a layer scrolls is 5 feet.
-
-- **Measured by** -- the layer whose movement is the party's. By default, the nearest layer below
+- **Show odometer** -- shows the distance traveled, how far is left and when the party arrives, to
+  everyone. It starts at the top of the canvas, below any menubars. Anyone can drag it somewhere else
+  on their own screen, and it stays there for them; a double-click puts it back.
+- **Ground layer** -- the layer the party is travelling over. By default, the nearest layer below
   the Tokens line.
-- **Scale** -- multiplies the distance, so a journey fits in a scene. At ×60, a second of scrolling
-  counts as a minute of travel at that speed.
-
-**World clock** reads it from in-world time, using Coffee Pub Blacksmith's world clock.
-
-- **Speed** -- how fast the party travels in the world, per in-world hour; a wagon is about 3 miles
-  an hour. Distance is that speed times the in-world time that passes while the scenery plays, so
-  with Blacksmith's clock on fast (×60) a real minute covers an hour of road.
-- The scenery follows the clock too. Its speeds, as you set them, are for the clock's rate when you
-  switched to World clock; faster time scrolls faster, slower time slower, and a stopped clock --
-  paused, or in combat -- eases it to a halt and stops the odometer. **Set speeds for this** makes the
-  speeds as set belong to the clock's rate now instead.
-- With a destination, the tab and the on-screen display also show how long, in in-world time, until
-  arrival.
-
-Either way:
-
+- **Pace** -- how fast the party travels. Choosing one sets the ground layer's speed from the grid,
+  and scales every other layer by the same amount so the depth between them is kept. With D&D 5e the
+  choices are the rules' own: slow, normal and fast (2, 3 and 4 miles an hour), the SRD's mounts at
+  their speed over ten (a riding horse is 6 mph) and a one-hour gallop, and its ships and airship. In
+  other systems they are everyday ones such as walking, a wagon or a galloping horse. Choose
+  **Custom** to type a pace of your own. Scenes measured in feet, yards or miles take it in mph; metres or kilometres in km/h. A
+  grid in hexes or squares has no pace, but the odometer still counts in them.
+- **Follow world clock** -- takes time from Coffee Pub Blacksmith's world clock rather than real
+  time, so with the clock on fast (×60) a real minute covers an hour of road. The scenery speeds up
+  with the clock too, up to four times its pace -- faster than that only the numbers speed up, since
+  the picture would be a blur -- and a stopped clock, paused or in combat, eases it to a halt and
+  stops the odometer. Without Blacksmith's world clock the switch is greyed out.
 - **Destination** -- how far there is to go in all, in the scene's units or the longer one (feet or
-  miles, metres or kilometres). With a destination set, the tab shows the distance remaining, and
-  **Stop on arrival** eases the scenery to a halt when it is reached.
-- **On screen** -- shows the distance traveled, and how far is left, to everyone. It starts at the top
-  of the canvas, below any menubars. Anyone can drag it somewhere else on their own screen, and it
-  stays there for them; a double-click puts it back.
+  miles, metres or kilometres). With a destination set, the tab shows the distance remaining and the
+  time to arrival, and **Stop on arrival** eases the scenery to a halt when it is reached.
 - **Reset odometer** starts counting from zero again.
 
-Running in reverse backs the odometer up. Scene motion only reads Blacksmith's clock; it never moves
-Foundry's in-game time, and a jump in time -- a rest, or the GM adding an hour -- does not move the
-scenery or the odometer.
+The master speed runs the party faster or slower than its pace, and running in reverse backs the
+odometer up. Scene motion only reads Blacksmith's clock; it never moves Foundry's in-game time, and a
+jump in time -- a rest, or the GM adding an hour -- does not move the scenery or the odometer.
 
 ### Groups
 
@@ -117,7 +110,7 @@ A group is a named combination of layers, such as Base, Snow or Night. Groups **
 layer shows when any group that is on shows it, so a winter night can be Base plus Snow plus Night
 rather than a group of its own.
 
-On the Groups tab, each group has an on/off toggle. **All Layers** shows everything and **No Layers**
+On the Groups tab, each group has an on/off switch. **All Layers** shows everything and **No Layers**
 hides everything, without changing any group. Expand a group to switch individual layers off within
 that group only. The pen edits a group's name and members, and groups can be duplicated and deleted.
 

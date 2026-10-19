@@ -622,8 +622,19 @@
     background: var(--blacksmith-color-brand-accent);
 }
 
-.cartographer-parallax-window .cartographer-parallax-travel-field {
-    grid-template-columns: 90px 1fr;
+/* Travel's labels are longer than a slider's, so its label column is wider. */
+.cartographer-parallax-window .cartographer-parallax-travel .cartographer-parallax-field {
+    grid-template-columns: 120px 1fr;
+}
+
+.cartographer-parallax-window .cartographer-parallax-travel-custom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-travel-custom[hidden] {
+    display: none;
 }
 
 .cartographer-parallax-window .cartographer-parallax-travel-inline {
@@ -876,6 +887,67 @@
     background: var(--blacksmith-tool-surface-selected);
     color: var(--blacksmith-tool-text);
     box-shadow: inset 0 0 0 1px var(--blacksmith-color-brand-accent);
+}
+
+/* --- Switch ---------- */
+/* The one control for a setting that is on or off, everywhere in the window;
+   a choice between named options is the segmented control above. It sits in
+   the control column, beside its label, where the other controls start. */
+.cartographer-parallax-window .cartographer-parallax-switch-row {
+    grid-template-columns: 90px 1fr;
+    justify-items: start;
+}
+
+/* Foundry styles every button (height, flex, centring); the switch undoes it. */
+.cartographer-parallax-window button.cartographer-parallax-switch {
+    position: relative;
+    display: block;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: 26px;
+    min-width: 0;
+    max-width: 26px;
+    height: 14px;
+    min-height: 0;
+    line-height: 0;
+    padding: 0;
+    margin: 0;
+    border: 1px solid var(--blacksmith-tool-border);
+    border-radius: 7px;
+    background: var(--blacksmith-tool-surface-sunken);
+    box-shadow: none;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.cartographer-parallax-window .cartographer-parallax-switch-knob {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--blacksmith-tool-text-muted);
+    transition: left 0.15s, background 0.15s;
+}
+
+.cartographer-parallax-window .cartographer-parallax-switch:hover:not(:disabled) {
+    border-color: var(--blacksmith-color-brand-accent);
+}
+
+.cartographer-parallax-window .cartographer-parallax-switch.is-on {
+    background: var(--blacksmith-color-brand-accent);
+    border-color: var(--blacksmith-color-brand-accent);
+}
+
+.cartographer-parallax-window .cartographer-parallax-switch.is-on .cartographer-parallax-switch-knob {
+    left: 13px;
+    background: var(--blacksmith-tool-text);
+}
+
+.cartographer-parallax-window .cartographer-parallax-switch:disabled {
+    opacity: 0.4;
+    cursor: default;
 }
 
 .cartographer-parallax-window .cartographer-parallax-band-offset {

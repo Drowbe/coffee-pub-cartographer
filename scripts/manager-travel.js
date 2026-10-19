@@ -58,7 +58,7 @@ class TravelManager {
      */
     _recordClockRate(rate = TravelManager.clockApi()?.rate) {
         if (!game.user.isGM || !canvas?.scene || rate === undefined) return;
-        if (parallaxManager.state.travel?.source !== 'clock') return;
+        if (!parallaxManager.state.travel?.followClock) return;
         void parallaxManager.syncClockRate(rate);
     }
 
@@ -83,12 +83,11 @@ class TravelManager {
         const destination = Number.isFinite(Number(travel?.destination)) && travel.destination > 0 ? Number(travel.destination) : null;
         const remaining = destination === null ? null : Math.max(0, destination - distance);
         const progress = destination === null ? null : Math.min(1, Math.max(0, distance / destination));
-        // Following the clock, distance has an in-world speed, so the rest of
-        // the way has an in-world time: an ETA, whether or not the clock runs.
-        const perHour = Number(travel?.speedPerHour) || 0;
-        const etaSeconds = travel?.source === 'clock' && remaining !== null && perHour > 0
-            ? (remaining / perHour) * 3600
-            : null;
+        // The rest of the way at the party's pace -- the ground layer's speed
+        // on the grid, times the master speed -- is an in-world time: an ETA.
+        // Without the clock, in-world time is real time.
+        const perHour = parallaxManager.groundPace() * Math.abs(Number(state.masterSpeed) || 0);
+        const etaSeconds = remaining !== null && perHour > 0 ? (remaining / perHour) * 3600 : null;
         return {
             configured: parallaxManager.isConfigured,
             showHud: !!travel?.showHud,

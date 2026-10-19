@@ -17,6 +17,8 @@ canvas, and how the window is put together.
 | `scripts/manager-tilemotion.js` | Tile motion state, rendering, and tile groups. |
 | `scripts/manager-collections.js` | Saved looks across both modes. |
 | `scripts/manager-motionbar.js` | The Scene Motion section of the sub-menubar. |
+| `scripts/utils-travel.js` | Distances on the grid, paces, and their units. |
+| `scripts/manager-travel.js` | The on-screen odometer, arrival, and the world clock's rate. |
 | `scripts/window-parallax.js`, `templates/window-parallax.hbs`, `styles/tool-parallax.css` | The window. |
 
 ## Where state lives
@@ -86,6 +88,15 @@ the mode's ease time and never saved. Whatever is showing when a scene loads app
 
 **Depth** offsets a layer's tiling by the camera's distance from the scene's centre times its depth,
 each frame, from that client's own view.
+
+**Travel.** The odometer's state is `travel` in the `parallax` flag. Its pace is not stored: it
+is the ground layer's speed read on the grid, so the scenery and the odometer cannot disagree, and
+choosing a pace sets that speed (and scales the other layers with it). Distance is the ground's
+scroll on the grid, folded into `travel.distance` at every rebase. Following Blacksmith's world
+clock, the GM records the clock's rate (`api.worldClock.rate`, and again on
+`blacksmith.worldClockRateChanged`) in `travel.clockRate`; distance is then the pace per second
+times `motionTravel(travel.clockMotion)`, a second motion whose speed is the rate, and the scenery's
+speeds are multiplied by `clockFactor`, the rate capped at four. A rate of 0 stops both.
 
 **Tiles.** A spinning tile turns its own mesh: the pivot's world position is worked out from the
 tile's anchor, size and rotation, and the mesh is re-anchored there, so it turns in place. A scrolling

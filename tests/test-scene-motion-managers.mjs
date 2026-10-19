@@ -161,12 +161,9 @@ console.log('\nthe odometer');
     await pm.setMasterSpeed(2);
     now += 1000;
     check(Math.abs(pm.travelDistance(now) - 10) < 1e-9, 'a speed change carries the distance on without a jump');
-    await pm.setTravel({ scale: 60 });
-    now += 1000;
-    check(Math.abs(pm.travelDistance(now) - (10 + 5 * 60)) < 1e-9, 'the scale multiplies distance from the moment it is set');
     await pm.setMasterSpeed(-1);
     now += 1000;
-    check(Math.abs(pm.travelDistance(now) - (310 - 2.5 * 60)) < 1e-9, 'running in reverse backs the odometer up');
+    check(Math.abs(pm.travelDistance(now) - 7.5) < 1e-9, 'running in reverse backs the odometer up');
     await pm.setTravel({ referenceLayer: pm.state.layers[0].id });
     check(pm.referenceLayer()?.name === 'sky', 'a chosen layer is measured instead');
     await pm.resetOdometer();
@@ -177,33 +174,50 @@ console.log('\nthe odometer');
     check(pm.state.travel.arrived && !pm.state.playing, 'arriving marks it and stops, by default');
 }
 
+console.log('\nthe pace');
+{
+    flags.parallax = { layers: [layer('sky', { speed: 10 }), layer('road', { speed: 70 })], sets: [], easeSeconds: 0 };
+    pm.state = pm._readState();
+    // 70 px/s on a 140 px, 5 ft grid is 2.5 ft/s: 9,000 ft an hour.
+    check(Math.abs(pm.groundPace() - 9000) < 1e-9, 'the pace is the ground layer\'s speed on the grid');
+    await pm.setGroundPace(3 * 5280);
+    const [sky, road] = pm.state.layers;
+    check(road.speed === 123.2, 'a pace of 3 mph sets the ground to 123.2 px/s');
+    check(sky.speed === 17.6, 'and the other layers scale with it, keeping the depth');
+    check(Math.abs(pm.groundPace() - 3 * 5280) < 1e-6, 'reading the pace back gives 3 mph');
+    await pm.updateLayer(road.id, { speed: 0 });
+    await pm.setGroundPace(9000);
+    check(pm.state.layers[1].speed === 70 && pm.state.layers[0].speed === 17.6, 'from a standing start only the ground changes');
+}
+
 console.log('\nthe odometer, following the world clock');
 {
     flags.parallax = { layers: [layer('road', { speed: 70 })], sets: [], easeSeconds: 0, masterSpeed: 1 };
     pm.state = pm._readState();
     await pm.syncClockRate(60);
-    await pm.setTravelSource('clock');
-    check(pm.state.travel.clockBaseRate === 60 && pm.state.clockFactor === 1, 'switching to the clock tunes the scenery to its rate now');
-    await pm.setTravel({ speedPerHour: 3 * 5280, distance: 0 });
+    await pm.setFollowClock(true);
+    check(pm.state.clockFactor === 4, 'at x60 the scenery runs at most four times its pace');
     await pm.resetOdometer();
     await pm.play();
     now += 60 * 1000;
-    // A real minute at x60 is an in-world hour: 3 miles.
-    check(Math.abs(pm.travelDistance(now) - 3 * 5280) < 1e-6, 'a real minute at x60 covers an hour of travel at 3 mph');
-    await pm.syncClockRate(1);
-    check(Math.abs(pm.state.clockFactor - 1 / 60) < 1e-12, 'slower time slows the scenery by the same ratio');
+    // A real minute at x60 is an in-world hour: 9,000 ft at 2.5 ft/s.
+    check(Math.abs(pm.travelDistance(now) - 9000) < 1e-6, 'but a real minute at x60 still covers an hour of road');
+    await pm.syncClockRate(2);
+    check(pm.state.clockFactor === 2, 'under the cap the scenery follows the clock exactly');
     now += 60 * 1000;
-    check(Math.abs(pm.travelDistance(now) - (3 * 5280 + 3 * 5280 / 60)) < 1e-6, 'and the odometer accrues at the new rate from then');
+    check(Math.abs(pm.travelDistance(now) - (9000 + 300)) < 1e-6, 'and the odometer accrues at the new rate from then');
     await pm.syncClockRate(0);
     const held = pm.travelDistance(now);
     now += 60 * 1000;
     check(pm.travelDistance(now) === held && pm.state.clockFactor === 0, 'a stopped clock stops the odometer and the scenery');
-    await pm.syncClockRate(6);
-    await pm.retuneToClock();
-    check(pm.state.travel.clockBaseRate === 6 && pm.state.clockFactor === 1, 'retuning makes the speeds as set the speeds for this rate');
-    await pm.setTravelSource('scenery');
-    check(pm.state.clockFactor === 1 && pm.state.travel.clockMotion.playing === false, 'back to scenery, the clock no longer drives anything');
+    await pm.setFollowClock(false);
+    check(pm.state.clockFactor === 1 && pm.state.travel.clockMotion.playing === false, 'not following, the clock no longer drives anything');
     await pm.stop();
+
+    flags.parallax = { layers: [], sets: [], travel: { source: 'clock', scale: 60, speedPerHour: 100, clockBaseRate: 2 } };
+    const migrated = pm._readState().travel;
+    check(migrated.followClock && !('scale' in migrated) && !('source' in migrated) && !('speedPerHour' in migrated),
+        'an older save that followed the clock still does, without the old settings');
 }
 
 console.log('\ntile groups and motion');

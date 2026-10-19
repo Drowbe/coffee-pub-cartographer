@@ -13,7 +13,9 @@ import {
     NONE_GROUP, normalizeActive, shownByGroups, toggledActive, sameActive
 } from '../scripts/utils-groups.js';
 import {
-    pixelsToDistance, formatDistance, formatSpan, toSceneUnits, unitChoices
+    pixelsToDistance, formatDistance, formatSpan, toSceneUnits, unitChoices,
+    REAL_WORLD_PACES, rulesPaces, paceToSceneUnits, paceUnit, sceneUnitsToPace,
+    paceInputToSceneUnits, unitsPerHourToPixels, pixelsToUnitsPerHour
 } from '../scripts/utils-travel.js';
 
 let bad = 0;
@@ -122,8 +124,8 @@ console.log('\nreading what is on from a save');
 console.log('\ntravel distances');
 {
     const grid = { size: 140, distance: 5, units: 'ft' };
-    if (pixelsToDistance(140, grid) !== 5 || pixelsToDistance(140, grid, 60) !== 300) fail('pixels do not convert on the grid, or ignore the scale');
-    else ok('one grid square of pixels is one square of distance, times the scale');
+    if (pixelsToDistance(140, grid) !== 5 || pixelsToDistance(70, grid) !== 2.5) fail('pixels do not convert on the grid');
+    else ok('one grid square of pixels is one square of distance');
     if (pixelsToDistance(140, { size: 0 }) !== 0) fail('a scene with no grid does not read as zero');
     else ok('no grid, no distance');
     const cases = [
@@ -143,6 +145,41 @@ console.log('\ntravel distances');
     else ok('an ETA reads as its two largest units');
     if (JSON.stringify(unitChoices('m')) !== '["m","km"]' || JSON.stringify(unitChoices('hexes')) !== '["hexes"]') fail('unit choices are wrong');
     else ok('units offered are the scene\'s and its longer one');
+}
+
+console.log('\npaces');
+{
+    const close = (a, b) => Math.abs(a - b) < 1e-9;
+    const grid = { size: 140, distance: 5, units: 'ft' };
+    // 3 mph is 15,840 ft an hour, 4.4 ft a second, 123.2 px a second on this grid.
+    const px = unitsPerHourToPixels(paceToSceneUnits(3, 'ft'), grid);
+    if (!close(px, 123.2)) fail(`3 mph on a 140 px, 5 ft grid is ${px} px/s, not 123.2`);
+    else ok('3 mph on a 140 px, 5 ft grid is 123.2 px/s');
+    if (!close(pixelsToUnitsPerHour(px, grid), 15840)) fail('a speed does not convert back to its pace');
+    else ok('and 123.2 px/s reads back as 3 mph');
+    const metric = paceInputToSceneUnits(5, 'm');
+    if (paceUnit('m') !== 'km/h' || !close(metric, 5000) || !close(sceneUnitsToPace(metric, 'm'), 5)) fail('a metric scene does not take its pace in km/h');
+    else ok('a metric scene takes and shows its pace in km/h');
+    if (paceUnit('ft') !== 'mph' || !close(sceneUnitsToPace(5280 * 4, 'yd'), 12)) fail('imperial paces are wrong');
+    else ok('an imperial scene shows its pace in mph');
+    if (paceToSceneUnits(3, 'hexes') !== null || paceInputToSceneUnits(3, 'squares') !== null) fail('a grid in hexes has a pace');
+    else ok('a grid in hexes or squares has no pace');
+    const config = { DND5E: { travelPace: {
+        slow: { label: 'DND5E.TravelPaceSlow', standard: 18, multiplier: 2 / 3 },
+        normal: { label: 'DND5E.TravelPaceNormal', standard: 24, multiplier: 1 },
+        fast: { label: 'DND5E.TravelPaceFast', standard: 30, multiplier: 4 / 3 }
+    } } };
+    const rules = rulesPaces('dnd5e', config);
+    const mph = rules?.slice(0, 3).map(p => Math.round(p.mph * 1e9) / 1e9).join(',');
+    if (mph !== '2,3,4' || rules[0].id !== 'dnd5e.slow' || rules[0].label !== 'DND5E.TravelPaceSlow') fail(`D&D 5e paces read as ${mph}`);
+    else ok('D&D 5e\'s paces are 2, 3 and 4 mph, as its rules give them');
+    const byId = id => rules?.find(p => p.id === `dnd5e.${id}`);
+    if (byId('ridingHorse')?.mph !== 6 || byId('ridingHorse')?.group !== 'mount' || byId('galley')?.group !== 'water' || byId('airship')?.mph !== 8) fail('D&D 5e mounts and vehicles are missing or wrong');
+    else ok('D&D 5e also lists the SRD mounts (a riding horse at 6 mph) and vehicles');
+    if (rulesPaces('pf2e', config) !== null || rulesPaces('dnd5e', {}) !== null) fail('a system without paces has some');
+    else ok('a system without paces falls back to real-world ones');
+    if (REAL_WORLD_PACES.some(p => !(p.mph > 0)) || new Set(REAL_WORLD_PACES.map(p => p.id)).size !== REAL_WORLD_PACES.length) fail('real-world paces are malformed');
+    else ok(`${REAL_WORLD_PACES.length} real-world paces, each with a speed`);
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');

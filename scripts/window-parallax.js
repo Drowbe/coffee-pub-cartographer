@@ -7,7 +7,10 @@ import { PARALLAX_DIRECTIONS } from './manager-parallax.js';
 import { defaultTileMotion, tileMotionManager } from './manager-tilemotion.js';
 import { collectionsManager } from './manager-collections.js';
 import { NONE_GROUP } from './utils-groups.js';
-import { displayDistance, toSceneUnits, unitChoices } from './utils-travel.js';
+import {
+    displayDistance, toSceneUnits, unitChoices, REAL_WORLD_PACES, rulesPaces,
+    paceToSceneUnits, paceUnit, sceneUnitsToPace, paceInputToSceneUnits
+} from './utils-travel.js';
 import { travelManager } from './manager-travel.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
@@ -167,11 +170,10 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         'remove-layer': (_event, target, app) => app.confirmRemoveLayer(target.dataset.layerId),
         'duplicate-layer': (_event, target, app) => void app.manager.duplicateLayer(target.dataset.layerId),
         // Travel, on the Movement tab.
-        'travel-hud': (_event, target, app) => void app.manager.setTravel({ showHud: target.dataset.value === 'true' }),
-        'travel-stop': (_event, target, app) => void app.manager.setTravel({ stopOnArrival: target.dataset.value === 'true' }),
+        'travel-hud': (_event, _target, app) => void app.manager.setTravel({ showHud: !app.manager.state.travel?.showHud }),
+        'travel-stop': (_event, _target, app) => void app.manager.setTravel({ stopOnArrival: !app.manager.state.travel?.stopOnArrival }),
+        'travel-clock': (_event, _target, app) => app.toggleFollowClock(),
         'travel-reset': (_event, _target, app) => void app.manager.resetOdometer(),
-        'travel-source': (_event, target, app) => app.setTravelSource(target.dataset.value),
-        'travel-retune': (_event, _target, app) => void app.manager.retuneToClock(),
         'travel-clear-destination': (_event, _target, app) => void app.manager.setTravel({ destination: null }),
         'rename-layer': (_event, target, app) => app.promptRenameLayer(target.dataset.layerId),
         'copy-from-scene': (_event, _target, app) => app.promptCopyFromScene(),
@@ -483,27 +485,38 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const hasDestination = Number(travel.destination) > 0;
         const shown = hasDestination ? displayDistance(travel.destination, units) : { amount: '', unit: choices.at(-1) };
         const nearestFirst = [...state.layers].reverse();
-        // Following the clock: the travel speed per in-world hour, shown in
-        // the longer unit once it is one or more of it (3 mi/h, not 15,840 ft/h).
-        const speed = Number(travel.speedPerHour) > 0
-            ? displayDistance(travel.speedPerHour, units)
-            : { amount: '', unit: choices.at(-1) };
         const clock = travelManager.constructor.clockApi();
         const rate = Number(travel.clockRate) || 0;
-        const base = Number(travel.clockBaseRate) || 1;
+        // The pace is the ground layer's speed on the grid. A preset shows as
+        // chosen when the speed is that pace, give or take the rounding of the
+        // speed to a tenth of a pixel; otherwise the pace is a custom one.
+        const paceAvailable = !!grid?.size && !!grid?.distance && paceToSceneUnits(1, units) !== null;
+        const pace = this.manager.groundPace(state);
+        const presets = paceAvailable ? this._paceChoices(units) : [];
+        // Custom stays chosen once picked, until a preset is, even when the
+        // number typed happens to match one.
+        const chosen = this._customPace ? null
+            : presets.find(p => pace > 0 && Math.abs(p.perHour - pace) <= p.perHour * 0.005);
+        const shownPace = paceAvailable ? sceneUnitsToPace(pace, units) : 0;
         return {
-            followsClock: travel.source === 'clock',
-            clockAvailable: !!clock,
-            speedAmount: speed.amount,
-            speedUnitOptions: choices.map(unit => ({ unit, selected: unit === speed.unit })),
+            followClock: !!travel.followClock,
+            clockUnavailable: !clock,
             clockText: rate > 0
                 ? game.i18n.format(`${MODULE.ID}.parallax.travelClockRunning`, { rate: +rate.toFixed(2), mode: clock?.mode ?? '' })
                 : localize('travelClockStopped'),
-            canRetune: rate > 0 && rate !== base,
-            tunedText: game.i18n.format(`${MODULE.ID}.parallax.travelTuned`, { rate: +base.toFixed(2) }),
+            paceAvailable,
+            paceUnit: paceUnit(units),
+            paceValue: Math.round(shownPace * 10) / 10,
+            customPace: !chosen,
+            paceGroups: [
+                ...['foot', 'mount', 'water', 'air'].map(group => ({
+                    label: localize(`paceGroup.${group}`),
+                    paces: presets.filter(p => p.group === group).map(p => ({ id: p.id, label: p.label, selected: p === chosen }))
+                })).filter(g => g.paces.length)
+            ],
+            customSelected: !chosen,
             showHud: !!travel.showHud,
             stopOnArrival: !!travel.stopOnArrival,
-            scale: travel.scale,
             hasDestination,
             destinationAmount: shown.amount,
             unitOptions: choices.map(unit => ({ unit, selected: unit === shown.unit })),
@@ -515,6 +528,27 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                 ? game.i18n.format(`${MODULE.ID}.parallax.travelGrid`, { size: grid.size, distance: grid.distance, units })
                 : ''
         };
+    }
+
+    /**
+     * The paces to choose from, as { id, label, perHour } with perHour in
+     * scene units: the game system's own when its rules define them, or
+     * real-world ones. Each label carries its speed, "Normal (3 mph)".
+     */
+    _paceChoices(units) {
+        const unit = paceUnit(units);
+        const rules = rulesPaces(game.system?.id, CONFIG);
+        const paces = (rules ?? REAL_WORLD_PACES).map(p => ({
+            id: p.id,
+            group: p.group,
+            mph: p.mph,
+            name: game.i18n.localize(p.label ?? `${MODULE.ID}.parallax.pace.${p.id}`)
+        }));
+        return paces.map(p => {
+            const perHour = paceToSceneUnits(p.mph, units);
+            const shown = Math.round(sceneUnitsToPace(perHour, units) * 10) / 10;
+            return { id: p.id, group: p.group, perHour, label: `${p.name} (${shown} ${unit})` };
+        });
     }
 
     async promptRenameLayer(id) {
@@ -1298,24 +1332,42 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     }
 
     /**
-     * Switch where distance comes from. Turning on the clock first records
-     * its rate, so the scenery is tuned to the clock as it is right now.
+     * Follow the world clock, or stop following it. Turning it on first
+     * records the clock's rate, so the odometer starts from the clock as it
+     * is now rather than from the last rate seen.
      */
-    async setTravelSource(source) {
-        if (source === 'clock') {
+    async toggleFollowClock() {
+        const follow = !this.manager.state.travel?.followClock;
+        if (follow) {
             const rate = travelManager.constructor.clockApi()?.rate;
             if (rate === undefined) return;
             await this.manager.syncClockRate(rate);
         }
-        await this.manager.setTravelSource(source);
+        await this.manager.setFollowClock(follow);
     }
 
-    /** The travel speed is an amount and a unit per in-world hour, read together. */
-    _saveSpeed() {
-        const amount = this.element?.querySelector('[data-field="travelSpeed"]')?.value ?? '';
-        const unit = this.element?.querySelector('[data-field="travelSpeedUnit"]')?.value;
-        const value = amount === '' ? 0 : toSceneUnits(amount, unit, canvas.scene?.grid?.units);
-        void this.manager.setTravel({ speedPerHour: value > 0 ? value : 0 });
+    /**
+     * A preset pace sets the ground layer's speed. Custom shows the number
+     * box, where the pace is typed; it is remembered for this window so a
+     * re-render does not snap back to a preset the speed happens to match.
+     */
+    _savePace(id) {
+        const preset = this._paceChoices(canvas.scene?.grid?.units).find(p => p.id === id);
+        this._customPace = !preset;
+        if (preset) {
+            void this.manager.setGroundPace(preset.perHour);
+            return;
+        }
+        const box = this.element?.querySelector('[data-field="travelPaceValue"]')?.closest('.cartographer-parallax-travel-custom');
+        if (box) box.hidden = false;
+        box?.querySelector('input')?.focus();
+    }
+
+    /** A pace typed in mph or km/h sets the ground layer's speed. */
+    _saveTypedPace(value) {
+        if (!(value >= 0)) return;
+        const perHour = paceInputToSceneUnits(value, canvas.scene?.grid?.units);
+        if (perHour !== null) void this.manager.setGroundPace(perHour);
     }
 
     /** The destination is an amount and a unit, read together whichever of the two changed. */
@@ -1363,9 +1415,9 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         else if (input.field === 'activeSet') void this._groups().setActive(input.value);
         else if (input.field === 'collection') void collectionsManager.apply(input.value);
         else if (input.field === 'travelReference') void this.manager.setTravel({ referenceLayer: input.value || null });
-        else if (input.field === 'travelScale' && input.value > 0) void this.manager.setTravel({ scale: input.value });
+        else if (input.field === 'travelPace') this._savePace(input.value);
+        else if (input.field === 'travelPaceValue') this._saveTypedPace(input.value);
         else if (input.field === 'travelDestination' || input.field === 'travelDestinationUnit') this._saveDestination();
-        else if (input.field === 'travelSpeed' || input.field === 'travelSpeedUnit') this._saveSpeed();
         else if (input.field === 'angle') void this.manager.setAngle(input.value);
         else if (input.field === 'easeSeconds') void this.manager.setEaseSeconds(input.value);
     }

@@ -68,7 +68,7 @@ console.log('\nno string under parallax.* goes unused');
 {
     // A key is used if it appears in full, or as its short name in quotes,
     // or is built from a known prefix (direction.left and friends).
-    const dynamic = ['parallax.direction.'];
+    const dynamic = ['parallax.direction.', 'parallax.pace.', 'parallax.paceGroup.'];
     const unused = Object.keys(lang).filter(key => key.startsWith('parallax.')).filter(key => {
         if (dynamic.some(prefix => key.startsWith(prefix))) return false;
         const short = key.slice('parallax.'.length);
