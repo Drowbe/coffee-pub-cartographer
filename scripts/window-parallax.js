@@ -21,7 +21,7 @@ const APP_ID = `${MODULE.ID}-parallax`;
  * reaches for mid-scene ("the wagon backs up").
  */
 const SLIDER_RANGES = {
-    masterSpeed: { min: -4, max: 4, step: 0.05 },
+    masterSpeed: { min: -10, max: 10, step: 0.05 },
     angle: { min: 0, max: 359, step: 1 },
     easeSeconds: { min: 0, max: 10, step: 0.5 },
     // Centred on zero like the master: a layer can run against the others.
@@ -164,6 +164,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         },
         'remove-layer': (_event, target, app) => app.confirmRemoveLayer(target.dataset.layerId),
         'duplicate-layer': (_event, target, app) => void app.manager.duplicateLayer(target.dataset.layerId),
+        'rename-layer': (_event, target, app) => app.promptRenameLayer(target.dataset.layerId),
         'copy-from-scene': (_event, _target, app) => app.promptCopyFromScene(),
         'export-parallax': (_event, _target, app) => app.exportParallax(),
         'import-parallax': (_event, _target, app) => app.promptImportParallax(),
@@ -457,6 +458,20 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.parallax.${bodyKey}`, data))}</p>`,
             rejectClose: false
         });
+    }
+
+    async promptRenameLayer(id) {
+        const layer = this._layer(id);
+        if (!layer) return;
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const name = await foundry.applications.api.DialogV2.prompt({
+            window: { title: localize('renameLayer'), icon: 'fa-solid fa-pen' },
+            content: `<input type="text" name="name" value="${foundry.utils.escapeHTML(layer.name)}" autofocus>`,
+            ok: { callback: (_event, button) => button.form.elements.name.value },
+            rejectClose: false
+        });
+        const label = String(name ?? '').trim();
+        if (label && label !== layer.name) await this.manager.updateLayer(id, { name: label });
     }
 
     async confirmRemoveLayer(id) {

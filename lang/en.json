@@ -329,6 +329,7 @@
 	"parallax.tabCollections": "Collections",
 	"parallax.copyName": "{name} (copy)",
 	"parallax.duplicateLayer": "Duplicate layer",
+	"parallax.renameLayer": "Rename layer",
 	"parallax.duplicateSet": "Duplicate group",
 	"parallax.duplicateCollection": "Duplicate collection",
 	"parallax.dragToReorder": "Drag to reorder. Drop on the Tokens line to move a layer across it.",

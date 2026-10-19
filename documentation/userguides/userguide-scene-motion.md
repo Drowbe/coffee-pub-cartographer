@@ -64,7 +64,7 @@ Each layer can be collapsed to a single line. Expanded, it has:
 - **Repeat** -- **Tile** repeats the image across the whole scene; **Band** repeats it only along the
   direction of travel, as a strip such as a tree line, at the offset you give.
 
-Each layer also has an eye to hide it everywhere, a duplicate button, and a delete button that asks
+Each layer also has an eye to hide it everywhere, a pen to rename it, a duplicate button, and a delete button that asks
 first.
 
 ### Movement

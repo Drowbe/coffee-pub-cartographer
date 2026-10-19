@@ -34,6 +34,8 @@
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.moveNearer"}}"><i class="fa-solid fa-chevron-up"></i></button>
             <button type="button" class="cartographer-parallax-button" data-action="move-down" data-layer-id="{{id}}" {{#if isLast}}disabled{{/if}}
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.moveFarther"}}"><i class="fa-solid fa-chevron-down"></i></button>
+            <button type="button" class="cartographer-parallax-button" data-action="rename-layer" data-layer-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.renameLayer"}}"><i class="fa-solid fa-pen"></i></button>
             <button type="button" class="cartographer-parallax-button" data-action="duplicate-layer" data-layer-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.duplicateLayer"}}"><i class="fa-solid fa-clone"></i></button>
             <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-layer" data-layer-id="{{id}}"
