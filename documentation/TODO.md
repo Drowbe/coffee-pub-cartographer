@@ -145,17 +145,6 @@ GM's scene keeps moving for everyone else.
 previous collection, speed up, slow down -- to drag onto the hotbar. Everything they need is on the
 module's API already. Verified by importing the pack and running each.
 
-**Travel that follows the world clock.** Blacksmith already runs a ticking world clock with modes
-(real, slow, fast, paused) and a rate in world seconds per real second; it is being exposed as
-`api.worldClock.rate`, `.running` and `.mode` with a `blacksmith.worldClockRateChanged` hook. Once
-it lands, the odometer's scale gets a "follow the world clock" option: distance per real second
-becomes an in-world travel speed times that rate, so fast time covers more road. Keep animating from
-our own clock and only read the rate -- world time arrives in whole-minute steps and would stutter.
-Time jumps (a rest, a GM adding an hour) still do not move the scenery. With a world-calendar
-duration formatter from Blacksmith, the display can add an ETA ("2 days, 4 hours"). Gated on
-Blacksmith's API change. Verified when switching Blacksmith's time mode changes the odometer's rate
-on every client.
-
 **Sound tied to Play/Stop.** Let a mode name an ambient sound -- wagon creaks, wind, rigging -- that
 fades in on Play and out on Stop with the motion's ease. Verified by the sound following Play and Stop
 on a second client.

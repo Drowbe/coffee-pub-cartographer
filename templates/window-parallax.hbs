@@ -436,6 +436,9 @@
                 <span>{{localize "coffee-pub-cartographer.parallax.travelTraveled"}} <strong data-travel-readout="traveled"></strong></span>
                 {{#if travel.hasDestination}}
                 <span>{{localize "coffee-pub-cartographer.parallax.travelRemaining"}} <strong data-travel-readout="remaining"></strong></span>
+                {{#if travel.followsClock}}
+                <span>{{localize "coffee-pub-cartographer.parallax.travelEtaLabel"}} <strong data-travel-readout="eta"></strong></span>
+                {{/if}}
                 {{/if}}
             </div>
             {{#if travel.hasDestination}}
@@ -451,6 +454,41 @@
                         data-action="travel-hud" data-value="true">{{localize "coffee-pub-cartographer.parallax.on"}}</button>
                 </div>
             </div>
+            {{! Where distance comes from: the scenery's scroll, or Blacksmith's world clock. }}
+            <div class="cartographer-parallax-field cartographer-parallax-repeat" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelSourceHint"}}">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelSource"}}</span>
+                <div class="cartographer-parallax-segmented" role="radiogroup">
+                    <button type="button" class="cartographer-parallax-segment{{#unless travel.followsClock}} is-active{{/unless}}" {{#unless travel.followsClock}}disabled{{/unless}}
+                        data-action="travel-source" data-value="scenery">{{localize "coffee-pub-cartographer.parallax.travelSourceScenery"}}</button>
+                    <button type="button" class="cartographer-parallax-segment{{#if travel.followsClock}} is-active{{/if}}" {{#if travel.followsClock}}disabled{{/if}}
+                        {{#unless travel.clockAvailable}}disabled data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelClockMissing"}}"{{/unless}}
+                        data-action="travel-source" data-value="clock">{{localize "coffee-pub-cartographer.parallax.travelSourceClock"}}</button>
+                </div>
+            </div>
+
+            {{#if travel.followsClock}}
+            <div class="cartographer-parallax-field cartographer-parallax-travel-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelSpeedHint"}}">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelSpeed"}}</span>
+                <span class="cartographer-parallax-travel-inline">
+                    <input type="number" data-field="travelSpeed" value="{{travel.speedAmount}}" min="0" step="any">
+                    <select data-field="travelSpeedUnit">
+                        {{#each travel.speedUnitOptions}}<option value="{{unit}}" {{#if selected}}selected{{/if}}>{{unit}}</option>{{/each}}
+                    </select>
+                    <span>{{localize "coffee-pub-cartographer.parallax.travelPerHour"}}</span>
+                </span>
+            </div>
+            <div class="cartographer-parallax-field cartographer-parallax-travel-field">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelClock"}}</span>
+                <span class="cartographer-parallax-travel-inline">
+                    <span>{{travel.clockText}}</span>
+                    {{#if travel.canRetune}}
+                    <button type="button" class="cartographer-parallax-button is-labelled" data-action="travel-retune"
+                        data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelRetuneHint"}}"><i class="fa-solid fa-gauge-simple"></i><span>{{localize "coffee-pub-cartographer.parallax.travelRetune"}}</span></button>
+                    {{/if}}
+                </span>
+            </div>
+            <p class="cartographer-parallax-hint">{{travel.tunedText}}</p>
+            {{else}}
             <label class="cartographer-parallax-field cartographer-parallax-travel-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelReferenceHint"}}">
                 <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelReference"}}</span>
                 <select data-field="travelReference">
@@ -461,6 +499,7 @@
                 <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelScale"}}</span>
                 <span class="cartographer-parallax-travel-inline">&times; <input type="number" data-field="travelScale" value="{{travel.scale}}" min="0.01" step="any"></span>
             </label>
+            {{/if}}
             <div class="cartographer-parallax-field cartographer-parallax-travel-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelDestinationHint"}}">
                 <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelDestination"}}</span>
                 <span class="cartographer-parallax-travel-inline">

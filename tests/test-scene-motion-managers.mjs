@@ -177,6 +177,35 @@ console.log('\nthe odometer');
     check(pm.state.travel.arrived && !pm.state.playing, 'arriving marks it and stops, by default');
 }
 
+console.log('\nthe odometer, following the world clock');
+{
+    flags.parallax = { layers: [layer('road', { speed: 70 })], sets: [], easeSeconds: 0, masterSpeed: 1 };
+    pm.state = pm._readState();
+    await pm.syncClockRate(60);
+    await pm.setTravelSource('clock');
+    check(pm.state.travel.clockBaseRate === 60 && pm.state.clockFactor === 1, 'switching to the clock tunes the scenery to its rate now');
+    await pm.setTravel({ speedPerHour: 3 * 5280, distance: 0 });
+    await pm.resetOdometer();
+    await pm.play();
+    now += 60 * 1000;
+    // A real minute at x60 is an in-world hour: 3 miles.
+    check(Math.abs(pm.travelDistance(now) - 3 * 5280) < 1e-6, 'a real minute at x60 covers an hour of travel at 3 mph');
+    await pm.syncClockRate(1);
+    check(Math.abs(pm.state.clockFactor - 1 / 60) < 1e-12, 'slower time slows the scenery by the same ratio');
+    now += 60 * 1000;
+    check(Math.abs(pm.travelDistance(now) - (3 * 5280 + 3 * 5280 / 60)) < 1e-6, 'and the odometer accrues at the new rate from then');
+    await pm.syncClockRate(0);
+    const held = pm.travelDistance(now);
+    now += 60 * 1000;
+    check(pm.travelDistance(now) === held && pm.state.clockFactor === 0, 'a stopped clock stops the odometer and the scenery');
+    await pm.syncClockRate(6);
+    await pm.retuneToClock();
+    check(pm.state.travel.clockBaseRate === 6 && pm.state.clockFactor === 1, 'retuning makes the speeds as set the speeds for this rate');
+    await pm.setTravelSource('scenery');
+    check(pm.state.clockFactor === 1 && pm.state.travel.clockMotion.playing === false, 'back to scenery, the clock no longer drives anything');
+    await pm.stop();
+}
+
 console.log('\ntile groups and motion');
 await tm.setTileMotion('a', 'visible', true);
 await tm.setTileMotion('b', 'visible', true);

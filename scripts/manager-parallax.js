@@ -7,7 +7,7 @@ import { tileMotionManager } from './manager-tilemotion.js';
 import { releaseRepeatingTextures, repeatingTexture } from './utils-textures.js';
 import { NONE_GROUP, normalizeActive, shownByGroups, toggledActive } from './utils-groups.js';
 import { pixelsToDistance } from './utils-travel.js';
-import { angleVector, DEFAULT_EASE_SECONDS, easeProgress, motionSpeed, motionTickerPriority, motionTravel, wrap } from './utils-motion.js';
+import { angleVector, DEFAULT_EASE_SECONDS, easeProgress, motionSpeed, motionTickerPriority, motionTravel, rebaseMotion, wrap } from './utils-motion.js';
 
 const FLAG_KEY = 'parallax';
 const WINDOW_ID = `${MODULE.ID}-parallax`;
@@ -96,6 +96,21 @@ function defaultState() {
  *   destination     how far there is to go in total, or null for none
  *   stopOnArrival   ease to a stop on reaching it
  *   arrived         reached this destination already, so arriving is not repeated
+ *
+ * Distance comes from one of two sources (`source`):
+ *
+ *   'scenery'  how far the reference layer has scrolled, on the grid, times `scale`
+ *   'clock'    an in-world travel speed (`speedPerHour`, scene units per in-world
+ *              hour) times the in-world time that passes while playing, read from
+ *              Blacksmith's world clock. The scenery then follows the clock too: its
+ *              speed is multiplied by the clock's rate over `clockBaseRate`, the rate
+ *              the GM's speeds were set for, so fast time scrolls faster and a stopped
+ *              clock (paused, combat) eases the scenery to a halt.
+ *
+ *   clockRate    Blacksmith's rate (in-world seconds per real second) as last recorded
+ *                by the GM, so every client works from the same number
+ *   clockMotion  a motion whose speed is the rate, signed by the direction of travel,
+ *                with no ease: its travel is in-world seconds of travel since the anchor
  */
 function defaultTravel() {
     return {
@@ -105,7 +120,12 @@ function defaultTravel() {
         distance: 0,
         destination: null,
         stopOnArrival: true,
-        arrived: false
+        arrived: false,
+        source: 'scenery',
+        speedPerHour: 0,
+        clockRate: 0,
+        clockBaseRate: 1,
+        clockMotion: { playing: false, masterSpeed: 0, easeSeconds: 0, anchorAt: 0, rampFrom: null }
     };
 }
 
@@ -282,6 +302,7 @@ class ParallaxManager {
         state.activeSets = normalizeActive(stored?.activeSets, stored?.activeSet, state.sets);
         delete state.activeSet;
         state.travel = { ...defaultTravel(), ...(stored?.travel ?? {}) };
+        state.travel.clockMotion = { ...defaultTravel().clockMotion, ...(stored?.travel?.clockMotion ?? {}) };
         return state;
     }
 
@@ -324,6 +345,7 @@ class ParallaxManager {
             layer.offsetY = y;
         }
         state.travel.distance = this.travelDistance(now);
+        state.travel.clockMotion = rebaseMotion(state.travel.clockMotion, now);
         // Whatever changes next eases from the speed in effect right now, so a
         // change made halfway through an ease carries on from where it was.
         state.rampFrom = motionSpeed(this.state, now);
@@ -341,9 +363,25 @@ class ParallaxManager {
         const state = this._rebase();
         mutate(state);
         state.layers = normalizeOrder(state.layers);
+        this._syncClock(state);
         this.state = state;
         this._applyState();
         await canvas.scene.setFlag(MODULE.ID, FLAG_KEY, state);
+    }
+
+    /**
+     * Bring the clock-driven parts of a state in line with its settings, after
+     * any change: whether the in-world clock motion runs and at what rate, and
+     * how fast the scenery goes relative to the speeds as set. Done on every
+     * commit, after the rebase, so a change takes effect from that moment.
+     */
+    _syncClock(state) {
+        const travel = state.travel;
+        const following = travel.source === 'clock';
+        const rate = following ? Math.max(0, Number(travel.clockRate) || 0) : 0;
+        travel.clockMotion.playing = following && state.playing;
+        travel.clockMotion.masterSpeed = rate * Math.sign(Number(state.masterSpeed) || 0);
+        state.clockFactor = following ? rate / (Number(travel.clockBaseRate) || 1) : 1;
     }
 
     // ==================================================================
@@ -380,6 +418,10 @@ class ParallaxManager {
      */
     travelDistance(now = game.time.serverTime, state = this.state) {
         const travel = state.travel ?? defaultTravel();
+        if (travel.source === 'clock') {
+            const worldSeconds = motionTravel(travel.clockMotion, now);
+            return travel.distance + worldSeconds * ((Number(travel.speedPerHour) || 0) / 3600);
+        }
         const layer = this.referenceLayer(state);
         if (!layer) return travel.distance;
         const pixels = motionTravel(state, now) * (Number(layer.speed) || 0);
@@ -391,6 +433,36 @@ class ParallaxManager {
         return this._commit(s => {
             Object.assign(s.travel, changes);
             if ('destination' in changes || 'scale' in changes) s.travel.arrived = false;
+        });
+    }
+
+    /**
+     * Record Blacksmith's clock rate in the scene, so every client works from
+     * the same number. GM only, like every write; called when the rate changes
+     * and when a scene loads.
+     */
+    syncClockRate(rate) {
+        const value = Math.max(0, Number(rate) || 0);
+        if (value === this.state.travel.clockRate) return;
+        return this._commit(s => { s.travel.clockRate = value; });
+    }
+
+    /**
+     * Follow the world clock, or the scenery, for distance. Switching to the
+     * clock takes the rate now as the one the scenery speeds were set for, so
+     * nothing changes speed at the moment of switching.
+     */
+    setTravelSource(source) {
+        return this._commit(s => {
+            s.travel.source = source === 'clock' ? 'clock' : 'scenery';
+            if (s.travel.source === 'clock') s.travel.clockBaseRate = s.travel.clockRate > 0 ? s.travel.clockRate : 1;
+        });
+    }
+
+    /** Take the clock's rate now as the one the scenery speeds are set for. */
+    retuneToClock() {
+        return this._commit(s => {
+            if (s.travel.clockRate > 0) s.travel.clockBaseRate = s.travel.clockRate;
         });
     }
 

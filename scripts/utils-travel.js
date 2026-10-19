@@ -64,6 +64,21 @@ export function displayDistance(value, sceneUnits) {
     return { amount: Math.round(value), unit: units };
 }
 
+/**
+ * An in-world span as its two largest units: "2 d 4 h", "5 h 20 m", "12 m".
+ * Plain 24-hour days; when Blacksmith's calendar-aware span formatter lands,
+ * this is the one place to hand over to it.
+ */
+export function formatSpan(seconds) {
+    const total = Math.max(0, Math.round(Number(seconds) || 0));
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    if (days) return hours ? `${days} d ${hours} h` : `${days} d`;
+    if (hours) return minutes ? `${hours} h ${minutes} m` : `${hours} h`;
+    return `${minutes} m`;
+}
+
 export function formatDistance(value, sceneUnits) {
     const { amount, unit } = displayDistance(value, sceneUnits);
     return `${amount.toLocaleString()} ${unit}`;

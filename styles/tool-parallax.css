@@ -645,11 +645,11 @@
 /* The on-screen odometer, shown to everyone. It sits over the canvas, outside
    any window, so it cannot take the tool window's theme; it is drawn as a dark
    plate that reads over any scene. */
+/* Placed and moved by the script (left/top), which keeps it on screen. Above
+   the canvas and the interface, below windows, so it never hides a sheet. */
 .cartographer-travel-hud {
     position: fixed;
-    top: 12px;
-    left: 50%;
-    z-index: 30;
+    z-index: 70;
     min-width: 180px;
     padding: 6px 12px;
     border: 1px solid rgba(255, 255, 255, 0.15);
@@ -658,8 +658,13 @@
     color: #f2eadb;
     font-family: "Signika", sans-serif;
     font-size: 14px;
-    pointer-events: none;
-    transform: translateX(-50%);
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+}
+
+.cartographer-travel-hud.is-dragging {
+    cursor: grabbing;
 }
 
 .cartographer-travel-hud-row {

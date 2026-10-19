@@ -8,6 +8,7 @@ import { defaultTileMotion, tileMotionManager } from './manager-tilemotion.js';
 import { collectionsManager } from './manager-collections.js';
 import { NONE_GROUP } from './utils-groups.js';
 import { displayDistance, toSceneUnits, unitChoices } from './utils-travel.js';
+import { travelManager } from './manager-travel.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -169,6 +170,8 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         'travel-hud': (_event, target, app) => void app.manager.setTravel({ showHud: target.dataset.value === 'true' }),
         'travel-stop': (_event, target, app) => void app.manager.setTravel({ stopOnArrival: target.dataset.value === 'true' }),
         'travel-reset': (_event, _target, app) => void app.manager.resetOdometer(),
+        'travel-source': (_event, target, app) => app.setTravelSource(target.dataset.value),
+        'travel-retune': (_event, _target, app) => void app.manager.retuneToClock(),
         'travel-clear-destination': (_event, _target, app) => void app.manager.setTravel({ destination: null }),
         'rename-layer': (_event, target, app) => app.promptRenameLayer(target.dataset.layerId),
         'copy-from-scene': (_event, _target, app) => app.promptCopyFromScene(),
@@ -480,7 +483,24 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const hasDestination = Number(travel.destination) > 0;
         const shown = hasDestination ? displayDistance(travel.destination, units) : { amount: '', unit: choices.at(-1) };
         const nearestFirst = [...state.layers].reverse();
+        // Following the clock: the travel speed per in-world hour, shown in
+        // the longer unit once it is one or more of it (3 mi/h, not 15,840 ft/h).
+        const speed = Number(travel.speedPerHour) > 0
+            ? displayDistance(travel.speedPerHour, units)
+            : { amount: '', unit: choices.at(-1) };
+        const clock = travelManager.constructor.clockApi();
+        const rate = Number(travel.clockRate) || 0;
+        const base = Number(travel.clockBaseRate) || 1;
         return {
+            followsClock: travel.source === 'clock',
+            clockAvailable: !!clock,
+            speedAmount: speed.amount,
+            speedUnitOptions: choices.map(unit => ({ unit, selected: unit === speed.unit })),
+            clockText: rate > 0
+                ? game.i18n.format(`${MODULE.ID}.parallax.travelClockRunning`, { rate: +rate.toFixed(2), mode: clock?.mode ?? '' })
+                : localize('travelClockStopped'),
+            canRetune: rate > 0 && rate !== base,
+            tunedText: game.i18n.format(`${MODULE.ID}.parallax.travelTuned`, { rate: +base.toFixed(2) }),
             showHud: !!travel.showHud,
             stopOnArrival: !!travel.stopOnArrival,
             scale: travel.scale,
@@ -1277,6 +1297,27 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         }
     }
 
+    /**
+     * Switch where distance comes from. Turning on the clock first records
+     * its rate, so the scenery is tuned to the clock as it is right now.
+     */
+    async setTravelSource(source) {
+        if (source === 'clock') {
+            const rate = travelManager.constructor.clockApi()?.rate;
+            if (rate === undefined) return;
+            await this.manager.syncClockRate(rate);
+        }
+        await this.manager.setTravelSource(source);
+    }
+
+    /** The travel speed is an amount and a unit per in-world hour, read together. */
+    _saveSpeed() {
+        const amount = this.element?.querySelector('[data-field="travelSpeed"]')?.value ?? '';
+        const unit = this.element?.querySelector('[data-field="travelSpeedUnit"]')?.value;
+        const value = amount === '' ? 0 : toSceneUnits(amount, unit, canvas.scene?.grid?.units);
+        void this.manager.setTravel({ speedPerHour: value > 0 ? value : 0 });
+    }
+
     /** The destination is an amount and a unit, read together whichever of the two changed. */
     _saveDestination() {
         const amount = this.element?.querySelector('[data-field="travelDestination"]')?.value ?? '';
@@ -1324,6 +1365,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         else if (input.field === 'travelReference') void this.manager.setTravel({ referenceLayer: input.value || null });
         else if (input.field === 'travelScale' && input.value > 0) void this.manager.setTravel({ scale: input.value });
         else if (input.field === 'travelDestination' || input.field === 'travelDestinationUnit') this._saveDestination();
+        else if (input.field === 'travelSpeed' || input.field === 'travelSpeedUnit') this._saveSpeed();
         else if (input.field === 'angle') void this.manager.setAngle(input.value);
         else if (input.field === 'easeSeconds') void this.manager.setEaseSeconds(input.value);
     }
