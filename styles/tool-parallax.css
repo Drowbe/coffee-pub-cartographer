@@ -4,11 +4,22 @@
 
 /* Every colour comes from the --blacksmith-tool-* family so the window follows
    Light, Dark and Glass without theme rules of its own. */
-.cartographer-parallax-window .cartographer-parallax-root {
+/* The tabs stay put and only the tab's content scrolls. Blacksmith's tool body
+   is the window's scroller, so it is made a column that does not scroll, and
+   the panel under the tabs scrolls instead -- which also starts the scrollbar
+   below the tabs rather than beside them. The panel's scroll is kept across
+   renders by the window script (_saveScrollPositions). */
+.cartographer-parallax-window .blacksmith-window-tool-body {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 8px;
+    overflow: hidden;
+}
+
+.cartographer-parallax-window .cartographer-parallax-root {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
     color: var(--blacksmith-tool-text);
 }
 
@@ -53,8 +64,8 @@
 /* --- Tabs -------------------------- */
 .cartographer-parallax-window .cartographer-parallax-tabs {
     display: flex;
+    flex: 0 0 auto;
     gap: 2px;
-    margin: -8px -8px 0;
     padding: 0 8px;
     border-bottom: 1px solid var(--blacksmith-tool-divider);
 }
@@ -100,8 +111,12 @@
 
 .cartographer-parallax-window .cartographer-parallax-panel {
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     gap: 8px;
+    min-height: 0;
+    padding: 8px;
+    overflow-y: auto;
 }
 
 .cartographer-parallax-window .cartographer-parallax-group {

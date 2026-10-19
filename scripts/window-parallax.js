@@ -1155,6 +1155,31 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         for (const el of this.element?.querySelectorAll('.is-dragging') ?? []) el.classList.remove('is-dragging');
     }
 
+    /**
+     * The settings panel scrolls under fixed tabs, so it is the scroller
+     * whose place has to survive a re-render -- and the window re-renders on
+     * every slider release. Blacksmith's base keeps only its own body's
+     * scroll and documents this override for a window with another scroller;
+     * it restores after layout, which is why nothing is set in _onRender.
+     * A different tab, or mode, starts at its own top.
+     */
+    _saveScrollPositions() {
+        const saved = super._saveScrollPositions?.() ?? {};
+        const panel = this.element?.querySelector('.cartographer-parallax-panel');
+        return { ...saved, panel: panel?.scrollTop ?? 0, panelKey: this._panelKey() };
+    }
+
+    _restoreScrollPositions(saved) {
+        super._restoreScrollPositions?.(saved);
+        if (saved?.panelKey !== this._panelKey()) return;
+        const panel = this.element?.querySelector('.cartographer-parallax-panel');
+        if (panel && saved.panel != null) panel.scrollTop = saved.panel;
+    }
+
+    _panelKey() {
+        return `${this.target}:${this.target === 'tiles' ? this.tileTab : this.tab}`;
+    }
+
     _readInput(target) {
         const field = target.dataset.field;
         if (!field) return null;
