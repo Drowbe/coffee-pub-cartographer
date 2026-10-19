@@ -12,6 +12,7 @@ import { parallaxManager } from './manager-parallax.js';
 import { tileMotionManager } from './manager-tilemotion.js';
 import { collectionsManager } from './manager-collections.js';
 import { motionBar } from './manager-motionbar.js';
+import { travelManager } from './manager-travel.js';
 
 // ================================================================== 
 // ===== BLACKSMITH API INTEGRATION =================================
@@ -164,6 +165,7 @@ Hooks.once('canvasReady', async () => {
         try {
             tileMotionManager.initialize();
             collectionsManager.initialize();
+            travelManager.initialize();
             // After the three it reports on.
             motionBar.initialize();
         } catch (error) {

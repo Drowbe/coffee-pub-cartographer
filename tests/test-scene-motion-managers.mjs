@@ -21,7 +21,7 @@ const check = (cond, m) => (cond ? ok(m) : fail(m));
 const strip = file => fs.readFileSync(`scripts/${file}`, 'utf8')
     .replace(/^import[\s\S]*?from '[^']+';\r?$/gm, '')
     .replace(/^export (const|function|class) /gm, '$1 ');
-const shared = `${strip('utils-motion.js')}\n${strip('utils-groups.js')}\n`;
+const shared = `${strip('utils-motion.js')}\n${strip('utils-groups.js')}\n${strip('utils-travel.js')}\n`;
 const load = async (source) => import('data:text/javascript,' + encodeURIComponent(source));
 
 // --- Foundry, stubbed ------------------------------------------------------
@@ -58,6 +58,8 @@ tiles[Symbol.iterator] = function* () { yield* tiles.values(); };
 const scene = {
     id: 'here',
     tiles,
+    // A 140-pixel square that is 5 feet, as the odometer reads it.
+    grid: { size: 140, distance: 5, units: 'ft' },
     getFlag: (_m, k) => flags[k],
     setFlag: async (_m, k, v) => { flags[k] = structuredClone(v); }
 };
@@ -147,6 +149,33 @@ check(pm.state.layers.length === exported.layers.length && pm.state.angle === 90
 let threw = false;
 try { pm.importData({ layers: [] }); } catch { threw = true; }
 check(threw, 'a file that is not an export is refused');
+
+console.log('\nthe odometer');
+{
+    flags.parallax = { layers: [layer('sky', { speed: 10 }), layer('road', { speed: 70 })], sets: [], easeSeconds: 0 };
+    pm.state = pm._readState();
+    check(pm.referenceLayer()?.name === 'road', 'it measures by the nearest ground layer unless told otherwise');
+    await pm.play();
+    now += 2000;
+    check(Math.abs(pm.travelDistance(now) - 5) < 1e-9, '2 s at 70 px/s on a 140 px, 5 ft grid is 5 ft');
+    await pm.setMasterSpeed(2);
+    now += 1000;
+    check(Math.abs(pm.travelDistance(now) - 10) < 1e-9, 'a speed change carries the distance on without a jump');
+    await pm.setTravel({ scale: 60 });
+    now += 1000;
+    check(Math.abs(pm.travelDistance(now) - (10 + 5 * 60)) < 1e-9, 'the scale multiplies distance from the moment it is set');
+    await pm.setMasterSpeed(-1);
+    now += 1000;
+    check(Math.abs(pm.travelDistance(now) - (310 - 2.5 * 60)) < 1e-9, 'running in reverse backs the odometer up');
+    await pm.setTravel({ referenceLayer: pm.state.layers[0].id });
+    check(pm.referenceLayer()?.name === 'sky', 'a chosen layer is measured instead');
+    await pm.resetOdometer();
+    check(pm.travelDistance(now) === 0, 'reset starts from zero');
+    await pm.setTravel({ destination: 100, arrived: true });
+    check(pm.state.travel.arrived === false, 'a new destination has not been reached yet');
+    await pm.arrive();
+    check(pm.state.travel.arrived && !pm.state.playing, 'arriving marks it and stops, by default');
+}
 
 console.log('\ntile groups and motion');
 await tm.setTileMotion('a', 'visible', true);

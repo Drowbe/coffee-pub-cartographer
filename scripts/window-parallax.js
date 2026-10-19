@@ -7,6 +7,7 @@ import { PARALLAX_DIRECTIONS } from './manager-parallax.js';
 import { defaultTileMotion, tileMotionManager } from './manager-tilemotion.js';
 import { collectionsManager } from './manager-collections.js';
 import { NONE_GROUP } from './utils-groups.js';
+import { displayDistance, toSceneUnits, unitChoices } from './utils-travel.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -164,6 +165,11 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         },
         'remove-layer': (_event, target, app) => app.confirmRemoveLayer(target.dataset.layerId),
         'duplicate-layer': (_event, target, app) => void app.manager.duplicateLayer(target.dataset.layerId),
+        // Travel, on the Movement tab.
+        'travel-hud': (_event, target, app) => void app.manager.setTravel({ showHud: target.dataset.value === 'true' }),
+        'travel-stop': (_event, target, app) => void app.manager.setTravel({ stopOnArrival: target.dataset.value === 'true' }),
+        'travel-reset': (_event, _target, app) => void app.manager.resetOdometer(),
+        'travel-clear-destination': (_event, _target, app) => void app.manager.setTravel({ destination: null }),
         'rename-layer': (_event, target, app) => app.promptRenameLayer(target.dataset.layerId),
         'copy-from-scene': (_event, _target, app) => app.promptCopyFromScene(),
         'export-parallax': (_event, _target, app) => app.exportParallax(),
@@ -458,6 +464,37 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.parallax.${bodyKey}`, data))}</p>`,
             rejectClose: false
         });
+    }
+
+    /**
+     * The Movement tab's travel settings. Distances are kept in the scene's
+     * grid units and shown in the longer unit once they reach one, so a
+     * destination of 211,200 ft reads -- and is edited -- as 40 mi.
+     */
+    _travelContext(state) {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const grid = canvas.scene?.grid;
+        const units = grid?.units ?? '';
+        const travel = state.travel;
+        const choices = unitChoices(units);
+        const hasDestination = Number(travel.destination) > 0;
+        const shown = hasDestination ? displayDistance(travel.destination, units) : { amount: '', unit: choices.at(-1) };
+        const nearestFirst = [...state.layers].reverse();
+        return {
+            showHud: !!travel.showHud,
+            stopOnArrival: !!travel.stopOnArrival,
+            scale: travel.scale,
+            hasDestination,
+            destinationAmount: shown.amount,
+            unitOptions: choices.map(unit => ({ unit, selected: unit === shown.unit })),
+            references: [
+                { id: '', name: localize('travelNearestGround'), selected: !travel.referenceLayer },
+                ...nearestFirst.map(layer => ({ id: layer.id, name: layer.name, selected: layer.id === travel.referenceLayer }))
+            ],
+            gridText: grid?.size
+                ? game.i18n.format(`${MODULE.ID}.parallax.travelGrid`, { size: grid.size, distance: grid.distance, units })
+                : ''
+        };
     }
 
     async promptRenameLayer(id) {
@@ -857,6 +894,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                 allActive: groups.active === null,
                 noneActive: Array.isArray(groups.active) && !groups.active.length,
                 collections: this._collectionsContext(state),
+                travel: this._travelContext(state),
                 noneId: NONE_GROUP,
                 noneLabel: localize(isTiles ? 'noTiles' : 'noLayers'),
                 noneHint: localize(isTiles ? 'noTilesHint' : 'noLayersHint'),
@@ -1218,6 +1256,8 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     _onInput(event) {
         const input = this._readInput(event.target);
         if (!input || event.target.type === 'checkbox' || event.target.tagName === 'SELECT') return;
+        // Travel settings are saved on change; nothing about them previews.
+        if (input.field.startsWith('travel')) return;
         const readout = event.target.closest('.cartographer-parallax-field')
             ?.querySelector('.cartographer-parallax-value');
         if (readout) readout.textContent = this._formatReadout(input);
@@ -1235,6 +1275,14 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         } else {
             this.manager.preview(state => this._assign(state, input));
         }
+    }
+
+    /** The destination is an amount and a unit, read together whichever of the two changed. */
+    _saveDestination() {
+        const amount = this.element?.querySelector('[data-field="travelDestination"]')?.value ?? '';
+        const unit = this.element?.querySelector('[data-field="travelDestinationUnit"]')?.value;
+        const value = amount === '' ? null : toSceneUnits(amount, unit, canvas.scene?.grid?.units);
+        void this.manager.setTravel({ destination: value > 0 ? value : null });
     }
 
     _formatReadout({ field, value, path }) {
@@ -1273,6 +1321,9 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         else if (input.field === 'masterSpeed') void this.manager.setMasterSpeed(input.value);
         else if (input.field === 'activeSet') void this._groups().setActive(input.value);
         else if (input.field === 'collection') void collectionsManager.apply(input.value);
+        else if (input.field === 'travelReference') void this.manager.setTravel({ referenceLayer: input.value || null });
+        else if (input.field === 'travelScale' && input.value > 0) void this.manager.setTravel({ scale: input.value });
+        else if (input.field === 'travelDestination' || input.field === 'travelDestinationUnit') this._saveDestination();
         else if (input.field === 'angle') void this.manager.setAngle(input.value);
         else if (input.field === 'easeSeconds') void this.manager.setEaseSeconds(input.value);
     }

@@ -6,7 +6,7 @@ import fs from 'node:fs';
 const hbs = fs.readFileSync('templates/window-parallax.hbs', 'utf8');
 const windowJs = fs.readFileSync('scripts/window-parallax.js', 'utf8');
 const sources = hbs + windowJs
-    + ['manager-parallax.js', 'manager-tilemotion.js', 'manager-collections.js', 'manager-motionbar.js']
+    + ['manager-parallax.js', 'manager-tilemotion.js', 'manager-collections.js', 'manager-motionbar.js', 'manager-travel.js']
         .map(file => fs.readFileSync(`scripts/${file}`, 'utf8')).join('');
 const css = fs.readFileSync('styles/tool-parallax.css', 'utf8');
 const lang = JSON.parse(fs.readFileSync('lang/en.json', 'utf8'))['coffee-pub-cartographer'];

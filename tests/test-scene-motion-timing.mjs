@@ -12,6 +12,9 @@ import {
 import {
     NONE_GROUP, normalizeActive, shownByGroups, toggledActive, sameActive
 } from '../scripts/utils-groups.js';
+import {
+    pixelsToDistance, formatDistance, toSceneUnits, unitChoices
+} from '../scripts/utils-travel.js';
 
 let bad = 0;
 const fail = (m) => { bad++; console.log('  FAIL  ' + m); };
@@ -114,6 +117,29 @@ console.log('\nreading what is on from a save');
     }
     if (!sameActive(['a', 'b'], ['b', 'a']) || sameActive(null, []) || !sameActive(null, null)) fail('sameActive is order-sensitive or confuses All with None');
     else ok('sameActive ignores order and tells All from None');
+}
+
+console.log('\ntravel distances');
+{
+    const grid = { size: 140, distance: 5, units: 'ft' };
+    if (pixelsToDistance(140, grid) !== 5 || pixelsToDistance(140, grid, 60) !== 300) fail('pixels do not convert on the grid, or ignore the scale');
+    else ok('one grid square of pixels is one square of distance, times the scale');
+    if (pixelsToDistance(140, { size: 0 }) !== 0) fail('a scene with no grid does not read as zero');
+    else ok('no grid, no distance');
+    const cases = [
+        [formatDistance(4000, 'ft'), '4,000 ft', 'under a mile stays in feet'],
+        [formatDistance(5280 * 2.5, 'ft'), '2.5 mi', 'a mile or more reads in miles'],
+        [formatDistance(1500, 'm'), '1.5 km', 'metres roll over into kilometres'],
+        [formatDistance(12, 'hexes'), '12 hexes', 'an unknown unit is shown as it is']
+    ];
+    for (const [got, want, what] of cases) {
+        if (got !== want) fail(`${what}: got "${got}"`);
+        else ok(what);
+    }
+    if (toSceneUnits(40, 'mi', 'ft') !== 211200 || toSceneUnits(300, 'ft', 'ft') !== 300) fail('a destination is not converted to scene units');
+    else ok('a destination in miles is stored in the scene\'s feet');
+    if (JSON.stringify(unitChoices('m')) !== '["m","km"]' || JSON.stringify(unitChoices('hexes')) !== '["hexes"]') fail('unit choices are wrong');
+    else ok('units offered are the scene\'s and its longer one');
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');

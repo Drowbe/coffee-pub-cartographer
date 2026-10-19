@@ -426,6 +426,72 @@
             <button type="button" class="cartographer-parallax-button is-labelled" data-action="reset-positions"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.resetPositionsHint"}}"><i class="fa-solid fa-rotate-left"></i><span>{{localize "coffee-pub-cartographer.parallax.resetPositions"}}</span></button>
         </div>
+
+        {{! Travel: the odometer. The figures are filled in live by manager-travel.js. }}
+        <div class="cartographer-parallax-section-header">
+            <i class="fa-solid fa-route"></i><span>{{localize "coffee-pub-cartographer.parallax.travel"}}</span>
+        </div>
+        <div class="cartographer-parallax-group">
+            <div class="cartographer-parallax-travel-readout">
+                <span>{{localize "coffee-pub-cartographer.parallax.travelTraveled"}} <strong data-travel-readout="traveled"></strong></span>
+                {{#if travel.hasDestination}}
+                <span>{{localize "coffee-pub-cartographer.parallax.travelRemaining"}} <strong data-travel-readout="remaining"></strong></span>
+                {{/if}}
+            </div>
+            {{#if travel.hasDestination}}
+            <div class="cartographer-parallax-travel-bar"><div class="cartographer-parallax-travel-fill" data-travel-readout="progress"></div></div>
+            {{/if}}
+
+            <div class="cartographer-parallax-field cartographer-parallax-repeat" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelShowHint"}}">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelShow"}}</span>
+                <div class="cartographer-parallax-segmented" role="radiogroup">
+                    <button type="button" class="cartographer-parallax-segment{{#unless travel.showHud}} is-active{{/unless}}" {{#unless travel.showHud}}disabled{{/unless}}
+                        data-action="travel-hud" data-value="false">{{localize "coffee-pub-cartographer.parallax.off"}}</button>
+                    <button type="button" class="cartographer-parallax-segment{{#if travel.showHud}} is-active{{/if}}" {{#if travel.showHud}}disabled{{/if}}
+                        data-action="travel-hud" data-value="true">{{localize "coffee-pub-cartographer.parallax.on"}}</button>
+                </div>
+            </div>
+            <label class="cartographer-parallax-field cartographer-parallax-travel-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelReferenceHint"}}">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelReference"}}</span>
+                <select data-field="travelReference">
+                    {{#each travel.references}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>{{/each}}
+                </select>
+            </label>
+            <label class="cartographer-parallax-field cartographer-parallax-travel-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelScaleHint"}}">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelScale"}}</span>
+                <span class="cartographer-parallax-travel-inline">&times; <input type="number" data-field="travelScale" value="{{travel.scale}}" min="0.01" step="any"></span>
+            </label>
+            <div class="cartographer-parallax-field cartographer-parallax-travel-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelDestinationHint"}}">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelDestination"}}</span>
+                <span class="cartographer-parallax-travel-inline">
+                    <input type="number" data-field="travelDestination" value="{{travel.destinationAmount}}" min="0" step="any"
+                        placeholder="{{localize "coffee-pub-cartographer.parallax.travelNoDestination"}}">
+                    <select data-field="travelDestinationUnit">
+                        {{#each travel.unitOptions}}<option value="{{unit}}" {{#if selected}}selected{{/if}}>{{unit}}</option>{{/each}}
+                    </select>
+                    {{#if travel.hasDestination}}
+                    <button type="button" class="cartographer-parallax-button" data-action="travel-clear-destination"
+                        data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelClearDestination"}}"><i class="fa-solid fa-xmark"></i></button>
+                    {{/if}}
+                </span>
+            </div>
+            {{#if travel.hasDestination}}
+            <div class="cartographer-parallax-field cartographer-parallax-repeat">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelStopOnArrival"}}</span>
+                <div class="cartographer-parallax-segmented" role="radiogroup">
+                    <button type="button" class="cartographer-parallax-segment{{#unless travel.stopOnArrival}} is-active{{/unless}}" {{#unless travel.stopOnArrival}}disabled{{/unless}}
+                        data-action="travel-stop" data-value="false">{{localize "coffee-pub-cartographer.parallax.off"}}</button>
+                    <button type="button" class="cartographer-parallax-segment{{#if travel.stopOnArrival}} is-active{{/if}}" {{#if travel.stopOnArrival}}disabled{{/if}}
+                        data-action="travel-stop" data-value="true">{{localize "coffee-pub-cartographer.parallax.on"}}</button>
+                </div>
+            </div>
+            {{/if}}
+            <p class="cartographer-parallax-hint">{{travel.gridText}}</p>
+        </div>
+        <div class="cartographer-parallax-panel-actions">
+            <button type="button" class="cartographer-parallax-button is-labelled" data-action="travel-reset"
+                data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelResetHint"}}"><i class="fa-solid fa-gauge"></i><span>{{localize "coffee-pub-cartographer.parallax.travelReset"}}</span></button>
+        </div>
     </div>
     {{/if}}
 

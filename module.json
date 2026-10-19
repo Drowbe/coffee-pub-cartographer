@@ -55,7 +55,8 @@
     "scripts/manager-parallax.js",
     "scripts/manager-tilemotion.js",
     "scripts/manager-collections.js",
-    "scripts/manager-motionbar.js"
+    "scripts/manager-motionbar.js",
+    "scripts/manager-travel.js"
   ],
   "packs": [],
   

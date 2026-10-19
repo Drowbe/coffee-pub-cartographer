@@ -597,6 +597,105 @@
     color: var(--blacksmith-color-brand-accent);
 }
 
+/* --- Travel ----------------------- */
+.cartographer-parallax-window .cartographer-parallax-travel-readout {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    font-size: 0.95em;
+}
+
+.cartographer-parallax-window .cartographer-parallax-travel-readout strong {
+    font-variant-numeric: tabular-nums;
+}
+
+.cartographer-parallax-window .cartographer-parallax-travel-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--blacksmith-tool-surface-sunken);
+    overflow: hidden;
+}
+
+.cartographer-parallax-window .cartographer-parallax-travel-fill {
+    height: 100%;
+    width: 0;
+    background: var(--blacksmith-color-brand-accent);
+}
+
+.cartographer-parallax-window .cartographer-parallax-travel-field {
+    grid-template-columns: 90px 1fr;
+}
+
+.cartographer-parallax-window .cartographer-parallax-travel-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-travel-inline input[type="number"] {
+    width: 90px;
+    height: 22px;
+}
+
+.cartographer-parallax-window .cartographer-parallax-travel-inline select {
+    width: auto;
+    height: 22px;
+}
+
+/* The on-screen odometer, shown to everyone. It sits over the canvas, outside
+   any window, so it cannot take the tool window's theme; it is drawn as a dark
+   plate that reads over any scene. */
+.cartographer-travel-hud {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    z-index: 30;
+    min-width: 180px;
+    padding: 6px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    background: rgba(20, 16, 12, 0.78);
+    color: #f2eadb;
+    font-family: "Signika", sans-serif;
+    font-size: 14px;
+    pointer-events: none;
+    transform: translateX(-50%);
+}
+
+.cartographer-travel-hud-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.cartographer-travel-hud-row span:first-of-type {
+    font-weight: bold;
+    font-variant-numeric: tabular-nums;
+}
+
+.cartographer-travel-hud-remaining {
+    opacity: 0.75;
+}
+
+.cartographer-travel-hud-bar {
+    height: 4px;
+    margin-top: 5px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.15);
+    overflow: hidden;
+}
+
+.cartographer-travel-hud-fill {
+    height: 100%;
+    background: var(--blacksmith-color-brand-accent, #c15701);
+}
+
+.cartographer-travel-hud.is-arrived .cartographer-travel-hud-fill {
+    background: var(--blacksmith-status-success, #629602);
+}
+
 /* --- Collections ------------------- */
 /* Every group as a chip: All and None choose outright; the rest switch on and
    off, since groups add together. */

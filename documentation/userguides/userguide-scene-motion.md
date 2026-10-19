@@ -72,6 +72,24 @@ first.
 The Movement tab sets the scene's **angle** -- which way the scenery runs, with quick picks for left,
 right, up and down -- the **Ease** time, and **Reset Positions**.
 
+### Travel
+
+Also on the Movement tab, an odometer counts how far the scenery has carried the party, read from
+the scene's grid: with a 140-pixel, 5-foot grid, every 140 pixels a layer scrolls is 5 feet.
+
+- **Measured by** -- the layer whose movement is the party's. By default, the nearest layer below
+  the Tokens line.
+- **Scale** -- multiplies the distance, so a journey fits in a scene. At ×60, a second of scrolling
+  counts as a minute of travel at that speed.
+- **Destination** -- how far there is to go in all, in the scene's units or the longer one (feet or
+  miles, metres or kilometres). With a destination set, the tab shows the distance remaining, and
+  **Stop on arrival** eases the scenery to a halt when it is reached.
+- **On screen** -- shows the distance traveled, and how far is left, at the top of everyone's screen.
+- **Reset odometer** starts counting from zero again.
+
+Running in reverse backs the odometer up. It counts what the scenery covers while playing; it does
+not move Foundry's in-game clock.
+
 ### Groups
 
 A group is a named combination of layers, such as Base, Snow or Night. Groups **add together**: a

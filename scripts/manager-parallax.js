@@ -6,6 +6,7 @@ import { MODULE } from './const.js';
 import { tileMotionManager } from './manager-tilemotion.js';
 import { releaseRepeatingTextures, repeatingTexture } from './utils-textures.js';
 import { NONE_GROUP, normalizeActive, shownByGroups, toggledActive } from './utils-groups.js';
+import { pixelsToDistance } from './utils-travel.js';
 import { angleVector, DEFAULT_EASE_SECONDS, easeProgress, motionSpeed, motionTickerPriority, motionTravel, wrap } from './utils-motion.js';
 
 const FLAG_KEY = 'parallax';
@@ -78,7 +79,33 @@ function defaultState() {
         // `activeSets` is which are on: null for All, [] for None, else ids.
         // See utils-groups.js.
         sets: [],
-        activeSets: null
+        activeSets: null,
+        travel: defaultTravel()
+    };
+}
+
+/**
+ * The odometer: how far the scenery has carried the party, read from one
+ * layer's travel on the scene's grid. Distances are in scene units.
+ *
+ *   showHud         the on-screen display, which every client shows
+ *   referenceLayer  the layer whose movement is the party's; null for the nearest ground layer
+ *   scale           distance multiplier, so a journey fits in a scene: x60 makes one real
+ *                   second of scrolling count as a minute of travel at that speed
+ *   distance        how far, as of the state's anchorAt -- folded forward at every rebase
+ *   destination     how far there is to go in total, or null for none
+ *   stopOnArrival   ease to a stop on reaching it
+ *   arrived         reached this destination already, so arriving is not repeated
+ */
+function defaultTravel() {
+    return {
+        showHud: false,
+        referenceLayer: null,
+        scale: 1,
+        distance: 0,
+        destination: null,
+        stopOnArrival: true,
+        arrived: false
     };
 }
 
@@ -254,6 +281,7 @@ class ParallaxManager {
         // Older saves held one group, as `activeSet`.
         state.activeSets = normalizeActive(stored?.activeSets, stored?.activeSet, state.sets);
         delete state.activeSet;
+        state.travel = { ...defaultTravel(), ...(stored?.travel ?? {}) };
         return state;
     }
 
@@ -295,6 +323,7 @@ class ParallaxManager {
             layer.offsetX = x;
             layer.offsetY = y;
         }
+        state.travel.distance = this.travelDistance(now);
         // Whatever changes next eases from the speed in effect right now, so a
         // change made halfway through an ease carries on from where it was.
         state.rampFrom = motionSpeed(this.state, now);
@@ -331,6 +360,53 @@ class ParallaxManager {
         const value = Number(speed);
         if (!Number.isFinite(value)) return;
         return this._commit(s => { s.masterSpeed = value; });
+    }
+
+    // ==================================================================
+    // ===== TRAVEL =====================================================
+    // ==================================================================
+
+    /** The layer whose movement is the party's: the chosen one, else the nearest ground layer. */
+    referenceLayer(state = this.state) {
+        const chosen = state.layers.find(layer => layer.id === state.travel?.referenceLayer);
+        return chosen ?? [...state.layers].reverse().find(layer => !layer.overhead) ?? null;
+    }
+
+    /**
+     * How far the party has come at `now`, in scene units: the distance at
+     * the anchor plus the reference layer's travel since, on the grid, times
+     * the scale. Signed -- running in reverse backs it up -- and computed the
+     * same way on every client, like everything else that moves.
+     */
+    travelDistance(now = game.time.serverTime, state = this.state) {
+        const travel = state.travel ?? defaultTravel();
+        const layer = this.referenceLayer(state);
+        if (!layer) return travel.distance;
+        const pixels = motionTravel(state, now) * (Number(layer.speed) || 0);
+        return travel.distance + pixelsToDistance(pixels, canvas.scene?.grid, travel.scale);
+    }
+
+    /** Change travel settings. A new destination or scale means it has not been reached yet. */
+    setTravel(changes) {
+        return this._commit(s => {
+            Object.assign(s.travel, changes);
+            if ('destination' in changes || 'scale' in changes) s.travel.arrived = false;
+        });
+    }
+
+    resetOdometer() {
+        return this._commit(s => {
+            s.travel.distance = 0;
+            s.travel.arrived = false;
+        });
+    }
+
+    /** The destination was reached: mark it, and stop if asked to. GM only, through _commit. */
+    arrive() {
+        return this._commit(s => {
+            s.travel.arrived = true;
+            if (s.travel.stopOnArrival) s.playing = false;
+        });
     }
 
     /** How long changes of speed take, in seconds. 0 makes them instant. */
