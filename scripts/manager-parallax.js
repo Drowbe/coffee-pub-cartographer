@@ -107,7 +107,8 @@ function defaultState() {
  *   stopOnArrival   ease to a stop on reaching it
  *   arrived         reached this destination already, so arriving is not repeated
  *   followClock     take time from Blacksmith's world clock rather than real time
- *   route           { sceneId, routeId } of a route drawn on a map that this journey
+ *   route           { sceneId, routeId } or { sceneId, journeyId }: a route, or a journey of
+ *                   routes, drawn on a map that this travel
  *                   follows, or null: its length is the destination (kept in step by
  *                   manager-travel.js), and the distance is how far along it the party is
  *

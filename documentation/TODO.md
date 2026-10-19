@@ -158,11 +158,31 @@ through the GM, a hidden route from a player's side, and measuring on a hex map,
 read from Foundry's grid and has only been checked against a stand-in. The first two rounds were
 walked by the GM on a square map and worked.
 
-**A progress marker on the map.** A token-like marker that stands at
-`routesManager.pointAt(routeId, distance)` and moves as the odometer counts, for everyone. The
-geometry is done; it needs drawing on the map scene from the animated scene's odometer, which is
-not loaded there -- read the animated scene's `travel` flag and compute its distance with the same
-shared clock.
+**Next: a token travelling a route or journey.** A token on the map that moves along it as the
+odometer counts, using the same shared clock, speed and ease as the scenery -- so the map scene
+and the animated scene are two views of one journey ("on the map" and "zoomed in on the road").
+The geometry is done: `routesManager.pointAt(id, distance)` gives the point and heading.
+Decided: terrain slows the token and the scenery leg by leg, as the time estimates already do.
+Proposed, awaiting the GM's word: progress lives on the journey, on the map scene (a map outlasts
+any one animated scene, which is reused for many journeys); the animated scene keeps its look and
+a link to the journey it shows. Progress is kept as effort (difficult legs cost double), turned
+into distance by walking the legs, so every client agrees without anything streaming.
+
+**Exhaustion on the road.** As the party travels, they -- or their mounts and draft animals --
+tire. Track hours travelled per in-world day (the odometer and world clock already give both),
+and past a day's travel (8 hours in D&D) warn the GM: in D&D 5e, a forced march's Constitution
+saves and exhaustion levels, and a mount's gallop lasting about an hour. Decided for phase 1,
+which is roleplay support:
+
+- **Warn the GM only.** Cartographer never changes an actor. The GM applies exhaustion by hand,
+  as the system's condition, and removes it the same way.
+- **The party is the system's own** -- in D&D 5e, the primary party group (the `dnd5e`
+  `primaryParty` setting) -- so the warning can name who is affected. Mounts and beasts are
+  roleplay: mentioned in the warning (a gallop past its hour), not tracked as actors.
+- **Pace and terrain set how fast fatigue builds** -- that is the core of it. A fast pace or
+  difficult terrain brings the warning sooner.
+- **Nothing resets it automatically.** Rest is roleplay; the GM clears exhaustion as the condition
+  it is. What Cartographer counts (hours on the road today) starts again with each in-world day.
 
 **A double-click on a route over a token** edits the route rather than opening the token's sheet,
 for anyone who may change that route. Fine on a map, where tokens rarely sit on roads; worth

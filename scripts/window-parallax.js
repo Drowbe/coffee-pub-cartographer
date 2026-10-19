@@ -573,17 +573,24 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     _routeContext(travel, units) {
         const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
         const link = travel.route;
-        const routeGroups = routesManager.allRoutes().map(({ scene, routes }) => ({
+        // Each map's journeys first -- the whole way -- then its routes.
+        const option = (scene, ref, label) => {
+            const linked = routesManager.linked({ sceneId: scene.id, ...ref }, units);
+            const id = ref.journeyId ? `j:${ref.journeyId}` : ref.routeId;
+            return {
+                value: `${scene.id}|${id}`,
+                label: label(formatDistance(linked.distance, linked.units)),
+                disabled: linked.converted === null,
+                selected: link?.sceneId === scene.id && (ref.journeyId ? link?.journeyId === ref.journeyId : link?.routeId === ref.routeId)
+            };
+        };
+        const routeGroups = routesManager.allRoutes().map(({ scene, routes, journeys }) => ({
             label: scene.name,
-            routes: routes.map(route => {
-                const linked = routesManager.linked({ sceneId: scene.id, routeId: route.id }, units);
-                return {
-                    value: `${scene.id}|${route.id}`,
-                    label: `${route.name} (${formatDistance(linked.distance, linked.units)})`,
-                    disabled: linked.converted === null,
-                    selected: link?.sceneId === scene.id && link?.routeId === route.id
-                };
-            })
+            routes: [
+                ...journeys.map(journey => option(scene, { journeyId: journey.id },
+                    length => game.i18n.format(`${MODULE.ID}.parallax.travelJourneyOption`, { name: journey.name, length }))),
+                ...routes.map(route => option(scene, { routeId: route.id }, length => `${route.name} (${length})`))
+            ]
         }));
         const linked = link ? routesManager.linked(link, units) : null;
         return {
@@ -593,7 +600,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             routeText: !link ? ''
                 : !linked ? localize('travelRouteMissing')
                 : linked.converted === null ? localize('travelRouteUnits')
-                : game.i18n.format(`${MODULE.ID}.parallax.travelRouteLength`, { length: formatDistance(linked.converted, units), scene: linked.scene.name })
+                : game.i18n.format(`${MODULE.ID}.parallax.travelRouteLength`, { length: formatDistance(linked.converted, units), name: linked.name, scene: linked.scene.name })
         };
     }
 
@@ -1421,10 +1428,11 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             void this.manager.setTravel({ route: null });
             return;
         }
-        const [sceneId, routeId] = String(value).split('|');
-        const linked = routesManager.linked({ sceneId, routeId }, canvas.scene?.grid?.units);
+        const [sceneId, id] = String(value).split('|');
+        const ref = id.startsWith('j:') ? { sceneId, journeyId: id.slice(2) } : { sceneId, routeId: id };
+        const linked = routesManager.linked(ref, canvas.scene?.grid?.units);
         if (!linked || linked.converted === null) return;
-        void this.manager.setTravel({ route: { sceneId, routeId }, destination: linked.converted });
+        void this.manager.setTravel({ route: ref, destination: linked.converted });
     }
 
     /** A pace typed in mph or km/h sets the ground layer's speed. */

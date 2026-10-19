@@ -135,3 +135,128 @@ export function cleanPoints(points, minGap = 4) {
     }
     return out;
 }
+
+// ==================================================================
+// ===== TERRAIN ====================================================
+// ==================================================================
+
+/**
+ * The ground a leg crosses, and how it slows travel: difficult terrain halves
+ * the pace, as in the D&D rules. A route stores one terrain per leg
+ * (`terrain[i]` is the leg from waypoint i to i + 1).
+ */
+export const TERRAINS = [
+    { id: 'road', factor: 1 },
+    { id: 'open', factor: 1 },
+    { id: 'forest', factor: 0.5 },
+    { id: 'hills', factor: 0.5 },
+    { id: 'mountains', factor: 0.5 },
+    { id: 'swamp', factor: 0.5 },
+    { id: 'desert', factor: 0.5 },
+    { id: 'snow', factor: 0.5 },
+    { id: 'water', factor: 1 }
+];
+export const DEFAULT_TERRAIN = 'open';
+
+export function terrainFactor(id) {
+    return TERRAINS.find(terrain => terrain.id === id)?.factor ?? 1;
+}
+
+/** Each leg's terrain, filling any that are missing or unknown with the default. */
+export function legTerrains(points, terrain) {
+    const legs = Math.max(0, (points?.length ?? 0) - 1);
+    return Array.from({ length: legs }, (_, i) =>
+        TERRAINS.some(known => known.id === terrain?.[i]) ? terrain[i] : DEFAULT_TERRAIN);
+}
+
+/** Hours to travel legs (in scene units) at a pace (scene units an hour), each slowed by its terrain. */
+export function travelHours(legDistances, terrains, perHour) {
+    if (!(perHour > 0)) return null;
+    return legDistances.reduce((hours, distance, i) => hours + distance / (perHour * terrainFactor(terrains?.[i])), 0);
+}
+
+/** A waypoint added on leg `legIndex`: the leg splits in two, both keeping its terrain. */
+export function insertWaypoint(points, terrain, legIndex, point) {
+    const legs = legTerrains(points, terrain);
+    return {
+        points: [...points.slice(0, legIndex + 1), point, ...points.slice(legIndex + 1)],
+        terrain: [...legs.slice(0, legIndex + 1), legs[legIndex] ?? DEFAULT_TERRAIN, ...legs.slice(legIndex + 1)]
+    };
+}
+
+/**
+ * Waypoint `index` removed. An end takes its leg with it; a middle one joins
+ * its two legs into one, which keeps the terrain of the first.
+ */
+export function removeWaypoint(points, terrain, index) {
+    const legs = legTerrains(points, terrain);
+    const next = points.filter((_, i) => i !== index);
+    if (index === 0) return { points: next, terrain: legs.slice(1) };
+    if (index === points.length - 1) return { points: next, terrain: legs.slice(0, -1) };
+    return { points: next, terrain: legs.filter((_, i) => i !== index) };
+}
+
+// ==================================================================
+// ===== SNAPPING AND JOURNEYS ======================================
+// ==================================================================
+
+/** The nearest of some points within a radius of a point, or null. */
+export function snapTo(point, targets, radius) {
+    let best = null;
+    for (const target of targets ?? []) {
+        const distance = Math.hypot(target[0] - point[0], target[1] - point[1]);
+        if (distance <= radius && (!best || distance < best.distance)) best = { point: [...target], distance };
+    }
+    return best?.point ?? null;
+}
+
+/**
+ * Routes, in order, as one path: a journey. Each route runs whichever way
+ * joins it to the one before -- a road drawn from Phlan joins one drawn to
+ * Phlan -- and the first runs whichever way meets the second. Where two do
+ * not meet (further apart than `tolerance` pixels) the path crosses the gap
+ * in a straight leg, and the join is listed in `gaps` so it can be shown.
+ *
+ * Returns { parts: [{ route, reversed }], points, terrain, gaps: [{ after, distance }] }.
+ */
+export function chainRoutes(routes, tolerance = 1) {
+    const list = (routes ?? []).filter(route => (route?.points?.length ?? 0) >= 2);
+    const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const parts = [];
+    const points = [];
+    const terrain = [];
+    const gaps = [];
+    list.forEach((route, index) => {
+        let reversed;
+        if (index === 0) {
+            const next = list[1];
+            if (!next) reversed = false;
+            else {
+                const ends = [next.points[0], next.points.at(-1)];
+                const fromEnd = Math.min(...ends.map(end => d(route.points.at(-1), end)));
+                const fromStart = Math.min(...ends.map(end => d(route.points[0], end)));
+                reversed = fromStart < fromEnd;
+            }
+        } else {
+            const at = points.at(-1);
+            reversed = d(at, route.points.at(-1)) < d(at, route.points[0]);
+        }
+        const own = reversed ? [...route.points].reverse() : route.points;
+        const legs = legTerrains(route.points, route.terrain);
+        const ownTerrain = reversed ? [...legs].reverse() : legs;
+        if (index > 0) {
+            const gap = d(points.at(-1), own[0]);
+            if (gap > tolerance) {
+                gaps.push({ after: index - 1, distance: gap });
+                terrain.push(DEFAULT_TERRAIN);
+                points.push(own[0]);
+            }
+            points.push(...own.slice(1));
+        } else {
+            points.push(...own);
+        }
+        terrain.push(...ownTerrain);
+        parts.push({ route, reversed });
+    });
+    return { parts, points, terrain, gaps };
+}

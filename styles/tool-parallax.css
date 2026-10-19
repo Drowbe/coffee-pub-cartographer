@@ -1008,8 +1008,49 @@
 }
 
 .cartographer-parallax-window .cartographer-routes-legs li {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.cartographer-parallax-window .cartographer-routes-legs select,
+.cartographer-parallax-window .cartographer-routes-terrain-all select,
+.cartographer-parallax-window .cartographer-routes-add {
+    width: auto;
+    height: 22px;
+    font-size: inherit;
+}
+
+/* A journey's route that does not meet the next: the gap is crossed in a straight line. */
+.cartographer-parallax-window .cartographer-routes-legs li.has-gap {
+    border-bottom: 1px dashed var(--blacksmith-status-warning, #c9a227);
+}
+
+.cartographer-parallax-window .cartographer-routes-legs .cartographer-routes-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    vertical-align: middle;
+}
+
+.cartographer-parallax-window .cartographer-routes-order {
+    display: inline-flex;
+    gap: 2px;
+}
+
+.cartographer-parallax-window .cartographer-routes-order .cartographer-parallax-button {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 3px;
+}
+
+.cartographer-parallax-window .cartographer-routes-terrain-all {
     display: flex;
+    align-items: center;
     justify-content: space-between;
+    gap: 8px;
+    font-size: 0.85em;
 }
 
 /* --- Switch ---------- */

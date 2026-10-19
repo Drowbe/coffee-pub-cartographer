@@ -392,6 +392,26 @@ console.log('\nroutes: who may change what');
     await rm._queue;
     check(!rm.get(theirs.id), 'the GM carries out a player\'s change to their own route');
     game.user = was;
+
+    console.log('\njourneys');
+    flags.routes = { list: [], journeys: [] };
+    const r1 = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'One', points: [[0, 0], [140, 0]] } }, gm);
+    const r2 = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Two', points: [[280, 0], [140, 0]] } }, ana);
+    const j = await rm._apply({ action: 'journey-create', sceneId: 'here', journey: { name: 'Trip', routeIds: [r1.id, r2.id, 'nope'] } }, ana);
+    check(j.userId === 'ana' && j.routeIds.join() === `${r1.id},${r2.id}`, 'a journey keeps only routes that exist, and belongs to its maker');
+    const path = rm.path({ journeyId: j.id });
+    check(JSON.stringify(path.points) === '[[0,0],[140,0],[280,0]]' && path.gaps.length === 0, 'a journey runs its routes end to end, the second reversed');
+    check(Math.abs(rm.linked({ sceneId: 'here', journeyId: j.id }, 'ft').converted - 10) < 1e-9, 'an odometer can follow a journey: 280 px is 10 ft');
+    await rm._apply({ action: 'journey-update', sceneId: 'here', id: j.id, changes: { name: 'Mine' } }, bo);
+    check(rm.getJourney(j.id).name === 'Trip', 'only its maker or the GM can change a journey');
+    await rm._apply({ action: 'journey-update', sceneId: 'here', id: j.id, changes: { routeIds: [r2.id, r1.id] } }, ana);
+    check(rm.getJourney(j.id).routeIds[0] === r2.id, 'its maker can reorder it, using anyone\'s routes');
+    await rm._apply({ action: 'update', sceneId: 'here', id: r2.id, changes: { terrain: ['swamp', 'extra'] } }, ana);
+    check(rm.get(r2.id).terrain.join() === 'swamp', 'terrain is one per leg');
+    await rm._apply({ action: 'remove', sceneId: 'here', id: r1.id }, gm);
+    check(rm.getJourney(j.id).routeIds.join() === r2.id, 'a deleted route leaves the journeys it was in');
+    await rm._apply({ action: 'journey-remove', sceneId: 'here', id: j.id }, ana);
+    check(!rm.getJourney(j.id) && rm.get(r2.id), 'deleting a journey leaves its routes');
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');

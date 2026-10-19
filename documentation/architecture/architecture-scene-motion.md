@@ -30,7 +30,7 @@ canvas, and how the window is put together.
 | Scene flag | `parallax` | Layers, layer groups (stored as `sets`), which are on (`activeSets`), and the parallax motion. |
 | Scene flag | `tileMotion` | The tiles' motion, each managed tile's position at the anchor (`offsets`), tile groups, and which are on (`activeGroups`). |
 | Scene flag | `collections` | `{ list }` of `{ id, name, layerGroups, tileGroups }`. |
-| Scene flag | `routes` | `{ list }` of `{ id, name, color, points }`, points as `[[x, y], ...]` in scene pixels. On map scenes. |
+| Scene flag | `routes` | `{ list, journeys }`. A route is `{ id, name, color, points, terrain, userId, hidden }`, points as `[[x, y], ...]` in scene pixels and terrain one id per leg; a journey is `{ id, name, routeIds, userId }`. On map scenes. |
 | Tile flag | `motion` | That tile's `visible`, `rotate` and `scroll` settings. A tile with this flag is managed. |
 | `localStorage` | `parallax.windowPrefs`, `parallax.windowOpen` | The window's mode, tabs, folded rows, height, and whether the GM wants it open. Per browser, never shared. |
 
@@ -101,13 +101,15 @@ clock, the GM records the clock's rate (`api.worldClock.rate`, and again on
 times `motionTravel(travel.clockMotion)`, a second motion whose speed is the rate, and the scenery's
 speeds are multiplied by `clockFactor`, the rate capped at four. A rate of 0 stops both.
 
-**Routes.** A route lives on its map scene; the journey lives on the animated scene, as
-`travel.route = { sceneId, routeId }`. Its length, converted from the map's units to the scene's,
+**Routes.** A route or journey lives on its map scene; the travel lives on the animated scene, as
+`travel.route = { sceneId, routeId }` or `{ sceneId, journeyId }`. A journey is turned into one
+path by `chainRoutes` (utils-routes.js), which runs each route whichever way meets the last and
+crosses any gap in a straight line. Its length, converted from the map's units to the scene's,
 is written into `travel.destination` when it is chosen, and again by the GM (`_syncRoute` in
 manager-travel.js) when the scene loads or any route changes -- `updateScene` on the map fires
 `coffee-pub-cartographer.routesChanged`. Storing the length rather than reading it live keeps the
 odometer working when the map is not loaded and after the route is deleted. Where the party is on
-the route is `routesManager.pointAt(routeId, distance)`, the odometer's distance converted back to
+the route is `routesManager.pointAt(id, distance)`, the odometer's distance converted back to
 the map's units: what the planned marker will read. Routes draw in `canvas.interface`, above tokens;
 the drawing tool captures left clicks in the capture phase, as the sketch tool does, and leaves
 right-drag to pan.

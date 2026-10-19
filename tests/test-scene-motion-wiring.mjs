@@ -109,7 +109,12 @@ console.log('\nthe routes window: actions, strings and styles');
     const missing = [...used].filter(key => !(key in lang));
     if (missing.length) fail(`missing strings: ${missing.join(', ')}`);
     else ok(`${used.size} keys, all present`);
-    const unusedRoutes = Object.keys(lang).filter(key => key.startsWith('routes.') && !used.has(key));
+    // Keys built from a name are used if the name is quoted in the scripts
+    // ('tabRoutes', 'defaultJourney'), or are under a prefix built from data.
+    const dynamic = ['routes.terrain.'];
+    const unusedRoutes = Object.keys(lang).filter(key => key.startsWith('routes.') && !used.has(key))
+        .filter(key => !dynamic.some(prefix => key.startsWith(prefix)))
+        .filter(key => !(rjs + rman).includes(`'${key.slice('routes.'.length)}'`));
     if (unusedRoutes.length) fail(`unused routes strings: ${unusedRoutes.join(', ')}`);
     else ok('every routes string is referenced');
 
@@ -118,19 +123,32 @@ console.log('\nthe routes window: actions, strings and styles');
     if (unusedClasses.length) fail(`unused classes: ${unusedClasses.join(', ')}`);
     else ok(`${routeClasses.length} route classes, all referenced`);
 
-    // Every name the window imports from utils-travel is exported there, and
-    // every one it calls is imported: a missing import is a crash on render.
-    const travel = fs.readFileSync('scripts/utils-travel.js', 'utf8');
-    const exported = new Set([...travel.matchAll(/^export (?:const|function) ([A-Za-z_]+)/gm)].map(m => m[1]));
-    for (const [file, source] of [['window-routes.js', rjs], ['window-parallax.js', windowJs], ['manager-routes.js', rman]]) {
-        const block = source.match(/import \{([^}]*)\} from '\.\/utils-travel\.js'/);
-        const imported = new Set((block?.[1] ?? '').split(',').map(name => name.trim()).filter(Boolean));
-        const body = source.replace(/import [\s\S]*?from '[^']+';/g, '');
-        const notExported = [...imported].filter(name => !exported.has(name));
-        const notImported = [...exported].filter(name => !imported.has(name) && new RegExp(`[^.\\w]${name}\\(`).test(body));
-        if (notExported.length || notImported.length) fail(`${file}: imports missing from utils-travel ${notExported.join(', ')}; calls without import ${notImported.join(', ')}`);
-        else ok(`${file} imports what it uses from utils-travel`);
+    // Every name a file imports from the utils is exported there, and every
+    // one it uses is imported: a missing import is a crash on render. A
+    // function counts as used when called; a constant (CAPITALS) when named.
+    const routesJs = fs.readFileSync('scripts/manager-travel.js', 'utf8');
+    for (const util of ['utils-travel', 'utils-routes']) {
+        const source = fs.readFileSync(`scripts/${util}.js`, 'utf8');
+        const exported = new Set([...source.matchAll(/^export (?:const|function) ([A-Za-z_]+)/gm)].map(m => m[1]));
+        for (const [file, text] of [['window-routes.js', rjs], ['window-parallax.js', windowJs], ['manager-routes.js', rman], ['manager-travel.js', routesJs]]) {
+            const found = text.match(new RegExp(`import \\{([^}]*)\\} from '\\./${util}\\.js'`));
+            const imported = new Set((found?.[1] ?? '').split(',').map(name => name.trim()).filter(Boolean));
+            const body = text.replace(/import [\s\S]*?from '[^']+';/g, '');
+            const uses = name => /^[A-Z_]+$/.test(name)
+                ? new RegExp(`(^|[^.\\w])${name}\\b`).test(body)
+                : new RegExp(`(^|[^.\\w])${name}\\(`).test(body);
+            const notExported = [...imported].filter(name => !exported.has(name));
+            const notImported = [...exported].filter(name => !imported.has(name) && uses(name));
+            if (notExported.length || notImported.length) fail(`${file}: imports missing from ${util} ${notExported.join(', ')}; uses without import ${notImported.join(', ')}`);
+            else ok(`${file} imports what it uses from ${util}`);
+        }
     }
+
+    // Every terrain has a name.
+    const terrainIds = [...fs.readFileSync('scripts/utils-routes.js', 'utf8').matchAll(/\{ id: '([a-z]+)', factor:/g)].map(m => m[1]);
+    const unnamed = terrainIds.filter(id => !(`routes.terrain.${id}` in lang));
+    if (!terrainIds.length || unnamed.length) fail(`terrains without a name: ${unnamed.join(', ') || 'none found'}`);
+    else ok(`${terrainIds.length} terrains, all named`);
 }
 
 console.log('\nthe window declares only its own options');

@@ -7,11 +7,12 @@ import { cartographerToolbar } from './manager-toolbar.js';
 import { socketManager } from './manager-sockets.js';
 import {
     cleanPoints, legPixels, routePixels, gridDistance, distancePixels, pointAlong, convertDistance,
-    nearestWaypoint, nearestOnRoute
+    nearestWaypoint, nearestOnRoute, legTerrains, terrainFactor, insertWaypoint, removeWaypoint,
+    snapTo, chainRoutes, TERRAINS
 } from './utils-routes.js';
 import { formatDistance } from './utils-travel.js';
 
-/** Scene flag holding `{ list }` of routes. */
+/** Scene flag holding `{ list, journeys }`. */
 const FLAG_KEY = 'routes';
 /** Whether this viewer shows routes on the map at all, per browser. */
 const SHOW_KEY = `${MODULE.ID}.routes.show`;
@@ -26,6 +27,10 @@ const IDS = {
 export const ROUTE_COLORS = ['#b03a2e', '#1f618d', '#1e8449', '#7d3c98', '#ca6f1e', '#212f3c'];
 /** How near, in screen pixels, a pointer must be to a waypoint or the line to take hold of it. */
 const HIT_PIXELS = 12;
+/** How near, in screen pixels, a waypoint must come to another route's end to snap onto it. */
+const SNAP_PIXELS = 18;
+/** Two routes whose ends are this close, in scene pixels, meet: a snapped join is exact, this allows for rounding. */
+const JOIN_TOLERANCE = 2;
 
 function readShow() {
     try {
@@ -46,35 +51,45 @@ function writeShow(show) {
 /**
  * Routes: lines of waypoints drawn on a map scene to measure a journey.
  *
- * A route is `{ id, name, color, points, userId, hidden }`, with points as
- * [[x, y], ...] in scene pixels, saved in the scene's `routes` flag. Its
- * length is the true length of the line on the scene's grid, square or hex
- * (see utils-routes.js).
+ * A route is `{ id, name, color, points, terrain, userId, hidden }`, with
+ * points as [[x, y], ...] in scene pixels and terrain as one id per leg
+ * (see TERRAINS in utils-routes.js), saved in the scene's `routes` flag. Its
+ * length is the true length of the line on the scene's grid, square or hex;
+ * its time at a pace is slowed, leg by leg, by difficult terrain.
  *
- * Anyone can draw a route; its maker and the GM can change it. Only the GM
- * writes the scene, so a player's change is sent to the active GM, who checks
- * it is theirs to make and saves it -- the way mapping's changes travel.
- * A hidden route is drawn only for its maker and the GM, faintly; anyone can
- * also turn routes off on their own screen.
+ * A journey is `{ id, name, routeIds, userId }`: routes in order, each run in
+ * whichever direction joins it to the last (see chainRoutes). Routes join
+ * when one's end is snapped to another's -- drawing or dragging a waypoint
+ * near another route's end puts it exactly there -- but a join is not
+ * required: a gap is crossed in a straight line and shown.
+ *
+ * Anyone can draw a route or make a journey; the maker and the GM can change
+ * it. Only the GM writes the scene, so a player's change is sent to the
+ * active GM, who checks it is theirs to make and saves it -- the way
+ * mapping's changes travel. A hidden route is drawn only for its maker and
+ * the GM, faintly; anyone can also turn routes off on their own screen.
  *
  * Drawing is click by click: each click places a waypoint and the distance
  * so far follows the pointer; a double-click or Enter finishes, Backspace
  * takes back the last point, and Escape gives up. Right-drag still pans.
  *
  * Editing: double-click your own route's line to add a waypoint there, which
- * also starts editing it. While editing, drag a waypoint to move it, and
- * right-click (or Alt-click) one to remove it; Enter or Escape stops.
+ * also starts editing it. While editing, click a waypoint to select it and
+ * drag to move it; Delete removes the selected one, as does right-click or
+ * Alt-click on any; Enter or Escape stops.
  *
- * Scene motion's odometer can follow a route on another scene: the route's
- * length is its destination (see manager-travel.js, `_syncRoute`).
+ * Scene motion's odometer can follow a route or a journey on another scene:
+ * its length is the destination (see manager-travel.js, `_syncRoute`).
  */
 class RoutesManager {
     constructor() {
         this._hooks = [];
         /** The route being drawn: { points, cursor }, or null. */
         this.draft = null;
-        /** The route whose waypoints are being edited: { id, points, drag }, or null. */
+        /** The route whose waypoints are being edited: { id, points, terrain, drag, selected }, or null. */
         this.editing = null;
+        /** Where the pointer has snapped to another route's end, for the ring that shows it. */
+        this._snapped = null;
         this.window = null;
         this.show = readShow();
         this._container = null;
@@ -129,8 +144,16 @@ class RoutesManager {
                 const scene = sceneId ? game.scenes.get(sceneId) : canvas.scene;
                 return this.visibleRoutes(scene).map(route => ({ ...route, ...this.measure(route, scene) }));
             },
-            /** Where a distance (in that scene's units) along a route reaches, in scene pixels. */
-            pointAt: (routeId, distance, sceneId) => this.pointAt(routeId, distance, sceneId),
+            /** The journeys on a scene, with their lengths and any gaps. */
+            journeys: (sceneId) => {
+                const scene = sceneId ? game.scenes.get(sceneId) : canvas.scene;
+                return this.journeys(scene).map(journey => {
+                    const path = this.path({ journeyId: journey.id }, scene);
+                    return { ...journey, ...this.measure(path, scene), gaps: path.gaps.length };
+                });
+            },
+            /** Where a distance (in that scene's units) along a route or journey reaches, in scene pixels. */
+            pointAt: (id, distance, sceneId) => this.pointAt(id, distance, sceneId),
             draw: () => this.startDrawing(),
             open: () => this.openWindow()
         };
@@ -191,6 +214,11 @@ class RoutesManager {
         return foundry.utils.deepClone(scene?.getFlag(MODULE.ID, FLAG_KEY)?.list ?? []);
     }
 
+    /** A scene's journeys. */
+    journeys(scene = canvas.scene) {
+        return foundry.utils.deepClone(scene?.getFlag(MODULE.ID, FLAG_KEY)?.journeys ?? []);
+    }
+
     /** The routes this user sees: every route that is not hidden, and their own, and all of them for the GM. */
     visibleRoutes(scene = canvas.scene, user = game.user) {
         return this.routes(scene).filter(route => !route.hidden || this.canEdit(route, user));
@@ -200,18 +228,44 @@ class RoutesManager {
         return this.routes(scene).find(route => route.id === id) ?? null;
     }
 
-    /** A route's maker and the GM can change it. A route from before routes had makers is the GM's. */
-    canEdit(route, user = game.user) {
-        return !!user && (user.isGM || (!!route?.userId && route.userId === user.id));
+    getJourney(id, scene = canvas.scene) {
+        return this.journeys(scene).find(journey => journey.id === id) ?? null;
+    }
+
+    /** A route's or journey's maker and the GM can change it. One from before they had makers is the GM's. */
+    canEdit(item, user = game.user) {
+        return !!user && (user.isGM || (!!item?.userId && item.userId === user.id));
     }
 
     /**
-     * A route's length on its scene's grid: { pixels, distance, units, legs },
-     * with distances in the scene's units and legs as each leg's distance.
+     * A route or a journey as one line to travel: { name, points, terrain,
+     * gaps }. `ref` is { routeId } or { journeyId }. A journey's routes are
+     * chained end to end; its gaps are where two do not meet.
      */
-    measure(route, scene = canvas.scene) {
+    path(ref, scene = canvas.scene) {
+        if (ref?.routeId) {
+            const route = this.get(ref.routeId, scene);
+            if (!route) return null;
+            return { name: route.name, points: route.points, terrain: legTerrains(route.points, route.terrain), gaps: [] };
+        }
+        if (ref?.journeyId) {
+            const journey = this.getJourney(ref.journeyId, scene);
+            if (!journey) return null;
+            const routes = this.routes(scene);
+            const chain = chainRoutes(journey.routeIds.map(id => routes.find(r => r.id === id)).filter(Boolean), JOIN_TOLERANCE);
+            return { name: journey.name, points: chain.points, terrain: chain.terrain, gaps: chain.gaps };
+        }
+        return null;
+    }
+
+    /**
+     * A route's or path's length on its scene's grid: { pixels, distance,
+     * units, legs }, with distances in the scene's units and legs as each
+     * leg's distance.
+     */
+    measure(item, scene = canvas.scene) {
         const grid = scene?.grid;
-        const points = route?.points ?? [];
+        const points = item?.points ?? [];
         return {
             pixels: routePixels(points),
             distance: gridDistance(routePixels(points), grid),
@@ -220,39 +274,40 @@ class RoutesManager {
         };
     }
 
-    /** Every scene with routes, and its routes, for choosing one to follow. */
+    /** Every scene with routes, and its routes and journeys, for choosing one to follow. */
     allRoutes() {
         return game.scenes.contents
-            .map(scene => ({ scene, routes: this.routes(scene) }))
+            .map(scene => ({ scene, routes: this.routes(scene), journeys: this.journeys(scene) }))
             .filter(entry => entry.routes.length);
     }
 
     /**
-     * A route an odometer follows (`{ sceneId, routeId }`), with its length
-     * both in its own scene's units and converted to `units` -- the
-     * odometer's scene's. `converted` is null when the two cannot be
-     * compared (hexes and feet). Null when the route is gone.
+     * A route or journey an odometer follows (`{ sceneId, routeId }` or
+     * `{ sceneId, journeyId }`), with its length both in its own scene's
+     * units and converted to `units` -- the odometer's scene's. `converted`
+     * is null when the two cannot be compared (hexes and feet). Null when it
+     * is gone.
      */
     linked(link, units) {
         const scene = link?.sceneId ? game.scenes.get(link.sceneId) : null;
-        const route = scene ? this.get(link.routeId, scene) : null;
-        if (!route) return null;
-        const { distance, units: own } = this.measure(route, scene);
-        return { route, scene, distance, units: own, converted: convertDistance(distance, own, units) };
+        const path = scene ? this.path(link, scene) : null;
+        if (!path) return null;
+        const { distance, units: own } = this.measure(path, scene);
+        return { path, scene, name: path.name, distance, units: own, converted: convertDistance(distance, own, units) };
     }
 
-    /** Where a distance in the route's scene units along it reaches: { x, y, angle } in pixels. */
-    pointAt(routeId, distance, sceneId) {
+    /** Where a distance in the scene's units along a route or journey reaches: { x, y, angle } in pixels. */
+    pointAt(id, distance, sceneId) {
         const scene = sceneId ? game.scenes.get(sceneId) : canvas.scene;
-        const route = this.get(routeId, scene);
-        if (!route || !scene?.grid?.distance) return null;
-        return pointAlong(route.points, distancePixels(Number(distance) || 0, scene.grid));
+        const path = this.path({ routeId: id }, scene) ?? this.path({ journeyId: id }, scene);
+        if (!path || !scene?.grid?.distance) return null;
+        return pointAlong(path.points, distancePixels(Number(distance) || 0, scene.grid));
     }
 
-    _nextName(list) {
-        const base = game.i18n.localize(`${MODULE.ID}.routes.defaultName`);
+    _nextName(list, key = 'defaultName') {
+        const base = game.i18n.localize(`${MODULE.ID}.routes.${key}`);
         let n = list.length + 1;
-        while (list.some(route => route.name === `${base} ${n}`)) n++;
+        while (list.some(item => item.name === `${base} ${n}`)) n++;
         return `${base} ${n}`;
     }
 
@@ -264,13 +319,26 @@ class RoutesManager {
         return this._request({ action: 'create', route: { name, points, color } });
     }
 
-    /** Rename, recolour, hide or show, or reshape a route. */
+    /** Rename, recolour, hide or show, reshape, or set the terrain of a route. */
     async update(id, changes) {
         return this._request({ action: 'update', id, changes });
     }
 
     async remove(id) {
         return this._request({ action: 'remove', id });
+    }
+
+    async addJourney({ name, routeIds = [] }) {
+        return this._request({ action: 'journey-create', journey: { name, routeIds } });
+    }
+
+    /** Rename a journey, or change its routes and their order. */
+    async updateJourney(id, changes) {
+        return this._request({ action: 'journey-update', id, changes });
+    }
+
+    async removeJourney(id) {
+        return this._request({ action: 'journey-remove', id });
     }
 
     /**
@@ -298,7 +366,7 @@ class RoutesManager {
 
     /**
      * Make a change on a user's behalf, if it is theirs to make. Changes are
-     * made one at a time, each reading the list as the last left it, so two
+     * made one at a time, each reading the scene as the last left it, so two
      * players drawing at once do not overwrite each other.
      */
     _apply(data, user) {
@@ -306,40 +374,92 @@ class RoutesManager {
             const scene = game.scenes.get(data.sceneId);
             if (!scene) return null;
             const list = this.routes(scene);
+            let journeys = this.journeys(scene);
+            const save = () => scene.setFlag(MODULE.ID, FLAG_KEY, { list, journeys });
+            const name = (value, fallback) => String(value ?? '').trim().slice(0, 100) || fallback;
+
             if (data.action === 'create') {
                 const points = cleanPoints(data.route?.points);
                 if (points.length < 2) return null;
                 const route = {
                     id: foundry.utils.randomID(),
-                    name: String(data.route.name ?? '').trim().slice(0, 100) || this._nextName(list),
+                    name: name(data.route.name, this._nextName(list)),
                     color: ROUTE_COLORS.includes(data.route.color) ? data.route.color
                         : ROUTE_COLORS.find(c => !list.some(r => r.color === c)) ?? ROUTE_COLORS[list.length % ROUTE_COLORS.length],
                     points,
+                    terrain: legTerrains(points, data.route.terrain),
                     userId: user.id,
                     hidden: false
                 };
-                await scene.setFlag(MODULE.ID, FLAG_KEY, { list: [...list, route] });
+                list.push(route);
+                await save();
                 return route;
             }
+
+            if (data.action === 'journey-create') {
+                const journey = {
+                    id: foundry.utils.randomID(),
+                    name: name(data.journey?.name, this._nextName(journeys, 'defaultJourney')),
+                    routeIds: (data.journey?.routeIds ?? []).filter(id => list.some(r => r.id === id)),
+                    userId: user.id
+                };
+                journeys.push(journey);
+                await save();
+                return journey;
+            }
+
+            if (data.action.startsWith('journey-')) {
+                const journey = journeys.find(j => j.id === data.id);
+                if (!journey || !this.canEdit(journey, user)) return null;
+                if (data.action === 'journey-remove') {
+                    journeys = journeys.filter(j => j.id !== data.id);
+                    await save();
+                    return null;
+                }
+                const changes = data.changes ?? {};
+                if ('name' in changes) journey.name = name(changes.name, journey.name);
+                // Any route on the map may be part of anyone's journey; a journey only reads it.
+                if (Array.isArray(changes.routeIds)) journey.routeIds = changes.routeIds.filter(id => list.some(r => r.id === id));
+                await save();
+                return journey;
+            }
+
             const route = list.find(r => r.id === data.id);
             if (!route || !this.canEdit(route, user)) return null;
             if (data.action === 'remove') {
-                await scene.setFlag(MODULE.ID, FLAG_KEY, { list: list.filter(r => r.id !== data.id) });
+                const at = list.indexOf(route);
+                list.splice(at, 1);
+                for (const journey of journeys) journey.routeIds = journey.routeIds.filter(id => id !== data.id);
+                await save();
                 return null;
             }
             const changes = data.changes ?? {};
-            if ('name' in changes) route.name = String(changes.name ?? '').trim().slice(0, 100) || route.name;
+            if ('name' in changes) route.name = name(changes.name, route.name);
             if ('color' in changes && ROUTE_COLORS.includes(changes.color)) route.color = changes.color;
             if ('hidden' in changes) route.hidden = !!changes.hidden;
             if ('points' in changes) {
                 const points = cleanPoints(changes.points);
                 if (points.length >= 2) route.points = points;
             }
-            await scene.setFlag(MODULE.ID, FLAG_KEY, { list });
+            // Terrain is one per leg; it follows the points when both change together.
+            if ('terrain' in changes || 'points' in changes) {
+                route.terrain = legTerrains(route.points, 'terrain' in changes ? changes.terrain : route.terrain);
+            }
+            await save();
             return route;
         };
         this._queue = this._queue.catch(() => {}).then(run);
         return this._queue;
+    }
+
+    /** One leg's terrain, or every leg's when `leg` is null. */
+    async setTerrain(id, leg, terrain) {
+        const route = this.get(id);
+        if (!route || !TERRAINS.some(t => t.id === terrain)) return;
+        const legs = legTerrains(route.points, route.terrain);
+        const next = leg === null || leg === undefined ? legs.map(() => terrain) : legs.map((t, i) => (i === Number(leg) ? terrain : t));
+        if (this.editing?.id === id) this.editing.terrain = next;
+        await this.update(id, { terrain: next });
     }
 
     // ==================================================================
@@ -385,9 +505,28 @@ class RoutesManager {
         return Number.isFinite(point.x) && Number.isFinite(point.y) ? [point.x, point.y] : null;
     }
 
-    /** The hit distance in scene pixels at the current zoom. */
+    /** A screen distance in scene pixels at the current zoom. */
+    _toScene(screenPixels) {
+        return screenPixels / (canvas.stage?.scale?.x || 1);
+    }
+
     _hitRadius() {
-        return HIT_PIXELS / (canvas.stage?.scale?.x || 1);
+        return this._toScene(HIT_PIXELS);
+    }
+
+    /**
+     * A point, moved onto another route's end if it is near one, so routes
+     * can be joined into a journey exactly. Ends of the route being edited
+     * are not targets for its own waypoints.
+     */
+    _snap(point, exceptId = null) {
+        if (!point) return point;
+        const ends = this.visibleRoutes()
+            .filter(route => route.id !== exceptId && route.points?.length >= 2)
+            .flatMap(route => [route.points[0], route.points.at(-1)]);
+        const snapped = snapTo(point, ends, this._toScene(SNAP_PIXELS));
+        this._snapped = snapped;
+        return snapped ?? point;
     }
 
     _swallow(event) {
@@ -401,7 +540,7 @@ class RoutesManager {
             // Only the left button places points; the others still pan and open menus.
             if (event.button !== 0) return;
             this._swallow(event);
-            const point = this._scenePoint(event);
+            const point = this._snap(this._scenePoint(event));
             if (point) this.draft.points.push(point);
             this.draw();
             return;
@@ -415,7 +554,11 @@ class RoutesManager {
             this._removeWaypoint(hit.index);
             return;
         }
-        if (event.button === 0) this.editing.drag = hit.index;
+        if (event.button === 0) {
+            this.editing.selected = hit.index;
+            this.editing.drag = hit.index;
+            this.draw();
+        }
     }
 
     _onPointerUp(event) {
@@ -425,14 +568,18 @@ class RoutesManager {
         }
         if (this.editing?.drag !== null && this.editing?.drag !== undefined) {
             this._swallow(event);
+            const moved = this.editing.moved;
             this.editing.drag = null;
-            void this._saveEdit();
+            this.editing.moved = false;
+            this._snapped = null;
+            if (moved) void this._saveEdit();
+            this.draw();
         }
     }
 
     _onPointerMove(event) {
         if (this.draft) {
-            this.draft.cursor = this._scenePoint(event);
+            this.draft.cursor = this._snap(this._scenePoint(event));
             this._drawDraft();
             return;
         }
@@ -441,8 +588,9 @@ class RoutesManager {
         if (!point) return;
         if (this.editing.drag !== null && this.editing.drag !== undefined) {
             this._swallow(event);
-            this.editing.points[this.editing.drag] = point;
-            this._drawEditing();
+            this.editing.points[this.editing.drag] = this._snap(point, this.editing.id);
+            this.editing.moved = true;
+            this.draw();
             return;
         }
         // A grab cursor over a waypoint says it can be dragged.
@@ -482,29 +630,37 @@ class RoutesManager {
         }
         if (!best) return;
         this._swallow(event);
-        // Not on top of a waypoint that is already there.
-        const near = nearestWaypoint(best.route.points, best.hit.point);
+        if (!this.editing || this.editing.id !== best.route.id) this.startEditing(best.route.id);
+        // On top of a waypoint that is already there, just select it.
+        const near = nearestWaypoint(this.editing.points, best.hit.point);
         if (near.distance <= radius) {
-            if (!this.editing) this.startEditing(best.route.id);
+            this.editing.selected = near.index;
+            this.draw();
             return;
         }
-        if (!this.editing || this.editing.id !== best.route.id) this.startEditing(best.route.id);
-        this.editing.points.splice(best.hit.index + 1, 0, best.hit.point);
-        this._drawEditing();
+        const next = insertWaypoint(this.editing.points, this.editing.terrain, best.hit.index, best.hit.point);
+        this.editing.points = next.points;
+        this.editing.terrain = next.terrain;
+        this.editing.selected = best.hit.index + 1;
+        this.draw();
         void this._saveEdit();
     }
 
     /**
      * While drawing, Enter, Backspace and Escape belong to the route --
      * Backspace would otherwise delete whatever token is selected. While
-     * editing, Enter and Escape stop. Unless someone is typing.
+     * editing, Delete or Backspace removes the selected waypoint, and Enter
+     * and Escape stop. Unless someone is typing.
      */
     _onKeyDown(event) {
         if (!this.draft && !this.editing) return;
         if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+        const removeSelected = () => {
+            if (Number.isInteger(this.editing?.selected)) this._removeWaypoint(this.editing.selected);
+        };
         const keys = this.draft
             ? { Enter: () => this.finishDrawing(), Escape: () => this.cancelDrawing(), Backspace: () => this.removeLastPoint(), Delete: () => this.removeLastPoint() }
-            : { Enter: () => this.stopEditing(), Escape: () => this.stopEditing() };
+            : { Enter: () => this.stopEditing(), Escape: () => this.stopEditing(), Delete: removeSelected, Backspace: removeSelected };
         const handled = keys[event.key];
         if (!handled) return;
         this._swallow(event);
@@ -528,6 +684,7 @@ class RoutesManager {
 
     _endDrawing() {
         this.draft = null;
+        this._snapped = null;
         if (canvas?.app?.view) canvas.app.view.style.cursor = '';
         this._refreshButtons();
         this.draw();
@@ -574,7 +731,14 @@ class RoutesManager {
         if (!route || !this.canEdit(route)) return;
         this.cancelDrawing();
         this._listen();
-        this.editing = { id, points: route.points.map(point => [...point]), drag: null };
+        this.editing = {
+            id,
+            points: route.points.map(point => [...point]),
+            terrain: legTerrains(route.points, route.terrain),
+            drag: null,
+            moved: false,
+            selected: null
+        };
         if (!this._editHinted) {
             ui.notifications.info(game.i18n.localize(`${MODULE.ID}.routes.editHint`));
             this._editHinted = true;
@@ -586,6 +750,7 @@ class RoutesManager {
     stopEditing() {
         if (!this.editing) return;
         this.editing = null;
+        this._snapped = null;
         if (canvas?.app?.view) canvas.app.view.style.cursor = '';
         this._refreshButtons();
         this.draw();
@@ -596,16 +761,20 @@ class RoutesManager {
         else this.startEditing(id);
     }
 
+    /** Remove a waypoint of the route being edited. A route keeps at least two. */
     _removeWaypoint(index) {
         if (!this.editing || this.editing.points.length <= 2) return;
-        this.editing.points.splice(index, 1);
-        this._drawEditing();
+        const next = removeWaypoint(this.editing.points, this.editing.terrain, index);
+        this.editing.points = next.points;
+        this.editing.terrain = next.terrain;
+        this.editing.selected = null;
+        this.draw();
         void this._saveEdit();
     }
 
     async _saveEdit() {
         if (!this.editing) return;
-        await this.update(this.editing.id, { points: this.editing.points });
+        await this.update(this.editing.id, { points: this.editing.points, terrain: this.editing.terrain });
     }
 
     // ==================================================================
@@ -645,13 +814,14 @@ class RoutesManager {
         const sizes = this._sizes();
         for (const route of this.visibleRoutes()) {
             if (!this.show && this.editing?.id !== route.id) continue;
-            const points = this.editing?.id === route.id ? this.editing.points : route.points;
+            const editing = this.editing?.id === route.id;
+            const points = editing ? this.editing.points : route.points;
             if ((points?.length ?? 0) < 2) continue;
+            const terrain = editing ? this.editing.terrain : legTerrains(points, route.terrain);
             // Hidden routes are only drawn for those who may change them, and faintly.
             const alpha = route.hidden ? 0.35 : 1;
             const color = Number.parseInt(String(route.color ?? ROUTE_COLORS[0]).replace('#', ''), 16);
-            const editing = this.editing?.id === route.id;
-            this._routes.addChild(this._line(points, color, sizes, alpha, editing));
+            this._routes.addChild(this._line(points, color, sizes, { alpha, terrain, editing, selected: editing ? this.editing.selected : null, ring: editing }));
             const distance = gridDistance(routePixels(points), canvas.scene.grid);
             const middle = pointAlong(points, routePixels(points) / 2);
             const label = this._label(`${route.name} · ${formatDistance(distance, canvas.scene.grid.units)}`, middle, sizes);
@@ -661,31 +831,61 @@ class RoutesManager {
         this._drawDraft();
     }
 
-    _drawEditing() {
-        this.draw();
+    /** A dashed segment, for a leg across difficult terrain. */
+    _dash(graphics, [ax, ay], [bx, by], length) {
+        const total = Math.hypot(bx - ax, by - ay);
+        if (!total) return;
+        const ux = (bx - ax) / total;
+        const uy = (by - ay) / total;
+        for (let at = 0; at < total; at += length * 2) {
+            const end = Math.min(total, at + length);
+            graphics.moveTo(ax + ux * at, ay + uy * at);
+            graphics.lineTo(ax + ux * end, ay + uy * end);
+        }
     }
 
-    _line(points, color, sizes, alpha = 1, editing = false) {
+    /**
+     * A route's line. Legs over difficult terrain are dashed. Being edited,
+     * every waypoint is a handle -- larger, ringed in the route's colour --
+     * and the selected one is filled.
+     */
+    _line(points, color, sizes, { alpha = 1, terrain = [], editing = false, selected = null, ring = false } = {}) {
         const graphics = new PIXI.Graphics();
+        const dash = sizes.line * 2.5;
         // A dark edge under the colour, so the line reads on light and dark maps.
         for (const [width, tint, a] of [[sizes.line + 3, 0x111111, 0.55 * alpha], [sizes.line, color, alpha]]) {
             graphics.lineStyle({ width, color: tint, alpha: a, cap: 'round', join: 'round' });
-            graphics.moveTo(points[0][0], points[0][1]);
-            for (const [x, y] of points.slice(1)) graphics.lineTo(x, y);
+            for (let i = 1; i < points.length; i++) {
+                if (terrainFactor(terrain[i - 1]) < 1) this._dash(graphics, points[i - 1], points[i], dash);
+                else {
+                    graphics.moveTo(points[i - 1][0], points[i - 1][1]);
+                    graphics.lineTo(points[i][0], points[i][1]);
+                }
+            }
         }
         graphics.lineStyle(0);
         points.forEach(([x, y], index) => {
             const end = index === 0 || index === points.length - 1;
-            // Being edited, every waypoint is a handle: larger, and ringed in the route's colour.
             const radius = editing ? sizes.dot * 2 : end ? sizes.dot * 1.6 : sizes.dot;
             graphics.beginFill(0x111111, 0.55 * alpha).drawCircle(x, y, radius + 1.5).endFill();
             if (editing) {
                 graphics.beginFill(color, alpha).drawCircle(x, y, radius).endFill();
-                graphics.beginFill(0xffffff, alpha).drawCircle(x, y, radius * 0.55).endFill();
+                graphics.beginFill(index === selected ? color : 0xffffff, alpha).drawCircle(x, y, radius * 0.55).endFill();
+                if (index === selected) {
+                    graphics.lineStyle({ width: 2, color: 0xffffff, alpha });
+                    graphics.drawCircle(x, y, radius + 4);
+                    graphics.lineStyle(0);
+                }
             } else {
                 graphics.beginFill(end ? 0xffffff : color, alpha).drawCircle(x, y, radius).endFill();
             }
         });
+        // The end a dragged or drawn point has snapped to.
+        if (ring && this._snapped) {
+            graphics.lineStyle({ width: 3, color: 0xffffff, alpha: 0.9 });
+            graphics.drawCircle(this._snapped[0], this._snapped[1], sizes.dot * 3);
+            graphics.lineStyle(0);
+        }
         return graphics;
     }
 
@@ -710,11 +910,16 @@ class RoutesManager {
         if (!this._layer()) return;
         for (const child of this._draftLayer.removeChildren()) child.destroy({ children: true });
         const draft = this.draft;
-        if (!draft?.points.length) return;
+        if (!draft) return;
         const sizes = this._sizes();
+        if (!draft.points.length) {
+            // Before the first click, show where it would snap.
+            if (this._snapped) this._draftLayer.addChild(this._line([this._snapped, this._snapped], 0xffffff, sizes, { alpha: 0.8, ring: true }));
+            return;
+        }
         const points = draft.cursor ? [...draft.points, draft.cursor] : draft.points;
         const color = Number.parseInt(ROUTE_COLORS[0].replace('#', ''), 16);
-        this._draftLayer.addChild(this._line(points.length > 1 ? points : [points[0], points[0]], color, sizes, 0.8));
+        this._draftLayer.addChild(this._line(points.length > 1 ? points : [points[0], points[0]], color, sizes, { alpha: 0.8, ring: true }));
         const grid = canvas.scene.grid;
         const total = formatDistance(gridDistance(routePixels(points), grid), grid.units);
         const legs = legPixels(points);
@@ -742,12 +947,12 @@ class RoutesManager {
         if (this.window === window) this.window = null;
     }
 
-    /** Pan the canvas to show a whole route. */
-    async focus(id) {
-        const route = this.get(id);
-        if (!route?.points?.length || !canvas?.ready) return;
-        const xs = route.points.map(p => p[0]);
-        const ys = route.points.map(p => p[1]);
+    /** Pan the canvas to show a whole route or journey. */
+    async focus(ref) {
+        const path = typeof ref === 'string' ? this.path({ routeId: ref }) : this.path(ref);
+        if (!path?.points?.length || !canvas?.ready) return;
+        const xs = path.points.map(p => p[0]);
+        const ys = path.points.map(p => p[1]);
         const width = Math.max(...xs) - Math.min(...xs);
         const height = Math.max(...ys) - Math.min(...ys);
         const screen = canvas.screenDimensions ?? [window.innerWidth, window.innerHeight];

@@ -19,7 +19,8 @@ import {
 } from '../scripts/utils-travel.js';
 import {
     convertDistance, legPixels, routePixels, gridDistance, pointAlong, cleanPoints,
-    distancePixels, nearestWaypoint, nearestOnRoute
+    distancePixels, nearestWaypoint, nearestOnRoute, legTerrains, travelHours, insertWaypoint,
+    removeWaypoint, snapTo, chainRoutes
 } from '../scripts/utils-routes.js';
 
 let bad = 0;
@@ -218,6 +219,50 @@ console.log('\nroutes');
     const on = nearestOnRoute(points, [310, 200]);
     if (on.index !== 1 || !close(on.point[0], 300) || !close(on.point[1], 200) || !close(on.distance, 10)) fail(`a double-click lands at ${on.point}`);
     else ok('a double-click by the line finds the leg and the point on it');
+}
+
+console.log('\nterrain');
+{
+    const pts = [[0, 0], [100, 0], [200, 0], [300, 0]];
+    if (legTerrains(pts, ['road', 'lava']).join() !== 'road,open,open') fail('missing or unknown terrain is not filled with open ground');
+    else ok('each leg has a terrain; missing or unknown ones are open ground');
+    // 10 mi of road and 10 mi of forest at 2 mi an hour: 5 h and 10 h.
+    if (travelHours([10, 10], ['road', 'forest'], 2) !== 15) fail('difficult terrain does not halve the pace');
+    else ok('a leg through forest takes twice as long');
+    if (travelHours([10], ['road'], 0) !== null) fail('no pace still gives a time');
+    else ok('no pace, no time');
+    const added = insertWaypoint(pts, ['road', 'forest', 'hills'], 1, [150, 0]);
+    if (added.points.length !== 5 || added.terrain.join() !== 'road,forest,forest,hills') fail(`adding a waypoint gives ${added.terrain}`);
+    else ok('a waypoint added to a leg splits it, both halves keeping its terrain');
+    const middle = removeWaypoint(pts, ['road', 'forest', 'hills'], 2);
+    const first = removeWaypoint(pts, ['road', 'forest', 'hills'], 0);
+    const last = removeWaypoint(pts, ['road', 'forest', 'hills'], 3);
+    if (middle.terrain.join() !== 'road,forest' || first.terrain.join() !== 'forest,hills' || last.terrain.join() !== 'road,forest'
+        || middle.points.length !== 3) fail(`removing waypoints gives ${middle.terrain} / ${first.terrain} / ${last.terrain}`);
+    else ok('removing a waypoint joins its two legs, keeping the terrain of the first, or drops an end leg');
+}
+
+console.log('\nsnapping and journeys');
+{
+    const ends = [[100, 100], [500, 500]];
+    if (JSON.stringify(snapTo([108, 95], ends, 12)) !== '[100,100]' || snapTo([130, 100], ends, 12) !== null) fail('snapping is wrong');
+    else ok('a point near another route\'s end snaps onto it, and only when near');
+    // Keep to Phlan, then Phlan to Melvaunt drawn the other way, then a road that does not quite meet.
+    const a = { id: 'a', points: [[0, 0], [100, 0]], terrain: ['road'] };
+    const b = { id: 'b', points: [[100, 100], [100, 0]], terrain: ['forest'] };
+    const c = { id: 'c', points: [[100, 150], [200, 150]], terrain: ['hills'] };
+    const chain = chainRoutes([a, b, c], 2);
+    if (JSON.stringify(chain.points) !== '[[0,0],[100,0],[100,100],[100,150],[200,150]]') fail(`the journey runs ${JSON.stringify(chain.points)}`);
+    else ok('each route runs whichever way joins the one before');
+    if (!chain.parts[1].reversed || chain.parts[0].reversed || chain.parts[2].reversed) fail('the directions are wrong');
+    else ok('a route drawn the other way round is reversed');
+    if (chain.gaps.length !== 1 || chain.gaps[0].after !== 1 || chain.gaps[0].distance !== 50) fail(`gaps: ${JSON.stringify(chain.gaps)}`);
+    else ok('where two routes do not meet, the gap is found and crossed');
+    if (chain.terrain.join() !== 'road,forest,open,hills') fail(`journey terrain is ${chain.terrain}`);
+    else ok('each route keeps its terrain in the journey; a gap is open ground');
+    const flipped = chainRoutes([{ points: [[100, 0], [0, 0]] }, b], 2);
+    if (!flipped.parts[0].reversed || JSON.stringify(flipped.points) !== '[[0,0],[100,0],[100,100]]') fail('the first route is not turned to meet the second');
+    else ok('the first route runs whichever way meets the second');
 }
 
 console.log('\nhex grids');

@@ -1,4 +1,11 @@
-{{! The scene's routes. Built by window-routes.js; styled in tool-parallax.css. }}
+{{! The map's routes and journeys. Built by window-routes.js; styled in tool-parallax.css. }}
+<nav class="cartographer-parallax-tabs" role="tablist">
+    {{#each tabs}}
+    <button type="button" role="tab" class="cartographer-parallax-tab{{#if active}} is-active{{/if}}" data-action="routes-tab" data-tab="{{id}}" aria-selected="{{active}}">
+        <i class="{{icon}}"></i><span>{{label}}</span>{{#if count}}<span class="cartographer-parallax-tab-count">{{count}}</span>{{/if}}
+    </button>
+    {{/each}}
+</nav>
 <div class="cartographer-parallax-panel cartographer-routes-panel">
     {{#unless hasGrid}}
     <p class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.routes.noGrid"}}</p>
@@ -15,6 +22,7 @@
     <p class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.routes.turnedOff"}}</p>
     {{/unless}}
 
+    {{#if isRoutes}}
     {{#each routes}}
     <div class="cartographer-routes-route{{#if hidden}} is-hidden{{/if}}{{#if editing}} is-editing{{/if}}">
         <div class="cartographer-routes-head">
@@ -44,18 +52,96 @@
         {{/if}}
         <div class="cartographer-routes-meta">
             <button type="button" class="cartographer-routes-legs-toggle" data-action="route-legs" data-route-id="{{id}}">
-                <i class="fa-solid {{#if expanded}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i> {{legsText}}
+                <i class="fa-solid {{#if expanded}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i> {{legsText}}{{#if difficult}} · {{localize "coffee-pub-cartographer.routes.someDifficult"}}{{/if}}
             </button>
             {{#if timeText}}<span>{{timeText}}</span>{{/if}}
         </div>
         {{#if expanded}}
+        {{#if canEdit}}
+        <label class="cartographer-routes-terrain-all">
+            <span>{{localize "coffee-pub-cartographer.routes.terrainAll"}}</span>
+            <select data-field="routeTerrain" data-route-id="{{id}}">
+                {{#each allTerrain}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
+            </select>
+        </label>
+        {{/if}}
         <ol class="cartographer-routes-legs">
-            {{#each legs}}<li><span>{{localize "coffee-pub-cartographer.routes.leg"}} {{number}}</span><span>{{length}}</span></li>{{/each}}
+            {{#each legs}}
+            <li>
+                <span>{{localize "coffee-pub-cartographer.routes.leg"}} {{number}}</span>
+                <span>{{length}}</span>
+                {{#if ../canEdit}}
+                <select data-field="legTerrain" data-route-id="{{../id}}" data-leg="{{index}}">
+                    {{#each terrain}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
+                </select>
+                {{else}}
+                <span>{{terrainName}}</span>
+                {{/if}}
+            </li>
+            {{/each}}
         </ol>
         {{/if}}
     </div>
     {{else}}
     <p class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.routes.empty"}}</p>
     {{/each}}
+
+    {{else}}
+
+    {{! Journeys: routes in order, joined end to end. }}
+    <div class="cartographer-parallax-panel-actions">
+        <button type="button" class="cartographer-parallax-button is-labelled" data-action="journey-new"
+            data-tooltip="{{localize "coffee-pub-cartographer.routes.journeyHint"}}"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.routes.newJourney"}}</span></button>
+    </div>
+    {{#each journeys}}
+    <div class="cartographer-routes-route">
+        <div class="cartographer-routes-head">
+            <i class="fa-solid fa-map-signs"></i>
+            <span class="cartographer-routes-name">{{name}}</span>
+            <strong class="cartographer-routes-length">{{length}}</strong>
+            <button type="button" class="cartographer-parallax-button" data-action="journey-focus" data-journey-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.routes.focus"}}"><i class="fa-solid fa-crosshairs"></i></button>
+            {{#if canEdit}}
+            <button type="button" class="cartographer-parallax-button" data-action="journey-rename" data-journey-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.routes.renameJourney"}}"><i class="fa-solid fa-pen"></i></button>
+            <button type="button" class="cartographer-parallax-button is-danger" data-action="journey-remove" data-journey-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.routes.removeJourney"}}"><i class="fa-solid fa-trash"></i></button>
+            {{/if}}
+        </div>
+        <div class="cartographer-routes-meta">
+            <span>{{#if gapText}}<i class="fa-solid fa-triangle-exclamation"></i> {{gapText}}{{/if}}</span>
+            {{#if timeText}}<span>{{timeText}}</span>{{/if}}
+        </div>
+        <ol class="cartographer-routes-legs">
+            {{#each routes}}
+            <li{{#if gapAfter}} class="has-gap"{{/if}}>
+                <span><span class="cartographer-routes-swatch" style="background: {{color}}"></span> {{number}}. {{name}}</span>
+                <span>{{length}}</span>
+                {{#if ../canEdit}}
+                <span class="cartographer-routes-order">
+                    <button type="button" class="cartographer-parallax-button" data-action="journey-move" data-journey-id="{{../id}}" data-index="{{index}}" data-by="-1"
+                        {{#if isFirst}}disabled{{/if}} data-tooltip="{{localize "coffee-pub-cartographer.routes.moveUp"}}"><i class="fa-solid fa-arrow-up"></i></button>
+                    <button type="button" class="cartographer-parallax-button" data-action="journey-move" data-journey-id="{{../id}}" data-index="{{index}}" data-by="1"
+                        {{#if isLast}}disabled{{/if}} data-tooltip="{{localize "coffee-pub-cartographer.routes.moveDown"}}"><i class="fa-solid fa-arrow-down"></i></button>
+                    <button type="button" class="cartographer-parallax-button is-danger" data-action="journey-drop" data-journey-id="{{../id}}" data-index="{{index}}"
+                        data-tooltip="{{localize "coffee-pub-cartographer.routes.dropFromJourney"}}"><i class="fa-solid fa-xmark"></i></button>
+                </span>
+                {{/if}}
+            </li>
+            {{else}}
+            <li class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.routes.journeyEmpty"}}</li>
+            {{/each}}
+        </ol>
+        {{#if canEdit}}
+        <select class="cartographer-routes-add" data-field="journeyAdd" data-journey-id="{{id}}">
+            <option value="">{{localize "coffee-pub-cartographer.routes.addToJourney"}}</option>
+            {{#each addable}}<option value="{{id}}">{{name}}</option>{{/each}}
+        </select>
+        {{/if}}
+    </div>
+    {{else}}
+    <p class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.routes.noJourneys"}}</p>
+    {{/each}}
+    {{/if}}
     {{/unless}}
 </div>
