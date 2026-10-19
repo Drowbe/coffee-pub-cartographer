@@ -152,8 +152,11 @@ on a second client.
 ## Routes
 
 **Walk routes in a running world.** Drawing (click, double-click, Enter, Backspace, Escape, and
-that a click on a token does not select it), the label sizes on a real map, the Routes window, and an
-odometer following a route from another scene. Built from source and tested in node only.
+that a click on a token does not select it), editing (drag, double-click to add, right-click to
+remove -- and that right-drag still pans elsewhere), a player drawing and deleting their own route
+through the GM, a hidden route from a player's side, and measuring on a hex map, where the step is
+read from Foundry's grid and has only been checked against a stand-in. The first two rounds were
+walked by the GM on a square map and worked.
 
 **A progress marker on the map.** A token-like marker that stands at
 `routesManager.pointAt(routeId, distance)` and moves as the odometer counts, for everyone. The
@@ -161,8 +164,9 @@ geometry is done; it needs drawing on the map scene from the animated scene's od
 not loaded there -- read the animated scene's `travel` flag and compute its distance with the same
 shared clock.
 
-**Editing a route's waypoints.** Routes can be renamed, recoloured and deleted, not reshaped; a
-mis-drawn one is deleted and drawn again.
+**A double-click on a route over a token** edits the route rather than opening the token's sheet,
+for anyone who may change that route. Fine on a map, where tokens rarely sit on roads; worth
+watching.
 
 ## Ad-hoc map making
 

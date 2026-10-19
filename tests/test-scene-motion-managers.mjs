@@ -335,5 +335,64 @@ await pm.refresh({ sceneLoaded: true });
 check(!pm.window?.rendered && store.get('m.parallax.windowOpen') === 'false', 'closed by the GM, it stays closed');
 for (const [k, v] of tileFlagsBackup) tileFlags.set(k, v);
 
+console.log('\nroutes: who may change what');
+{
+    const sent = [];
+    const warned = [];
+    globalThis.ui = { notifications: { warn: m => warned.push(m), info: () => {} } };
+    const gm = { id: 'gm', isGM: true, active: true, isSelf: true, name: 'GM' };
+    const ana = { id: 'ana', isGM: false, active: true, name: 'Ana' };
+    const bo = { id: 'bo', isGM: false, active: true, name: 'Bo' };
+    const users = new Map([[gm.id, gm], [ana.id, ana], [bo.id, bo]]);
+    game.users = { get: id => users.get(id), activeGM: gm };
+    game.scenes = Object.assign([], { get: id => (id === scene.id ? scene : null), contents: [scene] });
+    await load(`const MODULE={ID:'m',NAME:'M'}; const cartographerToolbar={registerTool(){}};`
+        + `const socketManager={registerToolHandlers(){}, broadcast: async (...args) => globalThis.routesSent.push(args)};\n`
+        + `${shared}\n${strip('utils-routes.js')}\n`
+        + strip('manager-routes.js').replace('const routesManager', 'globalThis.rm'));
+    globalThis.routesSent = sent;
+    const line = [[0, 0], [140, 0], [140, 280]];
+
+    const theirs = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Ana road', points: line } }, ana);
+    const mine = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'GM road', points: line } }, gm);
+    check(theirs.userId === 'ana' && mine.userId === 'gm', 'a route belongs to whoever drew it');
+    check(Math.abs(rm.measure(theirs).distance - 15) < 1e-9, 'it measures 420 px on a 140 px, 5 ft grid as 15 ft');
+
+    await rm._apply({ action: 'update', sceneId: 'here', id: mine.id, changes: { name: 'Mine now' } }, ana);
+    await rm._apply({ action: 'remove', sceneId: 'here', id: mine.id }, bo);
+    check(rm.get(mine.id)?.name === 'GM road', 'a player cannot rename or delete a route that is not theirs');
+    await rm._apply({ action: 'update', sceneId: 'here', id: theirs.id, changes: { name: 'Ana\'s road', points: [[0, 0], [280, 0]] } }, ana);
+    check(rm.get(theirs.id).name === 'Ana\'s road' && rm.get(theirs.id).points.length === 2, 'its maker can rename and reshape it');
+    await rm._apply({ action: 'update', sceneId: 'here', id: theirs.id, changes: { points: [[5, 5]] } }, ana);
+    check(rm.get(theirs.id).points.length === 2, 'a route cannot be reshaped to fewer than two waypoints');
+    await rm._apply({ action: 'update', sceneId: 'here', id: theirs.id, changes: { hidden: true } }, ana);
+    const seen = user => rm.visibleRoutes(scene, user).map(r => r.name).join(',');
+    check(seen(bo) === 'GM road' && seen(ana) === 'Ana\'s road,GM road' && seen(gm) === 'Ana\'s road,GM road',
+        'a hidden route is seen only by its maker and the GM');
+    await rm._apply({ action: 'update', sceneId: 'here', id: theirs.id, changes: { color: 'javascript:alert(1)' } }, ana);
+    check(rm.get(theirs.id).color !== 'javascript:alert(1)', 'only the palette\'s colours are accepted');
+
+    // Two players' routes arriving together both land.
+    await Promise.all([
+        rm._apply({ action: 'create', sceneId: 'here', route: { name: 'A', points: line } }, ana),
+        rm._apply({ action: 'create', sceneId: 'here', route: { name: 'B', points: line } }, bo)
+    ]);
+    check(rm.routes().length === 4, 'changes made at the same moment do not overwrite each other');
+
+    const was = game.user;
+    game.user = ana;
+    await rm.remove(theirs.id);
+    check(sent.length === 1 && sent[0][1] === 'request' && sent[0][2].userId === 'ana', 'a player\'s change is sent to the GM, not written');
+    game.users.activeGM = null;
+    await rm.remove(theirs.id);
+    check(sent.length === 1 && warned.length === 1, 'with no GM online the player is told it cannot be saved');
+    game.users.activeGM = gm;
+    game.user = gm;
+    rm._handleRequest({ action: 'remove', sceneId: 'here', id: theirs.id, userId: 'ana' });
+    await rm._queue;
+    check(!rm.get(theirs.id), 'the GM carries out a player\'s change to their own route');
+    game.user = was;
+}
+
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');
 process.exit(bad ? 1 : 0);

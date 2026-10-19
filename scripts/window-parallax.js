@@ -8,7 +8,7 @@ import { defaultTileMotion, tileMotionManager } from './manager-tilemotion.js';
 import { collectionsManager } from './manager-collections.js';
 import { NONE_GROUP } from './utils-groups.js';
 import {
-    displayDistance, formatDistance, toSceneUnits, unitChoices, paceChoices, PACE_GROUPS,
+    displayDistance, formatDistance, toSceneUnits, unitChoices, paceChoices, PACE_GROUPS, gridStep,
     paceToSceneUnits, paceUnit, sceneUnitsToPace, paceInputToSceneUnits
 } from './utils-travel.js';
 import { travelManager } from './manager-travel.js';
@@ -541,12 +541,14 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const format = (key, data) => game.i18n.format(`${MODULE.ID}.parallax.${key}`, data);
         if (!grid?.size) return [{ label: localize('measureGrid'), value: localize('measureNoGrid') }];
         const round = n => Math.round(n * 10) / 10;
-        const measures = [{ label: localize('measureGrid'), value: format('measureGridValue', { size: grid.size, distance: grid.distance, units }) }];
+        const step = round(gridStep(grid));
+        const hex = !!grid.isHexagonal;
+        const measures = [{ label: localize('measureGrid'), value: format(hex ? 'measureHexValue' : 'measureGridValue', { size: step, distance: grid.distance, units }) }];
         const dims = canvas.dimensions;
         if (dims?.sceneWidth && dims?.sceneHeight) {
-            const across = round(dims.sceneWidth / grid.size);
-            const down = round(dims.sceneHeight / grid.size);
-            measures.push({ label: localize('measureScene'), value: format('measureSceneValue', {
+            const across = round(dims.sceneWidth / step);
+            const down = round(dims.sceneHeight / step);
+            measures.push({ label: localize('measureScene'), value: format(hex ? 'measureSceneHexValue' : 'measureSceneValue', {
                 across, down,
                 width: displayDistance(across * grid.distance, units).amount.toLocaleString(),
                 height: displayDistance(down * grid.distance, units).amount.toLocaleString(),

@@ -35,12 +35,33 @@ export function unitChoices(sceneUnits) {
     return longer ? [units, longer.unit] : [units];
 }
 
+/**
+ * The pixels one grid space spans: what `grid.distance` measures. On a
+ * square grid that is its size. On a hex grid it is the distance from one
+ * hex's centre to its neighbour's, which Foundry's grid reports through its
+ * centre points; reading it there, rather than working it out from `size`,
+ * holds for both row and column hexes. A grid without those methods (a
+ * plain object, in tests) is taken as square.
+ */
+export function gridStep(grid) {
+    if (grid?.isHexagonal && typeof grid.getCenterPoint === 'function' && typeof grid.getAdjacentOffsets === 'function') {
+        const at = { i: 4, j: 4 };
+        const centre = grid.getCenterPoint(at);
+        const steps = grid.getAdjacentOffsets(at)
+            .map(offset => grid.getCenterPoint(offset))
+            .map(point => Math.hypot(point.x - centre.x, point.y - centre.y))
+            .filter(step => step > 0);
+        if (steps.length) return Math.min(...steps);
+    }
+    return Number(grid?.size) || 0;
+}
+
 /** Scrolled pixels as distance on the scene's grid: on a 140-pixel, 5-foot grid, 140 pixels is 5 feet. */
 export function pixelsToDistance(pixels, grid) {
-    const size = Number(grid?.size) || 0;
+    const step = gridStep(grid);
     const distance = Number(grid?.distance) || 0;
-    if (!size || !distance) return 0;
-    return (pixels / size) * distance;
+    if (!step || !distance) return 0;
+    return (pixels / step) * distance;
 }
 
 /** An amount entered in either of the unit choices, as scene units. */
@@ -218,10 +239,10 @@ export function paceInputToSceneUnits(value, sceneUnits) {
 
 /** Scene units per hour as a scroll speed in pixels per second, on the scene's grid. */
 export function unitsPerHourToPixels(unitsPerHour, grid) {
-    const size = Number(grid?.size) || 0;
+    const step = gridStep(grid);
     const distance = Number(grid?.distance) || 0;
-    if (!size || !distance) return 0;
-    return (unitsPerHour / 3600 / distance) * size;
+    if (!step || !distance) return 0;
+    return (unitsPerHour / 3600 / distance) * step;
 }
 
 /** A scroll speed in pixels per second as scene units per hour, on the scene's grid. */

@@ -11,21 +11,37 @@
     {{#if drawing}}
     <p class="cartographer-parallax-hint cartographer-routes-drawing">{{localize "coffee-pub-cartographer.routes.drawHint"}}</p>
     {{/if}}
+    {{#unless showing}}
+    <p class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.routes.turnedOff"}}</p>
+    {{/unless}}
 
     {{#each routes}}
-    <div class="cartographer-routes-route">
+    <div class="cartographer-routes-route{{#if hidden}} is-hidden{{/if}}{{#if editing}} is-editing{{/if}}">
         <div class="cartographer-routes-head">
+            {{#if canEdit}}
             <button type="button" class="cartographer-routes-swatch" style="background: {{color}}" data-action="route-color" data-route-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.color"}}"></button>
-            <span class="cartographer-routes-name">{{name}}</span>
+            {{else}}
+            <span class="cartographer-routes-swatch" style="background: {{color}}"></span>
+            {{/if}}
+            <span class="cartographer-routes-name">{{name}}{{#if maker}} <span class="cartographer-routes-maker">{{maker}}</span>{{/if}}</span>
             <strong class="cartographer-routes-length">{{length}}</strong>
             <button type="button" class="cartographer-parallax-button" data-action="route-focus" data-route-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.focus"}}"><i class="fa-solid fa-crosshairs"></i></button>
+            {{#if canEdit}}
+            <button type="button" class="cartographer-parallax-button" data-action="route-hide" data-route-id="{{id}}"
+                data-tooltip="{{#if hidden}}{{localize "coffee-pub-cartographer.routes.showRoute"}}{{else}}{{localize "coffee-pub-cartographer.routes.hideRoute"}}{{/if}}"><i class="fa-solid {{#if hidden}}fa-eye-slash{{else}}fa-eye{{/if}}"></i></button>
+            <button type="button" class="cartographer-parallax-button{{#if editing}} is-active{{/if}}" data-action="route-edit" data-route-id="{{id}}"
+                data-tooltip="{{localize "coffee-pub-cartographer.routes.editWaypoints"}}"><i class="fa-solid fa-bezier-curve"></i></button>
             <button type="button" class="cartographer-parallax-button" data-action="route-rename" data-route-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.rename"}}"><i class="fa-solid fa-pen"></i></button>
             <button type="button" class="cartographer-parallax-button is-danger" data-action="route-remove" data-route-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.remove"}}"><i class="fa-solid fa-trash"></i></button>
+            {{/if}}
         </div>
+        {{#if editing}}
+        <p class="cartographer-parallax-hint cartographer-routes-drawing">{{localize "coffee-pub-cartographer.routes.editHint"}}</p>
+        {{/if}}
         <div class="cartographer-routes-meta">
             <button type="button" class="cartographer-routes-legs-toggle" data-action="route-legs" data-route-id="{{id}}">
                 <i class="fa-solid {{#if expanded}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i> {{legsText}}

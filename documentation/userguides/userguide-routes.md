@@ -1,16 +1,18 @@
 # Routes
 
-**Audience:** GMs who want to measure a journey on an overland map -- how far it is from Zhentil
-Keep to Phlan along the road, and how long that takes -- and have the scene-motion odometer count
-the party along it.
+**Audience:** GMs and players who want to measure a journey on an overland map -- how far it is from
+Zhentil Keep to Phlan along the road, and how long that takes -- and GMs who want the scene-motion
+odometer to count the party along it.
 
-A route is a line of waypoints drawn on a map scene. Cartographer measures it on the map's grid,
-saves it with the scene, and draws it for everyone.
+A route is a line of waypoints drawn on a map scene. Cartographer measures it on the map's grid --
+square or hex -- saves it with the scene, and draws it for everyone.
 
 ## Draw a route
 
-In Cartographer's sub-menubar, the **Routes** section has two buttons: **Draw a route** and
-**Routes on this map**, which opens the Routes window.
+In Cartographer's sub-menubar, the **Routes** section has three buttons: **Draw a route**, an eye
+that shows or hides routes on your screen, and **Routes on this map**, which opens the Routes window.
+
+Anyone can draw a route. A player's route is saved by the GM's client, so a GM has to be online.
 
 With Draw on:
 
@@ -25,7 +27,27 @@ Finishing asks for a name; closing that box without saving discards the route.
 
 A route is measured as the true length of the line on the map's scale: a diagonal is as long as it
 looks, not as long as Foundry's ruler would count it in squares. On a map whose squares are 5 miles,
-a leg crossing ten squares' width is 50 miles.
+a leg crossing ten squares' width is 50 miles. On a hex map, one hex is the distance from a hex's
+centre to its neighbour's, so a leg crossing ten hexes on a 6-mile hex map is 60 miles.
+
+## Change a route's waypoints
+
+Double-click the line of a route you drew -- or any route, for the GM -- to add a waypoint there.
+That also starts editing the route, and every waypoint becomes a handle:
+
+- **Drag** a waypoint to move it.
+- **Double-click** the line to add another.
+- **Right-click** or **Alt-click** a waypoint to remove it. A route keeps at least two.
+- **Enter** or **Escape** stops editing.
+
+Each change is saved as you make it, and the length updates everywhere. The bezier-curve button in
+the Routes window starts and stops editing too.
+
+## Show and hide routes
+
+- **Hide a route from players** -- the eye on a route in the Routes window. Its maker and the GM
+  still see it, faintly; nobody else does.
+- **Turn routes off on your screen** -- the eye in the sub-menubar. It changes only what you see.
 
 ## The Routes window
 
@@ -37,10 +59,11 @@ that how many legs it has and how long it takes at a pace.
   travel and as travel days of 8 hours.
 - Click a route's legs to list each leg's length.
 - The coloured dot changes the route's colour; the crosshairs show the whole route on the map; the
-  pen renames it; the bin deletes it, after asking.
+  eye hides it from players; the bezier curve edits its waypoints; the pen renames it; the bin
+  deletes it, after asking.
 
-Only the GM can draw, rename or delete routes. Everyone sees them on the map, labelled with their
-name and length.
+The window lists every route you can see. A route someone else drew shows their name, and only its
+maker and the GM can change it.
 
 ## Follow a route with the odometer
 
@@ -66,9 +89,9 @@ measure of progress for now.
 ```js
 const { routes } = game.modules.get('coffee-pub-cartographer').api;
 
-routes.list();                          // this scene's routes: id, name, points, distance, units, legs
+routes.list();                          // this scene's routes you can see: id, name, points, distance, units, legs
 routes.list(sceneId);                   // another scene's
 routes.pointAt(routeId, 12, sceneId);   // where 12 (miles, say) along it reaches: { x, y, angle }
-routes.draw();                          // start drawing one (GM)
-routes.open();                          // open the window (GM)
+routes.draw();                          // start drawing one
+routes.open();                          // open the window
 ```

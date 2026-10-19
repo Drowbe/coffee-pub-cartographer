@@ -10,6 +10,8 @@
  * Nothing here touches Foundry, so it is tested in node.
  */
 
+import { gridStep } from './utils-travel.js';
+
 /** Metres in one of each unit a distance can be converted between. */
 const METRES = {
     ft: 0.3048, feet: 0.3048, foot: 0.3048,
@@ -47,11 +49,49 @@ export function routePixels(points) {
     return legPixels(points).reduce((sum, leg) => sum + leg, 0);
 }
 
-/** Pixels on a grid as its distance: on a 100 px, 5 mi grid, 100 px is 5 mi. */
+/** Pixels on a grid as its distance: on a 100 px, 5 mi grid, 100 px is 5 mi. Hexes too; see gridStep. */
 export function gridDistance(pixels, grid) {
-    const size = Number(grid?.size) || 0;
+    const step = gridStep(grid);
     const distance = Number(grid?.distance) || 0;
-    return size && distance ? (pixels / size) * distance : 0;
+    return step && distance ? (pixels / step) * distance : 0;
+}
+
+/** A distance on a grid as pixels: the other way from gridDistance. */
+export function distancePixels(distance, grid) {
+    const step = gridStep(grid);
+    const per = Number(grid?.distance) || 0;
+    return step && per ? (distance / per) * step : 0;
+}
+
+/** The waypoint nearest a point: { index, distance } in pixels, or null for no points. */
+export function nearestWaypoint(points, [x, y]) {
+    let best = null;
+    (points ?? []).forEach(([px, py], index) => {
+        const distance = Math.hypot(px - x, py - y);
+        if (!best || distance < best.distance) best = { index, distance };
+    });
+    return best;
+}
+
+/**
+ * The place on the route nearest a point: the leg it is on (`index` is the
+ * waypoint the leg starts from), the point itself, and how far away it is,
+ * in pixels. Where a double-click on the line puts a new waypoint.
+ */
+export function nearestOnRoute(points, [x, y]) {
+    let best = null;
+    for (let i = 1; i < (points?.length ?? 0); i++) {
+        const [ax, ay] = points[i - 1];
+        const [bx, by] = points[i];
+        const dx = bx - ax;
+        const dy = by - ay;
+        const lengthSq = dx * dx + dy * dy;
+        const t = lengthSq ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / lengthSq)) : 0;
+        const point = [ax + dx * t, ay + dy * t];
+        const distance = Math.hypot(point[0] - x, point[1] - y);
+        if (!best || distance < best.distance) best = { index: i - 1, point, distance };
+    }
+    return best;
 }
 
 /**

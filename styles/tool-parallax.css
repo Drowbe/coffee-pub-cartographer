@@ -936,7 +936,7 @@
     gap: 6px;
 }
 
-.cartographer-parallax-window button.cartographer-routes-swatch {
+.cartographer-parallax-window .cartographer-routes-swatch {
     flex: 0 0 auto;
     width: 16px;
     min-width: 0;
@@ -955,6 +955,19 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.cartographer-parallax-window .cartographer-routes-maker {
+    color: var(--blacksmith-tool-text-muted);
+    font-size: 0.85em;
+}
+
+.cartographer-parallax-window .cartographer-routes-route.is-hidden .cartographer-routes-name {
+    opacity: 0.55;
+}
+
+.cartographer-parallax-window .cartographer-routes-route.is-editing {
+    border-color: var(--blacksmith-color-brand-accent);
 }
 
 .cartographer-parallax-window .cartographer-routes-length {

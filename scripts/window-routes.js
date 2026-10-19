@@ -4,7 +4,7 @@
 
 import { MODULE } from './const.js';
 import { ROUTE_COLORS } from './manager-routes.js';
-import { formatDistance, formatSpan, paceChoices, PACE_GROUPS } from './utils-travel.js';
+import { formatDistance, formatSpan, paceChoices, PACE_GROUPS, gridStep } from './utils-travel.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -57,6 +57,8 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         'route-focus': (_event, target, app) => void app.manager.focus(target.dataset.routeId),
         'route-rename': (_event, target, app) => app.promptRename(target.dataset.routeId),
         'route-color': (_event, target, app) => app.cycleColor(target.dataset.routeId),
+        'route-hide': (_event, target, app) => app.toggleHidden(target.dataset.routeId),
+        'route-edit': (_event, target, app) => app.manager.toggleEditing(target.dataset.routeId),
         'route-legs': (_event, target, app) => app.toggleLegs(target.dataset.routeId),
         'route-remove': (_event, target, app) => app.confirmRemove(target.dataset.routeId)
     };
@@ -102,13 +104,18 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const pace = paces.find(p => p.id === this.paceId)
             ?? paces.find(p => p.id === 'dnd5e.normal') ?? paces.find(p => p.id === 'walking') ?? paces[0] ?? null;
 
-        const routes = this.manager.routes(scene).map(route => {
+        const routes = this.manager.visibleRoutes(scene).map(route => {
             const { distance, legs } = this.manager.measure(route, scene);
             const hours = pace?.perHour ? distance / pace.perHour : null;
+            const maker = route.userId && route.userId !== game.user.id ? game.users.get(route.userId)?.name : null;
             return {
                 id: route.id,
                 name: route.name,
                 color: route.color,
+                canEdit: this.manager.canEdit(route),
+                hidden: !!route.hidden,
+                editing: this.manager.editing?.id === route.id,
+                maker,
                 length: formatDistance(distance, units),
                 legCount: legs.length,
                 legsText: game.i18n.format(`${MODULE.ID}.routes.${legs.length === 1 ? 'oneLeg' : 'legs'}`, { count: legs.length }),
@@ -126,9 +133,11 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             {
                 routes,
                 hasGrid: !!grid?.size && !!grid?.distance,
-                gridText: grid?.size ? game.i18n.format(`${MODULE.ID}.parallax.measureGridValue`, { size: grid.size, distance: grid.distance, units }) : '',
+                gridText: grid?.size ? game.i18n.format(`${MODULE.ID}.parallax.${grid.isHexagonal ? 'measureHexValue' : 'measureGridValue'}`,
+                    { size: Math.round(gridStep(grid) * 10) / 10, distance: grid.distance, units }) : '',
                 pace: pace?.label ?? '',
-                drawing: !!this.manager.draft
+                drawing: !!this.manager.draft,
+                showing: this.manager.show
             }
         );
 
@@ -170,6 +179,11 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         else this.expanded.add(id);
         this._savePrefs();
         this.render();
+    }
+
+    async toggleHidden(id) {
+        const route = this.manager.get(id);
+        if (route) await this.manager.update(id, { hidden: !route.hidden });
     }
 
     async cycleColor(id) {

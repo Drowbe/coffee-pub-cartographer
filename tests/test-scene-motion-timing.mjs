@@ -13,12 +13,13 @@ import {
     NONE_GROUP, normalizeActive, shownByGroups, toggledActive, sameActive
 } from '../scripts/utils-groups.js';
 import {
-    pixelsToDistance, formatDistance, formatSpan, toSceneUnits, unitChoices,
+    pixelsToDistance, formatDistance, formatSpan, toSceneUnits, unitChoices, gridStep,
     REAL_WORLD_PACES, rulesPaces, paceToSceneUnits, paceUnit, sceneUnitsToPace,
     paceInputToSceneUnits, unitsPerHourToPixels, pixelsToUnitsPerHour
 } from '../scripts/utils-travel.js';
 import {
-    convertDistance, legPixels, routePixels, gridDistance, pointAlong, cleanPoints
+    convertDistance, legPixels, routePixels, gridDistance, pointAlong, cleanPoints,
+    distancePixels, nearestWaypoint, nearestOnRoute
 } from '../scripts/utils-routes.js';
 
 let bad = 0;
@@ -209,6 +210,34 @@ console.log('\nroutes');
     else ok('a route in miles converts to an odometer in feet or metres');
     if (convertDistance(3, 'hexes', 'ft') !== null || convertDistance(3, 'days', 'days') !== 3) fail('incomparable units convert');
     else ok('units that cannot be compared do not convert; the same unit always does');
+    if (distancePixels(35, { size: 100, distance: 5 }) !== 700) fail('distance does not convert back to pixels');
+    else ok('35 mi on a 100 px, 5 mi grid is 700 px');
+    const wp = nearestWaypoint(points, [290, 390]);
+    if (wp.index !== 2 || !close(wp.distance, Math.hypot(10, 10))) fail('the nearest waypoint is wrong');
+    else ok('the waypoint nearest a click is found');
+    const on = nearestOnRoute(points, [310, 200]);
+    if (on.index !== 1 || !close(on.point[0], 300) || !close(on.point[1], 200) || !close(on.distance, 10)) fail(`a double-click lands at ${on.point}`);
+    else ok('a double-click by the line finds the leg and the point on it');
+}
+
+console.log('\nhex grids');
+{
+    const close = (a, b) => Math.abs(a - b) < 1e-9;
+    // A pointy-top hex grid whose neighbours are 120 px apart, centre to centre,
+    // in a size that is not that number -- so reading size would be wrong.
+    const step = 120;
+    const hex = {
+        isHexagonal: true, size: 138.56, distance: 6, units: 'mi',
+        getCenterPoint: ({ i, j }) => ({ x: j * step + (i % 2 ? step / 2 : 0), y: i * step * Math.sqrt(3) / 2 }),
+        getAdjacentOffsets: ({ i, j }) => [[0, -1], [0, 1], [-1, 0], [-1, 1], [1, 0], [1, 1]]
+            .map(([di, dj]) => ({ i: i + di, j: j + dj - (i % 2 ? 0 : (di ? 1 : 0)) }))
+    };
+    if (!close(gridStep(hex), step)) fail(`a hex step read as ${gridStep(hex)} px, not ${step}`);
+    else ok('a hex grid\'s step is the distance between neighbouring centres');
+    if (!close(gridDistance(600, hex), 30) || !close(pixelsToDistance(600, hex), 30)) fail('distance on a hex grid is wrong');
+    else ok('five hexes\' width on a 6-mile hex grid is 30 miles');
+    if (gridStep({ size: 140 }) !== 140) fail('a square grid\'s step is not its size');
+    else ok('a square grid\'s step is its size');
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');
