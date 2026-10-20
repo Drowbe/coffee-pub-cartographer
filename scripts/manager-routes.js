@@ -9,7 +9,7 @@ import {
     cleanPoints, legPixels, routePixels, gridDistance, distancePixels, pointAlong, convertDistance,
     nearestWaypoint, nearestOnRoute, legTerrains, terrainFactor, insertWaypoint, removeWaypoint,
     snapTo, chainRoutes, TERRAINS, pathLegs, totalEffort, distanceForEffort, legIndexAt,
-    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY
+    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith
 } from './utils-routes.js';
 import { motionSpeed } from './utils-motion.js';
 import { formatDistance } from './utils-travel.js';
@@ -112,6 +112,8 @@ class RoutesManager {
     initialize() {
         this._exposeApi();
         this._registerButtons();
+        // When the world time last changed here, for carrying it on smoothly between updates.
+        this._hooks.push({ name: 'updateWorldTime', id: Hooks.on('updateWorldTime', () => { this._worldSeenAt = performance.now(); }) });
         socketManager.registerToolHandlers('routes', {
             request: data => this._handleRequest(data)
         });
@@ -221,17 +223,40 @@ class RoutesManager {
         return foundry.utils.deepClone(scene?.getFlag(MODULE.ID, FLAG_KEY)?.list ?? []);
     }
 
-    /** A map's travel plan: { hoursPerDay }. */
+    /** A map's travel plan, { hoursPerDay }, and the route or journey its Play button runs, { active }. */
     settings(scene = canvas.scene) {
         const stored = scene?.getFlag(MODULE.ID, FLAG_KEY)?.settings ?? {};
         const hours = Number(stored.hoursPerDay);
-        return { hoursPerDay: hours > 0 && hours <= 24 ? hours : DEFAULT_HOURS_PER_DAY };
+        const active = stored.active?.journeyId && this.getJourney(stored.active.journeyId, scene) ? { journeyId: stored.active.journeyId }
+            : stored.active?.routeId && this.get(stored.active.routeId, scene) ? { routeId: stored.active.routeId }
+            : null;
+        return { hoursPerDay: hours > 0 && hours <= 24 ? hours : DEFAULT_HOURS_PER_DAY, active };
     }
 
     /** Change the map's travel plan. The GM's; it is the same plan for everyone. */
     async setSettings(changes) {
         if (!game.user.isGM) return null;
         return this._apply({ action: 'settings', sceneId: canvas.scene?.id, changes }, game.user);
+    }
+
+    /**
+     * The routes a moving route or journey on this map is travelling: while
+     * one is under way, only those are drawn. Null when nothing is moving.
+     */
+    travellingRouteIds(scene = canvas.scene) {
+        const ids = new Set();
+        let moving = false;
+        for (const route of this.routes(scene)) {
+            if (!route.travel?.motion?.playing) continue;
+            moving = true;
+            ids.add(route.id);
+        }
+        for (const journey of this.journeys(scene)) {
+            if (!journey.travel?.motion?.playing) continue;
+            moving = true;
+            for (const id of journey.routeIds) ids.add(id);
+        }
+        return moving ? ids : null;
     }
 
     /** A scene's journeys. */
@@ -336,7 +361,21 @@ class RoutesManager {
      * Returns { scene, path, legs, travel, effort, totalEffort, distance,
      * length, leg, factor, terrain, point } in the map's units, or null.
      */
-    progress(link, now = game.time.serverTime) {
+    /**
+     * The world time now, carried on between the world clock's updates at its
+     * rate while it runs, so a marker following the clock moves smoothly
+     * rather than stepping at each update. A few seconds at most: past that,
+     * the clock has stalled and the stored time is the truth.
+     */
+    worldTime() {
+        const base = Number(game.time?.worldTime) || 0;
+        const clock = game.modules.get('coffee-pub-blacksmith')?.api?.worldClock;
+        if (!clock?.running || !(Number(clock.rate) > 0) || this._worldSeenAt === undefined) return base;
+        const elapsed = Math.min(10, Math.max(0, (performance.now() - this._worldSeenAt) / 1000));
+        return base + Number(clock.rate) * elapsed;
+    }
+
+    progress(link, now = game.time.serverTime, world = this.worldTime()) {
         const scene = link?.sceneId ? game.scenes.get(link.sceneId) : null;
         const item = scene ? this._pathItem(link, scene) : null;
         const path = item ? this.path(link, scene) : null;
@@ -345,7 +384,7 @@ class RoutesManager {
         const travel = { ...defaultPathTravel(), ...(item.travel ?? {}) };
         travel.motion = { ...defaultPathTravel().motion, ...(item.travel?.motion ?? {}) };
         const total = totalEffort(legs);
-        const effort = Math.min(total, Math.max(0, travelEffort(travel, now)));
+        const effort = Math.min(total, Math.max(0, travelEffort(travel, now, world)));
         const distance = distanceForEffort(legs, effort);
         const leg = legIndexAt(legs, distance);
         return {
@@ -373,7 +412,7 @@ class RoutesManager {
      */
     async setPathTravel(link, changes, now = game.time.serverTime) {
         if (!game.user.isGM || !link?.sceneId) return null;
-        return this._apply({ action: 'travel', sceneId: link.sceneId, link, changes, now }, game.user);
+        return this._apply({ action: 'travel', sceneId: link.sceneId, link, changes, now, world: this.worldTime() }, game.user);
     }
 
     /** Where a distance in the scene's units along a route or journey reaches: { x, y, angle } in pixels. */
@@ -481,6 +520,13 @@ class RoutesManager {
                 const stored = scene.getFlag(MODULE.ID, FLAG_KEY)?.settings ?? {};
                 const hours = Number(data.changes?.hoursPerDay);
                 const settings = { ...stored, ...(hours > 0 && hours <= 24 ? { hoursPerDay: Math.round(hours * 4) / 4 } : {}) };
+                // The route or journey the map's bar and Play button run: the last one played here.
+                if ('active' in (data.changes ?? {})) {
+                    const active = data.changes.active;
+                    settings.active = active?.journeyId && journeys.some(j => j.id === active.journeyId) ? { journeyId: active.journeyId }
+                        : active?.routeId && list.some(r => r.id === active.routeId) ? { routeId: active.routeId }
+                        : null;
+                }
                 await scene.setFlag(MODULE.ID, FLAG_KEY, { list, journeys, settings });
                 return settings;
             }
@@ -492,9 +538,10 @@ class RoutesManager {
                 const travel = { ...defaultPathTravel(), ...(item.travel ?? {}) };
                 travel.motion = { ...defaultPathTravel().motion, ...(item.travel?.motion ?? {}) };
                 const now = Number(data.now) || game.time.serverTime;
+                const world = Number.isFinite(Number(data.world)) ? Number(data.world) : this.worldTime();
                 const path = this.path(data.link, scene);
                 const total = path ? totalEffort(pathLegs(path.points, path.terrain, scene.grid)) : 0;
-                travel.effort = Math.min(total, Math.max(0, travelEffort(travel, now)));
+                travel.effort = Math.min(total, Math.max(0, travelEffort(travel, now, world)));
                 travel.motion.rampFrom = motionSpeed(travel.motion, now);
                 travel.motion.anchorAt = now;
                 const changes = data.changes ?? {};
@@ -504,6 +551,16 @@ class RoutesManager {
                 if ('effort' in changes) travel.effort = Math.min(total, Math.max(0, Number(changes.effort) || 0));
                 if ('pace' in changes) travel.pace = Math.max(0, Number(changes.pace) || 0);
                 if ('arrived' in changes) travel.arrived = !!changes.arrived;
+                if ('followClock' in changes) travel.followClock = !!changes.followClock;
+                // Following the clock, the change goes on the timeline at this world
+                // time, replacing whatever a scrub back had left after it.
+                travel.timeline = travel.followClock
+                    ? timelineWith(travel.timeline, {
+                        w: world,
+                        effort: travel.effort,
+                        rate: travel.motion.playing ? (travel.pace / 3600) * (Number(travel.motion.masterSpeed) || 0) : 0
+                    })
+                    : [];
                 item.travel = travel;
                 await save();
                 // For the journey's marker on the map (manager-travelpins.js), on the GM's client.
@@ -929,8 +986,11 @@ class RoutesManager {
         // Turned off on this screen, routes are not drawn -- except one being edited.
         this._routes.visible = this.show || !!this.editing;
         const sizes = this._sizes();
+        // While a route or journey is under way, only the routes it travels are drawn.
+        const travelling = this.editing || this.draft ? null : this.travellingRouteIds();
         for (const route of this.visibleRoutes()) {
             if (!this.show && this.editing?.id !== route.id) continue;
+            if (travelling && !travelling.has(route.id)) continue;
             const editing = this.editing?.id === route.id;
             const points = editing ? this.editing.points : route.points;
             if ((points?.length ?? 0) < 2) continue;
@@ -981,7 +1041,10 @@ class RoutesManager {
             }
         }
         graphics.lineStyle(0);
+        // Waypoints are handles: drawn while a route is edited or drawn, not on a route at rest.
+        const showPoints = editing || ring;
         points.forEach(([x, y], index) => {
+            if (!showPoints) return;
             const end = index === 0 || index === points.length - 1;
             const radius = editing ? sizes.dot * 2 : end ? sizes.dot * 1.6 : sizes.dot;
             graphics.beginFill(0x111111, 0.55 * alpha).drawCircle(x, y, radius + 1.5).endFill();

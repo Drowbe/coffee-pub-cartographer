@@ -5,6 +5,7 @@
 import { MODULE } from './const.js';
 import { ROUTE_COLORS } from './manager-routes.js';
 import { travelPinsManager } from './manager-travelpins.js';
+import { journeysManager } from './manager-journeys.js';
 import { formatDistance, formatSpan, paceChoices, PACE_GROUPS, gridStep } from './utils-travel.js';
 import {
     legTerrains, travelHours, terrainFactor, TERRAINS, travelPlan, MOUNT_HOURS_PER_DAY, FORCED_MARCH_HOURS
@@ -13,6 +14,16 @@ import {
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
 const APP_ID = `${MODULE.ID}-routes`;
+/** Near zero, the speed slider snaps to a stop, as the scene-motion window's does. */
+const SPEED_SNAP = 0.1;
+const SPEED_RANGE = { min: -10, max: 10, step: 0.05 };
+
+/** A master speed as the bar shows it: "+1.50×", "−2.00×", "0×". */
+function formatSpeed(value) {
+    const n = Number(value) || 0;
+    if (n === 0) return '0×';
+    return `${n > 0 ? '+' : '−'}${Math.abs(n).toFixed(2)}×`;
+}
 /** The window's choices, per browser: the tab, the pace times are shown at, and which routes show their legs. */
 const PREFS_KEY = `${MODULE.ID}.routes.windowPrefs`;
 const TABS = [
@@ -61,6 +72,8 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
 
     static ACTION_HANDLERS = {
         'routes-tab': (_event, target, app) => app.setTab(target.dataset.tab),
+        'routes-play': (_event, _target, app) => app.togglePlay(app._barPath()),
+        'toggle-settings': (_event, _target, app) => app.toggleSettings(),
         'route-draw': (_event, _target, app) => (app.manager.draft ? app.manager.finishDrawing() : app.manager.startDrawing()),
         'route-focus': (_event, target, app) => void app.manager.focus(target.dataset.routeId),
         'route-rename': (_event, target, app) => app.promptRename(target.dataset.routeId),
@@ -75,7 +88,12 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         'journey-remove': (_event, target, app) => app.confirmRemoveJourney(target.dataset.journeyId),
         'journey-move': (_event, target, app) => app.moveJourneyRoute(target.dataset.journeyId, Number(target.dataset.index), Number(target.dataset.by)),
         'journey-drop': (_event, target, app) => app.dropJourneyRoute(target.dataset.journeyId, Number(target.dataset.index)),
-        'path-marker': (_event, target, app) => app.toggleMarker(target.dataset)
+        'path-marker': (_event, target, app) => app.toggleMarker(target.dataset),
+        'path-reset': (_event, target, app) => void journeysManager.reset(app._linkFrom(target.dataset)),
+        'path-clock': (_event, target, app) => {
+            const link = app._linkFrom(target.dataset);
+            return journeysManager.setFollowClock(link, !app.manager.progress(link)?.travel.followClock);
+        }
     };
 
     static async open(manager) {
@@ -97,11 +115,117 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         this.tab = TABS.some(tab => tab.id === prefs.tab) ? prefs.tab : 'routes';
         this.paceId = prefs.paceId ?? null;
         this.expanded = new Set(prefs.expanded ?? []);
+        /** Whether the settings are showing. Hidden, the window is just its bar, as the scene-motion window's. */
+        this.settingsOpen = prefs.settingsOpen ?? true;
+        this._settingsHeight = prefs.settingsHeight ?? null;
         this._onChange = this._onChange.bind(this);
     }
 
     _savePrefs() {
-        writePrefs({ tab: this.tab, paceId: this.paceId, expanded: [...this.expanded] });
+        writePrefs({
+            tab: this.tab,
+            paceId: this.paceId,
+            expanded: [...this.expanded],
+            settingsOpen: this.settingsOpen,
+            settingsHeight: this._settingsHeight
+        });
+    }
+
+    // ==================================================================
+    // ===== THE BAR ====================================================
+    // ==================================================================
+
+    /**
+     * The route or journey the bar runs: the map's active one (the last
+     * played here), or its first journey, or its first route. The bar is the
+     * scene-motion window's: Play/Stop, the speed centred on zero, which route
+     * or journey, and the gear for the settings.
+     */
+    _barPath(scene = canvas.scene) {
+        if (!scene) return null;
+        const active = journeysManager.activeLink(scene);
+        if (active) return active;
+        const journey = this.manager.journeys(scene)[0];
+        if (journey) return { sceneId: scene.id, journeyId: journey.id };
+        const route = this.manager.visibleRoutes(scene)[0];
+        return route ? { sceneId: scene.id, routeId: route.id } : null;
+    }
+
+    /** A route or journey named by an element's data-route-id or data-journey-id. */
+    _linkFrom({ routeId, journeyId }) {
+        return { sceneId: canvas.scene?.id, ...(journeyId ? { journeyId } : { routeId }) };
+    }
+
+    _button({ action, icon, label, text = '', className = '', disabled = false }) {
+        const safe = foundry.utils.escapeHTML(label ?? '');
+        const caption = text ? `<span>${foundry.utils.escapeHTML(text)}</span>` : '';
+        return `<button type="button" class="cartographer-parallax-button ${className}${text ? ' is-labelled' : ''}" data-action="${action}" data-tooltip="${safe}" aria-label="${safe}"${disabled ? ' disabled' : ''}><i class="${icon}"></i>${caption}</button>`;
+    }
+
+    _buildBar(localize) {
+        const esc = value => foundry.utils.escapeHTML(String(value));
+        const gear = this._button({
+            action: 'toggle-settings',
+            icon: 'fa-solid fa-gear',
+            label: localize(this.settingsOpen ? 'hideSettings' : 'showSettings'),
+            className: this.settingsOpen ? 'is-active' : ''
+        });
+        if (!game.user.isGM) return { left: '', right: gear };
+        const link = this._barPath();
+        const travel = link ? this.manager.progress(link)?.travel : null;
+        const playing = !!travel?.motion?.playing;
+        const speed = Number(travel?.motion?.masterSpeed ?? 1);
+        const disabled = !link;
+        const play = this._button({
+            action: 'routes-play',
+            icon: playing ? 'fa-solid fa-stop' : 'fa-solid fa-play',
+            label: disabled ? localize('noJourneyToPlay') : localize(playing ? 'stop' : 'play'),
+            text: localize(playing ? 'stop' : 'play'),
+            className: playing ? 'is-active' : '',
+            disabled
+        });
+        const label = esc(localize('speedHint'));
+        const off = disabled ? ' disabled' : '';
+        const slider = `<div class="cartographer-parallax-field cartographer-parallax-bar-speed${disabled ? ' is-disabled' : ''}">
+            <i class="fa-solid fa-backward cartographer-parallax-arrow" data-tooltip="${esc(localize('speedBack'))}"></i>
+            <input type="range" data-field="journeySpeed" value="${esc(speed)}" min="${SPEED_RANGE.min}" max="${SPEED_RANGE.max}" step="${SPEED_RANGE.step}"
+                list="cartographer-routes-zero" aria-label="${label}" data-tooltip="${label}"${off}>
+            <i class="fa-solid fa-forward cartographer-parallax-arrow" data-tooltip="${esc(localize('speedForward'))}"></i>
+            <span class="cartographer-parallax-value">${esc(formatSpeed(speed))}</span>
+            <datalist id="cartographer-routes-zero"><option value="0"></option></datalist>
+        </div>`;
+        // Journeys and routes: either can be run.
+        const journeys = this.manager.journeys();
+        const routes = this.manager.visibleRoutes();
+        const group = (labelKey, items, prefix, selectedId) => items.length
+            ? `<optgroup label="${esc(localize(labelKey))}">${items.map(item =>
+                `<option value="${prefix}:${esc(item.id)}"${item.id === selectedId ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</optgroup>`
+            : '';
+        const pick = journeys.length || routes.length
+            ? `<select class="cartographer-parallax-set-select" data-field="barPath" aria-label="${esc(localize('whichJourney'))}" data-tooltip="${esc(localize('whichJourney'))}">`
+                + group('tabJourneys', journeys, 'j', link?.journeyId) + group('tabRoutes', routes, 'r', link?.routeId) + '</select>'
+            : '';
+        return { left: play + slider, right: pick + gear };
+    }
+
+    /**
+     * Show or hide the settings. Hidden, the window shrinks to its bar;
+     * shown, it returns to the height it last had open.
+     */
+    async toggleSettings() {
+        const rect = this.element?.getBoundingClientRect();
+        if (this.settingsOpen && rect?.height) this._settingsHeight = rect.height;
+        this.settingsOpen = !this.settingsOpen;
+        this._savePrefs();
+        await this.render();
+        if (this.minimized) return;
+        this.setPosition({ height: this.settingsOpen ? (this._settingsHeight ?? this.options.position.height) : 'auto' });
+    }
+
+    /** With settings hidden the window is only its bar: any height asked for fits the bar. */
+    setPosition(position = {}) {
+        if (this.settingsOpen || !this.element || this.minimized) return super.setPosition(position);
+        return super.setPosition({ ...position, height: 'auto' });
     }
 
     _paces(units) {
@@ -132,6 +256,37 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
     _marker(link) {
         if (!game.user.isGM || !travelPinsManager.pinFor(link)) return null;
         return { shown: travelPinsManager.isShown(link) };
+    }
+
+    /** Play or stop a route or journey from the map. One that no animated scene drives sets out at the pace chosen for the times. */
+    async togglePlay(link) {
+        if (!link) return;
+        if (journeysManager.isPlaying(link)) await journeysManager.stop(link);
+        else await journeysManager.play(link, this._barPace?.perHour ?? null);
+    }
+
+    /**
+     * A route's or journey's travel settings, for the GM: its pace and which
+     * animated scenes drive it. A pace that matches none of the presets shows
+     * as itself. Running it is the bar's job.
+     */
+    _pathControls(link, paces, units) {
+        if (!game.user.isGM) return null;
+        const progress = this.manager.progress(link);
+        const travel = progress?.travel;
+        const pace = Number(travel?.pace) || 0;
+        const chosen = paces.find(p => pace > 0 && Math.abs(p.perHour - pace) <= p.perHour * 0.005);
+        const scenes = journeysManager.linkedScenes(link).map(scene => scene.name);
+        return {
+            playing: !!travel?.motion?.playing,
+            followClock: !!travel?.followClock,
+            paces: [
+                ...(pace > 0 && !chosen ? [{ id: '', label: game.i18n.format(`${MODULE.ID}.routes.customPace`, { pace: formatDistance(pace, units) }), selected: true }] : []),
+                ...(!(pace > 0) ? [{ id: '', label: game.i18n.localize(`${MODULE.ID}.routes.noPace`), selected: true }] : []),
+                ...paces.map(p => ({ id: p.id, label: p.label, selected: p === chosen }))
+            ],
+            drivenBy: scenes.length ? game.i18n.format(`${MODULE.ID}.routes.drivenBy`, { scenes: scenes.join(', ') }) : ''
+        };
     }
 
     async toggleMarker({ routeId, journeyId }) {
@@ -173,6 +328,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             ?? paces.find(p => p.id === 'dnd5e.normal') ?? paces.find(p => p.id === 'walking') ?? paces[0] ?? null;
 
         const { hoursPerDay } = this.manager.settings(scene);
+        this._barPace = pace;
         const visible = this.manager.visibleRoutes(scene);
         const routes = visible.map(route => {
             const { distance, legs } = this.manager.measure(route, scene);
@@ -190,6 +346,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
                 maker,
                 progressText: this._progressText({ sceneId: scene.id, routeId: route.id }, units),
                 marker: this._marker({ sceneId: scene.id, routeId: route.id }),
+                controls: this._pathControls({ sceneId: scene.id, routeId: route.id }, paces, units),
                 length: formatDistance(distance, units),
                 legsText: game.i18n.format(`${MODULE.ID}.routes.${legs.length === 1 ? 'oneLeg' : 'legs'}`, { count: legs.length }),
                 difficult: terrain.some(t => terrainFactor(t) < 1),
@@ -221,6 +378,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
                 canEdit,
                 length: formatDistance(distance, units),
                 progressText: this._progressText({ sceneId: scene.id, journeyId: journey.id }, units),
+                controls: this._pathControls({ sceneId: scene.id, journeyId: journey.id }, paces, units),
                 marker: this._marker({ sceneId: scene.id, journeyId: journey.id }),
                 timeText: this._timeText(travelHours(legs, path.terrain, pace?.perHour), hoursPerDay),
                 gapText: path.gaps.length
@@ -264,34 +422,64 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
                 dayWarning: hoursPerDay > FORCED_MARCH_HOURS ? localize('warnForcedMarch')
                     : pace?.group === 'mount' && hoursPerDay > MOUNT_HOURS_PER_DAY ? localize('warnMounts') : '',
                 drawing: !!this.manager.draft,
-                showing: this.manager.show
+                showing: this.manager.show,
+                barJourneyId: this._barPath(scene)?.journeyId ?? null,
+                barRouteId: this._barPath(scene)?.routeId ?? null,
+                paceGroups: PACE_GROUPS.map(group => ({
+                    label: game.i18n.localize(`${MODULE.ID}.parallax.paceGroup.${group}`),
+                    paces: paces.filter(p => p.group === group).map(p => ({ id: p.id, label: p.label, selected: p === pace }))
+                })).filter(group => group.paces.length)
             }
         );
 
-        const drawing = !!this.manager.draft;
-        const drawLabel = localize(drawing ? 'finishDrawing' : 'draw');
-        const draw = `<button type="button" class="cartographer-parallax-button is-labelled${drawing ? ' is-active' : ''}" data-action="route-draw" data-tooltip="${foundry.utils.escapeHTML(localize('drawHint'))}"><i class="fa-solid ${drawing ? 'fa-check' : 'fa-route'}"></i><span>${foundry.utils.escapeHTML(drawLabel)}</span></button>`;
-        const paceSelect = paces.length
-            ? `<select class="cartographer-routes-pace" data-field="routePace" data-tooltip="${foundry.utils.escapeHTML(localize('paceHint'))}">${PACE_GROUPS.map(group => {
-                const options = paces.filter(p => p.group === group)
-                    .map(p => `<option value="${p.id}"${p === pace ? ' selected' : ''}>${foundry.utils.escapeHTML(p.label)}</option>`).join('');
-                return options ? `<optgroup label="${foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.parallax.paceGroup.${group}`))}">${options}</optgroup>` : '';
-            }).join('')}</select>`
-            : '';
+        const bar = this._buildBar(localize);
         return {
             appId: this.id,
-            bodyContent,
+            bodyContent: this.settingsOpen ? bodyContent : '',
             showToolBar: true,
-            toolBarLeft: draw,
-            toolBarRight: paceSelect
+            toolBarLeft: bar.left,
+            toolBarRight: bar.right
         };
     }
 
     _onRender(context, options) {
         super._onRender?.(context, options);
+        this.element?.classList.toggle('is-settings-closed', !this.settingsOpen);
+        this._startLiveProgress();
         if (this._inputsBound || !this.element) return;
         this.element.addEventListener('change', this._onChange);
+        this.element.addEventListener('input', event => {
+            // The speed's readout follows the slider while it moves; the change is made on release.
+            if (event.target?.dataset?.field !== 'journeySpeed') return;
+            const readout = event.target.parentElement?.querySelector('.cartographer-parallax-value');
+            if (readout) readout.textContent = formatSpeed(RoutesWindow.snap(event.target.value));
+        });
         this._inputsBound = true;
+    }
+
+    static snap(value) {
+        const n = Number(value) || 0;
+        return Math.abs(n) < SPEED_SNAP ? 0 : n;
+    }
+
+    /**
+     * While anything on this map is moving, its progress lines are rewritten
+     * a few times a second, without re-rendering the window -- which would
+     * drop a slider mid-drag.
+     */
+    _startLiveProgress() {
+        if (this._liveTimer) return;
+        this._liveTimer = setInterval(() => {
+            if (!this.rendered || !canvas?.scene) return;
+            const units = canvas.scene.grid?.units ?? '';
+            for (const element of this.element?.querySelectorAll('[data-progress-route], [data-progress-journey]') ?? []) {
+                const link = element.dataset.progressJourney
+                    ? { sceneId: canvas.scene.id, journeyId: element.dataset.progressJourney }
+                    : { sceneId: canvas.scene.id, routeId: element.dataset.progressRoute };
+                const text = this._progressText(link, units);
+                if (text && element.textContent !== text) element.textContent = text;
+            }
+        }, 250);
     }
 
     _onChange(event) {
@@ -308,6 +496,15 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             void this.manager.setTerrain(target.dataset.routeId, Number(target.dataset.leg), target.value);
         } else if (field === 'routeTerrain' && target.value) {
             void this.manager.setTerrain(target.dataset.routeId, null, target.value);
+        } else if (field === 'journeySpeed') {
+            const link = this._barPath();
+            if (link) void journeysManager.setSpeed(link, RoutesWindow.snap(target.value));
+        } else if (field === 'barPath' && target.value) {
+            const [kind, id] = target.value.split(':');
+            void this.manager.setSettings({ active: kind === 'j' ? { journeyId: id } : { routeId: id } });
+        } else if (field === 'pathPace' && target.value) {
+            const pace = this._paces(canvas.scene?.grid?.units).find(p => p.id === target.value);
+            if (pace) void journeysManager.setPace(this._linkFrom(target.dataset), pace.perHour);
         } else if (field === 'journeyAdd' && target.value) {
             const journey = this.manager.getJourney(target.dataset.journeyId);
             if (journey) void this.manager.updateJourney(journey.id, { routeIds: [...journey.routeIds, target.value] });
@@ -419,6 +616,8 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
     }
 
     _onClose(options) {
+        clearInterval(this._liveTimer);
+        this._liveTimer = null;
         this.manager?.onWindowClosed(this);
         return super._onClose?.(options);
     }

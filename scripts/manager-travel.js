@@ -144,10 +144,62 @@ class TravelManager {
         this._lastDraw = now;
         if (!canvas?.ready) return;
         const summary = this.summary();
-        this._drawHud(summary);
+        // On a map, the display shows the route or journey under way there.
+        this._drawHud(this.mapSummary() ?? summary);
         this._drawReadouts(summary);
         this._checkArrival(summary);
         this._checkTerrain();
+    }
+
+    /**
+     * The odometer for a map: the route or journey under way on the scene on
+     * the canvas -- the map's active one if it is moving, else any that is --
+     * read from its progress, in the same shape as summary(). Null when
+     * nothing on this map is moving, or it is at rest after easing to a stop.
+     */
+    mapSummary(now = game.time.serverTime) {
+        const scene = canvas?.scene;
+        if (!scene) return null;
+        const underWay = link => {
+            const progress = routesManager.progress(link, now);
+            const motion = progress?.travel.motion;
+            if (!motion) return null;
+            const resting = !motion.playing && now >= (Number(motion.anchorAt) || 0) + (Number(motion.easeSeconds) || 0) * 1000;
+            return resting ? null : progress;
+        };
+        const active = routesManager.settings(scene).active;
+        let progress = active ? underWay({ sceneId: scene.id, ...active }) : null;
+        if (!progress) {
+            const links = [
+                ...routesManager.journeys(scene).map(journey => ({ sceneId: scene.id, journeyId: journey.id })),
+                ...routesManager.routes(scene).map(route => ({ sceneId: scene.id, routeId: route.id }))
+            ];
+            for (const link of links) {
+                progress = underWay(link);
+                if (progress) break;
+            }
+        }
+        if (!progress) return null;
+        const units = scene.grid?.units ?? '';
+        const remaining = Math.max(0, progress.length - progress.distance);
+        const speed = Math.abs(Number(progress.travel.motion.masterSpeed) || 0);
+        const pace = Number(progress.travel.pace) || 0;
+        // The rest of the way in effort, so difficult terrain ahead makes it longer.
+        const etaSeconds = pace > 0 && speed > 0 ? ((progress.totalEffort - progress.effort) / (pace * speed)) * 3600 : null;
+        const arrived = progress.travel.arrived || progress.distance >= progress.length * (1 - 1e-9) - 1e-9;
+        return {
+            configured: true,
+            showHud: true,
+            distance: progress.distance,
+            destination: progress.length,
+            remaining,
+            progress: progress.length > 0 ? Math.min(1, progress.distance / progress.length) : 0,
+            arrived,
+            traveledText: formatDistance(progress.distance, units),
+            remainingText: formatDistance(remaining, units),
+            destinationText: formatDistance(progress.length, units),
+            etaText: etaSeconds === null || remaining === 0 ? '' : formatSpan(etaSeconds)
+        };
     }
 
     /**

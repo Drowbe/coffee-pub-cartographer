@@ -103,8 +103,10 @@ feet.
 - **Reset odometer** starts counting from zero again.
 
 The master speed runs the party faster or slower than its pace, and running in reverse backs the
-odometer up. Scene motion only reads Blacksmith's clock; it never moves Foundry's in-game time, and a
-jump in time -- a rest, or the GM adding an hour -- does not move the scenery or the odometer.
+odometer up. Scene motion only reads Blacksmith's clock; it never moves Foundry's in-game time. On its
+own, a jump in time -- a rest, or the GM adding an hour -- does not move the scenery or the odometer.
+Following a route or journey on a map that follows the clock, though, where the party is goes with the
+date and time, so scrubbing time moves the odometer with it; see [Routes](userguide-routes.md).
 
 ### Groups
 

@@ -53,6 +53,9 @@ class TravelPinsManager {
         on('canvasTearDown', () => this._stop());
         on(`${MODULE.ID}.pathTravelChanged`, ({ link, travel }) => this._onTravelChanged(link, travel));
         on(`${MODULE.ID}.pathRemoved`, link => this._onPathRemoved(link));
+        // Scrubbing the world time moves a party that follows the clock, even
+        // stopped; the GM saves where it lands once the scrubbing settles.
+        on('updateWorldTime', () => this._onWorldTime());
         this._start();
     }
 
@@ -105,34 +108,49 @@ class TravelPinsManager {
 
     /**
      * Each frame, on every client: put each marker on this map where the
-     * party is. A moving journey's marker takes a live position; one at rest
-     * keeps it only until the saved position has caught up.
+     * party is. Wherever that differs from the saved position -- moving, or
+     * moved by a scrub of the world time -- the marker takes a live position;
+     * once the saved one has caught up, it lets go of it.
      */
     _tick() {
         const pins = TravelPinsManager.pins();
         if (!pins || !canvas?.ready || !canvas.scene || !TravelPinsManager.canMoveLive()) return;
-        const now = game.time.serverTime;
+        const near = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) <= MOVE_EPSILON;
         for (const link of this._travelling()) {
             const id = TravelPinsManager.pinId(link);
             if (!pins.exists?.(id, { sceneId: link.sceneId })) continue;
-            const progress = routesManager.progress(link, now);
-            const point = progress?.point;
+            const point = routesManager.progress(link)?.point;
             if (!point) continue;
             const live = this._live.get(id);
-            if (TravelPinsManager.atRest(progress.travel, now)) {
-                if (!live) continue;
-                const stored = pins.get?.(id, { sceneId: link.sceneId });
-                const caughtUp = stored && Math.hypot(stored.x - point.x, stored.y - point.y) <= MOVE_EPSILON;
-                if (caughtUp) {
+            const stored = pins.get?.(id, { sceneId: link.sceneId });
+            if (stored && near(stored, point)) {
+                if (live) {
                     pins.clearLivePosition(id);
                     this._live.delete(id);
-                    continue;
                 }
+                continue;
             }
-            if (live && Math.hypot(live.x - point.x, live.y - point.y) <= MOVE_EPSILON) continue;
+            if (live && near(live, point)) continue;
             pins.setLivePosition(id, { x: point.x, y: point.y });
             this._live.set(id, { x: point.x, y: point.y });
         }
+    }
+
+    /**
+     * The world time changed: a stopped party that follows the clock may have
+     * been moved by a scrub. The GM saves their markers once it settles.
+     */
+    _onWorldTime() {
+        if (!game.user.isGM || !TravelPinsManager.pins()) return;
+        clearTimeout(this._worldSave);
+        this._worldSave = setTimeout(() => {
+            for (const scene of game.scenes.contents) {
+                for (const link of this._travelling(scene)) {
+                    const travel = routesManager.progress(link)?.travel;
+                    if (travel?.followClock && !travel.motion.playing) void this.savePosition(link);
+                }
+            }
+        }, 600);
     }
 
     // ==================================================================

@@ -497,6 +497,106 @@ console.log('\nroutes: who may change what');
     await tp._onPathRemoved(link);
     check(!stored.has(pinId), 'deleting the journey deletes its marker');
     game.modules = { get: () => null };
+
+    console.log('\nrunning a journey from the map');
+    const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+    const warnings = [];
+    ui.notifications.warn = m => warnings.push(m);
+    await load(`const MODULE={ID:'m',NAME:'M'}; const cartographerToolbar={registerTool(){}}; const routesManager=globalThis.rm; const parallaxManager=globalThis.pm;`
+        + `const travelManager={ constructor: { clockApi: () => null } };\n${shared}\n${strip('utils-routes.js')}\n`
+        + strip('manager-journeys.js').replace('const journeysManager', 'globalThis.jm').replace(/^export \{[^}]*\};?$/m, ''));
+    // The map: 50 ft of road and 50 ft of forest, as before.
+    flags.routes = { list: [], journeys: [] };
+    const m1 = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Road', points: [[0, 0], [1400, 0]] } }, gm);
+    const m2 = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Wood', points: [[1400, 0], [2800, 0]], terrain: ['forest'] } }, gm);
+    const walk = await rm._apply({ action: 'journey-create', sceneId: 'here', journey: { name: 'Walk', routeIds: [m1.id, m2.id] } }, gm);
+    const go = { sceneId: 'here', journeyId: walk.id };
+    flags.parallax = { layers: [], sets: [] };
+    pm.state = pm._readState();
+    await jm.play(go);
+    check(warnings.length === 1 && !jm.isPlaying(go), 'a journey nothing drives needs a pace before it can set out');
+    await jm.play(go, 18000);
+    check(jm.isPlaying(go) && rm.progress(go).travel.pace === 18000 && rm.progress(go).travel.motion.easeSeconds === 2,
+        'played from the map, it sets out at the pace chosen, easing up');
+    check(jm.activeLink()?.journeyId === walk.id, 'and becomes the journey the map\'s Play button runs');
+    now += 2000 + 5000;
+    // 2 s of ease (smoothstep averages half speed: 5 ft), then 5 s at 5 ft/s.
+    check(Math.abs(rm.progress(go).distance - 30) < 1e-6, 'it travels on the map with no animated scene: 30 ft after the ease and 5 s');
+    await jm.stop(go);
+    check(!jm.isPlaying(go), 'Stop stops it');
+    await jm.reset(go);
+    check(rm.progress(go).distance === 0, 'reset takes it back to the start');
+
+    // An animated scene, not on the canvas, that follows the journey.
+    const animFlags = { parallax: { layers: [layer('ground', { speed: 140 })], sets: [], easeSeconds: 0, masterSpeed: 1, travel: { route: go } } };
+    const anim = {
+        id: 'anim', name: 'The Road', grid: { size: 140, distance: 5, units: 'ft' },
+        getFlag: (_m, k) => animFlags[k],
+        setFlag: async (_m, k, v) => { animFlags[k] = structuredClone(v); }
+    };
+    game.scenes = Object.assign([scene, anim], { get: id => [scene, anim].find(s => s.id === id) ?? null, contents: [scene, anim] });
+    check(jm.linkedScenes(go).map(s => s.id).join() === 'anim', 'the map knows which animated scenes follow the journey');
+    await jm.setPace(go, 9000);
+    check(animFlags.parallax.layers[0].speed === 70 && rm.progress(go).travel.pace === 9000,
+        'the map\'s pace sets the following scene\'s ground speed, and through it the journey\'s');
+    await jm.play(go);
+    check(animFlags.parallax.playing === true && jm.isPlaying(go), 'Play on the map plays the scene that follows it, though it is not on the canvas');
+    now += 25000;
+    // 25 s at 2.5 ft/s: 50 ft of road, into the forest.
+    jm._lastWatch = -Infinity;
+    jm._watch();
+    await settle();
+    check(animFlags.parallax.terrainFactor === 0.5, 'reaching the forest slows that scene\'s scenery, from the map');
+    now += 60000;
+    jm._lastWatch = -Infinity;
+    jm._watch();
+    await settle();
+    check(!jm.isPlaying(go) && rm.progress(go).travel.arrived && animFlags.parallax.playing === false && animFlags.parallax.travel.arrived,
+        'at the end, the GM\'s client stops the journey and the scene, and marks them arrived');
+    await jm.play(go);
+    check(jm.isPlaying(go) && rm.progress(go).distance === 0, 'playing an arrived journey sets out again from the start');
+    await jm.setSpeed(go, -1);
+    check(animFlags.parallax.masterSpeed === -1 && rm.progress(go).travel.motion.masterSpeed === -1, 'the speed reaches both');
+    await jm.stop(go);
+    game.scenes = Object.assign([scene], { get: id => (id === scene.id ? scene : null), contents: [scene] });
+
+    console.log('\nrunning a single route, and what is drawn meanwhile');
+    const lone = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Lone', points: [[0, 500], [1400, 500]] } }, gm);
+    const one = { sceneId: 'here', routeId: lone.id };
+    check(rm.travellingRouteIds() === null, 'with nothing moving, every route is drawn');
+    await jm.play(one, 18000);
+    check(jm.isPlaying(one) && jm.activeLink()?.routeId === lone.id, 'a single route can be run, and becomes the one the map\'s bar runs');
+    check([...rm.travellingRouteIds()].join() === lone.id, 'while it runs, only it is drawn');
+    await jm.stop(one);
+    await jm.play(go);
+    const shown = rm.travellingRouteIds();
+    check(shown.size === 2 && shown.has(m1.id) && shown.has(m2.id) && !shown.has(lone.id), 'while a journey runs, only its routes are drawn');
+    await jm.stop(go);
+
+    console.log('\nfollowing the world clock: place goes with the date and time');
+    let world = 100000;
+    Object.defineProperty(game.time, 'worldTime', { get: () => world, configurable: true });
+    await jm.reset(one);
+    await jm.setPace(one, 3600);
+    await jm.setFollowClock(one, true);
+    check(rm.progress(one).travel.followClock === true, 'a route run from the map can follow the world clock');
+    await jm.play(one);
+    world += 25;
+    // 1 ft each in-world second, whatever real time does.
+    now += 999999;
+    check(Math.abs(rm.progress(one).distance - 25) < 1e-6, 'it travels with in-world time, not real time');
+    world += 3600;
+    check(Math.abs(rm.progress(one).distance - 50) < 1e-6, 'scrubbing time forward moves the party on, to the end');
+    world -= 3600 - 10;
+    check(Math.abs(rm.progress(one).distance - 35) < 1e-6, 'scrubbing back moves them back to where they were then');
+    await jm.stop(one);
+    world += 600;
+    check(Math.abs(rm.progress(one).distance - 35) < 1e-6, 'stopped, time passing does not move them');
+    world -= 615;
+    check(Math.abs(rm.progress(one).distance - 20) < 1e-6, 'but scrubbing back past the stop puts them where they were');
+    await jm.setFollowClock(one, false);
+    now += 5000;
+    check(!rm.progress(one).travel.followClock && rm.progress(one).travel.timeline.length === 0, 'off the clock, the timeline is dropped and real time drives it again');
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');

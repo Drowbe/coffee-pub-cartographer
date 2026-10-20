@@ -22,6 +22,7 @@ canvas, and how the window is put together.
 | `scripts/utils-routes.js` | Route geometry: lengths, a point along a route, unit conversion. |
 | `scripts/manager-routes.js`, `scripts/window-routes.js`, `templates/window-routes.hbs` | Routes: saving, drawing on the canvas, the click-to-place tool, and the Routes window. |
 | `scripts/manager-travelpins.js` | The party's marker: a Blacksmith pin per route or journey that has set out, moved along it. |
+| `scripts/manager-journeys.js` | Running a journey from its map: Play/Stop, speed, pace, reset, and the GM's watch over journeys that are moving. |
 | `scripts/window-parallax.js`, `templates/window-parallax.hbs`, `styles/tool-parallax.css` | The window. |
 
 ## Where state lives
@@ -123,6 +124,28 @@ showing. Its odometer reads the path. The scenery's speed is multiplied by `terr
 `targetSpeed` (utils-motion.js); the GM's client sets it as the party crosses into a leg of other
 terrain (`_checkTerrain` in manager-travel.js), so it eases like any change of speed. The
 distance never waits on that: it is exact from the effort; only the picture follows.
+
+**Following the world clock**, a path's place is a function of the world time, not of real time:
+`travel.timeline` is a list of changes `{ w, effort, rate }` -- the world time each was made, the
+effort then, and the effort per in-world second after (pace times master speed while playing, else
+0) -- and `timelineEffort` reads the last change at or before a world time. Every `setPathTravel`
+on a path that follows the clock adds a change at the GM's world time, dropping any after it, so a
+change made after scrubbing back rewrites what followed; the last 500 are kept. Scrubbing needs no
+handling of its own: the next frame reads the new time. `routesManager.worldTime()` carries the world
+time on at Blacksmith's clock rate between updates, for at most ten seconds, so the marker moves
+smoothly rather than stepping. The marker takes a live position wherever the party's place differs
+from the saved pin, and the GM saves a stopped party's marker after a scrub settles.
+
+**Controls from the map** (manager-journeys.js). A journey followed by animated scenes is driven
+through them: the map's Play, speed and pace change each following scene with
+`parallaxManager.commitScene`, which rebases and writes a scene's parallax from its own flag and
+grid without it being on the canvas, and each pushes on to the journey as its own controls do. A
+journey nothing follows is changed directly with `setPathTravel`. The GM's client watches every
+moving journey on a ticker: it slows the scenery of following scenes that are not on the canvas
+for the terrain, keeps their world-clock rate, and stops a journey that reaches its end when no
+following scene is on the canvas to notice (manager-travel.js covers the one that is). The map's
+"active" journey -- the one the sub-menubar's Play runs -- is `settings.active` in the `routes`
+flag: the last one played there.
 
 **The marker** is a Blacksmith pin, id `coffee-pub-cartographer-travel-j-<journeyId>` (or
 `-r-<routeId>`), type `journey`, created by the GM's client the first time the path's travel is

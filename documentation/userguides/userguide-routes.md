@@ -14,7 +14,7 @@ that shows or hides routes on your screen, and **Routes on this map**, which ope
 
 Anyone can draw a route. A player's route is saved by the GM's client, so a GM has to be online.
 
-With Draw on:
+**Draw route** is also at the top of the Routes window's Routes tab. With Draw on:
 
 - **Click** to place each waypoint -- the start, every bend in the road, and the end. The distance so
   far, and the length of the leg being drawn, follow the pointer.
@@ -89,7 +89,7 @@ Deleting a route takes it out of every journey; deleting a journey leaves its ro
 The window lists the map's routes. Each shows its colour, its name and its total length, and below
 that how many legs it has and how long it takes at a pace.
 
-- **Times at** -- the pace the times are worked out at, chosen at the top right: with D&D 5e, the
+- **Times at** -- the pace the times are worked out at: with D&D 5e, the
   rules' paces, mounts and vehicles; in other systems, everyday ones.
 - **Travel day** -- how many hours a day the party plans to travel (8 to start). The GM sets it for
   the map, so everyone plans with the same day. Each time is the hours of travel the trip takes, and,
@@ -131,6 +131,48 @@ but cannot be chosen.
 
 The map does not yet show where along the route the party is; the odometer's distance is the only
 measure of progress for now.
+
+## Run a route or journey from the map
+
+The GM can run a single route or a whole journey from its map, with or without an animated scene
+showing it. The Routes
+window's bar works as the Scene Motion window's does. From the left:
+
+- **Play / Stop** -- the button says what pressing it will do. Stop eases the journey to a halt;
+  Play eases it back up. Playing a journey that has arrived starts it again from the beginning.
+- **Speed** -- centred on zero, as a multiple of the pace. Right of centre runs onward, left of
+  centre runs back along the way, and it snaps to a stop near the middle.
+- **Which** -- the route or journey the bar runs, from the map's journeys and routes. It is outlined
+  in the window.
+- **The gear** -- shows and hides the settings. Hidden, the window is just the bar.
+
+Each journey's settings on the Journeys tab -- and each route's, with its legs open -- hold its
+**Pace**, how fast the party travels it, and **Reset** (the rewind button), back to the start. One
+no animated scene shows needs a pace before it can set out; Play uses the pace chosen under **Times
+at** if it has none.
+
+**Follow world clock**, in the same settings, ties where the party is to the world's date and time
+(Coffee Pub Blacksmith's world clock, or Foundry's own time). As the clock runs, they travel at the
+pace, slowed by terrain; stopped, they stay put however much time passes. Scrubbing time moves them:
+forward to where they will be, back to where they were then -- including back past a stop, to where
+they were still travelling. Play, Stop or a change of speed or pace made after scrubbing back
+replaces what had followed. With an animated scene following the journey, this is that scene's own
+Follow world clock switch.
+
+While a route or journey is under way, the map shows only the routes it travels, and the same
+odometer as an animated scene's -- distance travelled, how far is left, the arrival time and a
+progress bar -- for everyone. It goes when the party comes to rest. Waypoints are shown only while a
+route is drawn or edited; otherwise a route is its line and its label.
+
+The **Routes** section of the sub-menubar has a Play button too: it plays or stops what the bar runs
+on the map on screen.
+
+If an animated scene follows the journey, it moves with these controls even though it is not the
+scene on screen: Play on the map starts its scenery, the pace sets its ground speed, and its scenery
+still slows in difficult terrain. The journey card names the scenes that follow it. Its own controls
+work too; both drive the same journey.
+
+At the end of the way the journey stops, for everyone, and is marked arrived.
 
 ## The party's marker
 

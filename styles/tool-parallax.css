@@ -917,6 +917,17 @@
     height: 24px;
 }
 
+.cartographer-parallax-window .cartographer-routes-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* The journey the bar runs. */
+.cartographer-parallax-window .cartographer-routes-route.is-selected {
+    border-color: var(--blacksmith-color-brand-accent);
+}
+
 .cartographer-parallax-window .cartographer-routes-progress {
     display: flex;
     align-items: center;

@@ -1,9 +1,29 @@
 {{! The map's routes and journeys. Built by window-routes.js; styled in tool-parallax.css. }}
 
 {{! How far the party has come, and for the GM, the marker on the map shown to players or not. }}
+{{! A route's or journey's travel settings, for the GM. Running it is the bar's job. }}
+{{#*inline "pathControls"}}
+<div class="cartographer-routes-terrain-all" data-tooltip="{{localize "coffee-pub-cartographer.routes.journeyPaceHint"}}">
+    <span>{{localize "coffee-pub-cartographer.routes.journeyPace"}}</span>
+    <span class="cartographer-routes-controls">
+        <select data-field="pathPace" {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}>
+            {{#each controls.paces}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
+        </select>
+        <button type="button" class="cartographer-parallax-button" data-action="path-reset" {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}
+            data-tooltip="{{localize "coffee-pub-cartographer.routes.resetJourney"}}"><i class="fa-solid fa-backward-fast"></i></button>
+    </span>
+</div>
+<div class="cartographer-routes-terrain-all" data-tooltip="{{localize "coffee-pub-cartographer.routes.followClockHint"}}">
+    <span>{{localize "coffee-pub-cartographer.parallax.travelFollowClock"}}</span>
+    <button type="button" class="cartographer-parallax-switch{{#if controls.followClock}} is-on{{/if}}" role="switch" aria-checked="{{#if controls.followClock}}true{{else}}false{{/if}}"
+        data-action="path-clock" {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}><span class="cartographer-parallax-switch-knob"></span></button>
+</div>
+{{#if controls.drivenBy}}<p class="cartographer-parallax-hint">{{controls.drivenBy}}</p>{{/if}}
+{{/inline}}
+
 {{#*inline "pathProgress"}}
 <p class="cartographer-parallax-hint cartographer-routes-progress">
-    <span><i class="fa-solid fa-person-walking"></i> {{progressText}}</span>
+    <span><i class="fa-solid fa-person-walking"></i> <span {{#if (eq kind "journeyId")}}data-progress-journey="{{id}}"{{else}}data-progress-route="{{id}}"{{/if}}>{{progressText}}</span></span>
     {{#if marker}}
     <button type="button" class="cartographer-parallax-button{{#if marker.shown}} is-active{{/if}}" data-action="path-marker"
         {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}
@@ -24,7 +44,16 @@
     {{else}}
     <dl class="cartographer-parallax-measures">
         <dt>{{localize "coffee-pub-cartographer.parallax.measureGrid"}}</dt><dd>{{gridText}}</dd>
-        {{#if pace}}<dt>{{localize "coffee-pub-cartographer.routes.timesAt"}}</dt><dd>{{pace}}</dd>{{/if}}
+        {{#if paceGroups.length}}
+        <dt>{{localize "coffee-pub-cartographer.routes.timesAt"}}</dt>
+        <dd>
+            <select class="cartographer-routes-pace" data-field="routePace" data-tooltip="{{localize "coffee-pub-cartographer.routes.paceHint"}}">
+                {{#each paceGroups}}
+                <optgroup label="{{label}}">{{#each paces}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}</optgroup>
+                {{/each}}
+            </select>
+        </dd>
+        {{/if}}
         <dt>{{localize "coffee-pub-cartographer.routes.travelDay"}}</dt>
         <dd>
             {{#if canPlan}}
@@ -45,8 +74,12 @@
     {{/unless}}
 
     {{#if isRoutes}}
+    <div class="cartographer-parallax-panel-actions">
+        <button type="button" class="cartographer-parallax-button is-labelled{{#if drawing}} is-active{{/if}}" data-action="route-draw"
+            data-tooltip="{{localize "coffee-pub-cartographer.routes.drawHint"}}"><i class="fa-solid {{#if drawing}}fa-check{{else}}fa-route{{/if}}"></i><span>{{#if drawing}}{{localize "coffee-pub-cartographer.routes.finishDrawing"}}{{else}}{{localize "coffee-pub-cartographer.routes.draw"}}{{/if}}</span></button>
+    </div>
     {{#each routes}}
-    <div class="cartographer-routes-route{{#if hidden}} is-hidden{{/if}}{{#if editing}} is-editing{{/if}}">
+    <div class="cartographer-routes-route{{#if hidden}} is-hidden{{/if}}{{#if editing}} is-editing{{/if}}{{#if (eq id @root.barRouteId)}} is-selected{{/if}}">
         <div class="cartographer-routes-head">
             {{#if canEdit}}
             <button type="button" class="cartographer-routes-swatch" style="background: {{color}}" data-action="route-color" data-route-id="{{id}}"
@@ -73,6 +106,7 @@
         <p class="cartographer-parallax-hint cartographer-routes-drawing">{{localize "coffee-pub-cartographer.routes.editHint"}}</p>
         {{/if}}
         {{#if progressText}}{{> pathProgress kind="routeId"}}{{/if}}
+        {{#if controls}}{{#if expanded}}{{> pathControls kind="routeId"}}{{/if}}{{/if}}
         <div class="cartographer-routes-meta">
             <button type="button" class="cartographer-routes-legs-toggle" data-action="route-legs" data-route-id="{{id}}">
                 <i class="fa-solid {{#if expanded}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i> {{legsText}}{{#if difficult}} · {{localize "coffee-pub-cartographer.routes.someDifficult"}}{{/if}}
@@ -117,7 +151,7 @@
             data-tooltip="{{localize "coffee-pub-cartographer.routes.journeyHint"}}"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.routes.newJourney"}}</span></button>
     </div>
     {{#each journeys}}
-    <div class="cartographer-routes-route">
+    <div class="cartographer-routes-route{{#if (eq id @root.barJourneyId)}} is-selected{{/if}}">
         <div class="cartographer-routes-head">
             <i class="fa-solid fa-map-signs"></i>
             <span class="cartographer-routes-name">{{name}}</span>
@@ -132,6 +166,7 @@
             {{/if}}
         </div>
         {{#if progressText}}{{> pathProgress kind="journeyId"}}{{/if}}
+        {{#if controls}}{{> pathControls kind="journeyId"}}{{/if}}
         <div class="cartographer-routes-meta">
             <span>{{#if gapText}}<i class="fa-solid fa-triangle-exclamation"></i> {{gapText}}{{/if}}</span>
             {{#if timeText}}<span>{{timeText}}</span>{{/if}}

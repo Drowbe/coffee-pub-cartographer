@@ -351,20 +351,23 @@ class ParallaxManager {
         return { x: layer.offsetX + dir.x * distance, y: layer.offsetY + dir.y * distance };
     }
 
-    /** The current state with travel so far folded into each offset, anchored at now. */
-    _rebase() {
+    /**
+     * A state with travel so far folded into each offset, anchored at now:
+     * the scene on the canvas, or another scene's state read from its flag.
+     */
+    _rebase(current = this.state, scene = canvas.scene) {
         const now = game.time.serverTime;
-        const state = foundry.utils.deepClone(this.state);
+        const state = foundry.utils.deepClone(current);
         for (const layer of state.layers) {
-            const { x, y } = this.layerOffset(layer, now);
+            const { x, y } = this.layerOffset(layer, now, current);
             layer.offsetX = x;
             layer.offsetY = y;
         }
-        state.travel.distance = this.travelDistance(now);
+        state.travel.distance = this.travelDistance(now, current, scene);
         state.travel.clockMotion = rebaseMotion(state.travel.clockMotion, now);
         // Whatever changes next eases from the speed in effect right now, so a
         // change made halfway through an ease carries on from where it was.
-        state.rampFrom = motionSpeed(this.state, now);
+        state.rampFrom = motionSpeed(current, now);
         state.anchorAt = now;
         return state;
     }
@@ -384,7 +387,26 @@ class ParallaxManager {
         this.state = state;
         this._applyState();
         await canvas.scene.setFlag(MODULE.ID, FLAG_KEY, state);
-        await this._pushJourney(before, state);
+        await this._pushJourney(before, state, canvas.scene);
+    }
+
+    /**
+     * Apply a change to any scene's parallax, not only the one on the canvas:
+     * how the map's controls drive an animated scene following its journey
+     * while the GM looks at the map. The same rebase and write as _commit,
+     * from the scene's own flag and grid; nothing is drawn, since the scene
+     * is not on this canvas. `mutate` gets the state and the scene.
+     */
+    async commitScene(scene, mutate) {
+        if (!game.user.isGM || !scene) return;
+        if (scene.id === canvas.scene?.id) return this._commit(state => mutate(state, scene));
+        const before = this._readState(scene);
+        const state = this._rebase(before, scene);
+        mutate(state, scene);
+        state.layers = normalizeOrder(state.layers);
+        this._syncClock(state);
+        await scene.setFlag(MODULE.ID, FLAG_KEY, state);
+        await this._pushJourney(before, state, scene);
     }
 
     // ==================================================================
@@ -400,34 +422,38 @@ class ParallaxManager {
      * Terrain is the journey's: it slows the party, and the GM's client slows
      * the scenery to match (see manager-travel.js).
      */
-    _journeyMotion(state) {
+    _journeyMotion(state, scene = canvas.scene) {
         const travel = state.travel;
         const map = game.scenes.get(travel.route?.sceneId);
-        const pace = convertDistance(this.groundPace(state), canvas.scene?.grid?.units, map?.grid?.units);
+        const pace = convertDistance(this.groundPace(state, scene), scene?.grid?.units, map?.grid?.units);
         return {
             playing: !!state.playing,
             masterSpeed: Number(state.masterSpeed) || 0,
             easeSeconds: Math.max(0, Number(state.easeSeconds) || 0),
-            // In-world time drives the journey at the clock's full rate; only the scenery is capped.
-            clockFactor: travel.followClock ? Math.max(0, Number(travel.clockRate) || 0) : 1,
+            // Following the clock, the journey's place is read from the world time
+            // (its timeline); only the scenery runs at the capped clock rate.
+            followClock: !!travel.followClock,
+            clockFactor: 1,
             pace: pace ?? 0
         };
     }
 
-    async _pushJourney(before, state) {
+    async _pushJourney(before, state, scene = canvas.scene) {
         const key = link => (link ? `${link.sceneId}|${link.routeId ?? ''}|${link.journeyId ?? ''}` : '');
         const was = before?.travel?.route;
         const link = state.travel?.route;
+        // What was last written for each scene, so a change that does not touch the journey writes nothing.
+        this._pushed ??= new Map();
         // A journey this scene stops showing stops where it is; it keeps its progress.
         if (was && key(was) !== key(link)) await routesManager.setPathTravel(was, { playing: false }, state.anchorAt);
         if (!link) {
-            this._pushed = null;
+            this._pushed.delete(scene?.id);
             return;
         }
-        const motion = this._journeyMotion(state);
+        const motion = this._journeyMotion(state, scene);
         const signature = key(link) + JSON.stringify(motion);
-        if (signature === this._pushed) return;
-        this._pushed = signature;
+        if (signature === this._pushed.get(scene?.id)) return;
+        this._pushed.set(scene?.id, signature);
         await routesManager.setPathTravel(link, motion, state.anchorAt);
     }
 
@@ -493,17 +519,17 @@ class ParallaxManager {
      * the scale. Signed -- running in reverse backs it up -- and computed the
      * same way on every client, like everything else that moves.
      */
-    travelDistance(now = game.time.serverTime, state = this.state) {
+    travelDistance(now = game.time.serverTime, state = this.state, scene = canvas.scene) {
         const travel = state.travel ?? defaultTravel();
         // Following a journey, how far is the journey's, from its map.
         const progress = this.journeyProgress(now, state);
         if (progress) {
-            const distance = convertDistance(progress.distance, progress.scene.grid.units, canvas.scene?.grid?.units);
+            const distance = convertDistance(progress.distance, progress.scene.grid.units, scene?.grid?.units);
             if (distance !== null) return distance;
         }
         const layer = this.referenceLayer(state);
         if (!layer) return travel.distance;
-        const grid = canvas.scene?.grid;
+        const grid = scene?.grid;
         if (travel.followClock) {
             // The pace, per in-world second, times in-world seconds of travel.
             const perSecond = pixelsToDistance(Number(layer.speed) || 0, grid);
@@ -514,9 +540,9 @@ class ParallaxManager {
     }
 
     /** The ground layer's pace, in scene units per hour, from its scroll speed on the grid. */
-    groundPace(state = this.state) {
+    groundPace(state = this.state, scene = canvas.scene) {
         const layer = this.referenceLayer(state);
-        return layer ? pixelsToDistance(Number(layer.speed) || 0, canvas.scene?.grid) * 3600 : 0;
+        return layer ? pixelsToDistance(Number(layer.speed) || 0, scene?.grid) * 3600 : 0;
     }
 
     /**
@@ -526,18 +552,21 @@ class ParallaxManager {
      * nothing to scale by, so only the ground changes.
      */
     setGroundPace(unitsPerHour) {
-        const target = unitsPerHourToPixels(Math.max(0, Number(unitsPerHour) || 0), canvas.scene?.grid);
-        return this._commit(s => {
-            const ground = this.referenceLayer(s);
-            if (!ground) return;
-            const was = Number(ground.speed) || 0;
-            const round = speed => Math.round(speed * 10) / 10;
-            if (was !== 0 && target !== 0) {
-                const factor = target / was;
-                for (const layer of s.layers) layer.speed = round((Number(layer.speed) || 0) * factor);
-            }
-            ground.speed = round(target);
-        });
+        return this._commit(s => this.applyGroundPace(s, unitsPerHour, canvas.scene));
+    }
+
+    /** Set a state's ground pace, as setGroundPace does; for commitScene, on any scene. */
+    applyGroundPace(state, unitsPerHour, scene) {
+        const target = unitsPerHourToPixels(Math.max(0, Number(unitsPerHour) || 0), scene?.grid);
+        const ground = this.referenceLayer(state);
+        if (!ground) return;
+        const was = Number(ground.speed) || 0;
+        const round = speed => Math.round(speed * 10) / 10;
+        if (was !== 0 && target !== 0) {
+            const factor = target / was;
+            for (const layer of state.layers) layer.speed = round((Number(layer.speed) || 0) * factor);
+        }
+        ground.speed = round(target);
     }
 
     /** Change travel settings. A new destination or scale means it has not been reached yet. */

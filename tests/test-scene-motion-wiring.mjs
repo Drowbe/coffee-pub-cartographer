@@ -90,8 +90,10 @@ console.log('\nthe routes window: actions, strings and styles');
 {
     const rhbs = fs.readFileSync('templates/window-routes.hbs', 'utf8');
     const rjs = fs.readFileSync('scripts/window-routes.js', 'utf8');
-    // The routes manager and the marker manager, read as one for strings and imports.
-    const rman = fs.readFileSync('scripts/manager-routes.js', 'utf8') + fs.readFileSync('scripts/manager-travelpins.js', 'utf8');
+    // The routes managers -- routes, the marker, the map's controls -- read as one for strings.
+    const managers = ['manager-routes.js', 'manager-travelpins.js', 'manager-journeys.js'];
+    const managerSources = Object.fromEntries(managers.map(file => [file, fs.readFileSync(`scripts/${file}`, 'utf8')]));
+    const rman = Object.values(managerSources).join('\n');
     const all = rhbs + rjs + rman;
     const actions = new Set([...all.matchAll(/data-action="([a-z-]+)"/g)].map(m => m[1]));
     const unhandled = [...actions].filter(action => !rjs.includes(`'${action}':`));
@@ -131,7 +133,7 @@ console.log('\nthe routes window: actions, strings and styles');
     for (const util of ['utils-travel', 'utils-routes']) {
         const source = fs.readFileSync(`scripts/${util}.js`, 'utf8');
         const exported = new Set([...source.matchAll(/^export (?:const|function) ([A-Za-z_]+)/gm)].map(m => m[1]));
-        for (const [file, text] of [['window-routes.js', rjs], ['window-parallax.js', windowJs], ['manager-routes.js', rman], ['manager-travel.js', routesJs]]) {
+        for (const [file, text] of [['window-routes.js', rjs], ['window-parallax.js', windowJs], ['manager-travel.js', routesJs], ...Object.entries(managerSources)]) {
             const found = text.match(new RegExp(`import \\{([^}]*)\\} from '\\./${util}\\.js'`));
             const imported = new Set((found?.[1] ?? '').split(',').map(name => name.trim()).filter(Boolean));
             const body = text.replace(/import [\s\S]*?from '[^']+';/g, '');

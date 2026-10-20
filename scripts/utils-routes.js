@@ -353,12 +353,54 @@ export function defaultPathTravel() {
         effort: 0,
         pace: 0,
         arrived: false,
+        followClock: false,
+        timeline: [],
         motion: { playing: false, masterSpeed: 1, easeSeconds: 0, anchorAt: 0, rampFrom: null, clockFactor: 1 }
     };
 }
 
-/** The effort a path's travel has reached at `now`, unclamped. */
-export function travelEffort(travel, now) {
+/** How many changes a journey's timeline keeps: months of play, at a few a session. */
+export const TIMELINE_LIMIT = 500;
+
+/**
+ * Following the world clock, a path's progress is a function of the date and
+ * time: a **timeline** of changes, each `{ w, effort, rate }` -- the world
+ * time it was made, the effort then, and the effort per in-world second from
+ * then on (the pace times the master speed while playing, 0 while stopped).
+ * Where the party is at any world time is read from the last change at or
+ * before it, so scrubbing time forward or back moves them to where they were
+ * or will be, and a stretch spent stopped stays stopped.
+ */
+export function timelineEffort(timeline, worldTime) {
+    if (!timeline?.length) return 0;
+    let at = timeline[0];
+    if (worldTime <= at.w) return at.effort;
+    for (const change of timeline) {
+        if (change.w <= worldTime) at = change;
+        else break;
+    }
+    return at.effort + at.rate * (worldTime - at.w);
+}
+
+/**
+ * A change to a timeline at world time `w`: everything after it is
+ * replaced -- changing course after scrubbing back rewrites what followed --
+ * and the change is added, keeping the last TIMELINE_LIMIT.
+ */
+export function timelineWith(timeline, change) {
+    const kept = (timeline ?? []).filter(earlier => earlier.w < change.w);
+    return [...kept, change].slice(-TIMELINE_LIMIT);
+}
+
+/**
+ * The effort a path's travel has reached, unclamped: from its timeline at
+ * world time `worldTime` when it follows the clock, else from real time
+ * `now` and its motion.
+ */
+export function travelEffort(travel, now, worldTime) {
+    if (travel?.followClock && travel.timeline?.length && Number.isFinite(worldTime)) {
+        return timelineEffort(travel.timeline, worldTime);
+    }
     const pace = Number(travel?.pace) || 0;
     return (Number(travel?.effort) || 0) + (pace / 3600) * motionTravel(travel?.motion ?? {}, now);
 }

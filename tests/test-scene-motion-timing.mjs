@@ -21,7 +21,7 @@ import {
     convertDistance, legPixels, routePixels, gridDistance, pointAlong, cleanPoints,
     distancePixels, nearestWaypoint, nearestOnRoute, legTerrains, travelHours, insertWaypoint,
     removeWaypoint, snapTo, chainRoutes, pathLegs, totalEffort, distanceForEffort, effortForDistance,
-    legIndexAt, travelEffort, defaultPathTravel, travelPlan
+    legIndexAt, travelEffort, defaultPathTravel, travelPlan, timelineEffort, timelineWith
 } from '../scripts/utils-routes.js';
 
 let bad = 0;
@@ -289,6 +289,28 @@ console.log('\neffort along a path');
     travel.motion.clockFactor = 60;
     if (!close(travelEffort(travel, 11000), 602)) fail('the world clock does not speed up effort');
     else ok('following the clock at x60, a real second is a minute of travel');
+}
+
+console.log('\nthe world-time timeline');
+{
+    const close = (a, b) => Math.abs(a - b) < 1e-9;
+    // Set out at 1000 at 1 unit a second; stop at 4600 (3600 units); set out again at 8200 at 2 a second.
+    let line = timelineWith([], { w: 1000, effort: 0, rate: 1 });
+    line = timelineWith(line, { w: 4600, effort: 3600, rate: 0 });
+    line = timelineWith(line, { w: 8200, effort: 3600, rate: 2 });
+    const at = w => timelineEffort(line, w);
+    if (!close(at(500), 0) || !close(at(2800), 1800) || !close(at(6000), 3600) || !close(at(9200), 5600)) fail(`timeline reads ${[500, 2800, 6000, 9200].map(at).join(', ')}`);
+    else ok('where the party is goes with the world time: before setting out, travelling, stopped, and on again');
+    const rewritten = timelineWith(line, { w: 2800, effort: 1800, rate: 0 });
+    if (rewritten.length !== 2 || !close(timelineEffort(rewritten, 9200), 1800)) fail('a change after scrubbing back does not replace what followed');
+    else ok('changing course after scrubbing back replaces what came after');
+    const travel = { ...defaultPathTravel(), followClock: true, timeline: line, effort: 99 };
+    if (!close(travelEffort(travel, 0, 2800), 1800)) fail('a path following the clock does not read its timeline');
+    else ok('a path following the clock reads its place from the timeline, not real time');
+    let long = [];
+    for (let i = 0; i < 600; i++) long = timelineWith(long, { w: i, effort: i, rate: 0 });
+    if (long.length !== 500 || long[0].w !== 100) fail('the timeline grows without limit');
+    else ok('the timeline keeps its last 500 changes');
 }
 
 console.log('\nplanning travel days');

@@ -166,9 +166,10 @@ Done: progress lives on the journey, on the map scene, as effort; the animated s
 drives it; terrain slows the party and the scenery. The marker is built: a Blacksmith pin per journey, moved with
 `pins.setLivePosition`, which Blacksmith is adding (agreed: a pin with a live position cannot be
 dragged; no heading in v1). **When Blacksmith releases it, raise Cartographer's minimum Blacksmith
-version** in `module.json`. Still to do: controls for a journey on the map itself -- a Play/Stop
-bar in the Routes window and the sub-menubar, like the animated scene's -- which means the GM's
-client writing a linked animated scene's motion while it is not the scene on the canvas.
+version** in `module.json`. Controls from the map are built (Play/Stop, speed, pace, reset per journey,
+and the sub-menubar's Play), driving following animated scenes through `commitScene`. Not yet: a
+journey driven only from the map does not follow the world clock (an animated scene that follows
+the clock carries that to its journey); worth adding as a switch on the journey.
 
 **Exhaustion on the road.** As the party travels, they -- or their mounts and draft animals --
 tire. Track hours travelled per in-world day (the odometer and world clock already give both),
@@ -183,6 +184,9 @@ which is roleplay support:
   roleplay: mentioned in the warning (a gallop past its hour), not tracked as actors.
 - **Pace and terrain set how fast fatigue builds** -- that is the core of it. A fast pace or
   difficult terrain brings the warning sooner.
+- **Hours on the road come from the timeline.** A path that follows the clock keeps every change of
+  pace and every stop against the world time (`travel.timeline`), so the hours travelled on any
+  in-world day can be read off it exactly, scrubbing included.
 - **Nothing resets it automatically.** Rest is roleplay; the GM clears exhaustion as the condition
   it is. What Cartographer counts (hours on the road today) starts again with each in-world day.
 

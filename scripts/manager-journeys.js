@@ -1,0 +1,318 @@
+// ==================================================================
+// ===== JOURNEYS: CONTROLS FROM THE MAP ============================
+// ==================================================================
+
+import { MODULE } from './const.js';
+import { cartographerToolbar } from './manager-toolbar.js';
+import { routesManager } from './manager-routes.js';
+import { parallaxManager } from './manager-parallax.js';
+import { travelManager } from './manager-travel.js';
+import { convertDistance } from './utils-routes.js';
+import { DEFAULT_EASE_SECONDS } from './utils-motion.js';
+
+/** The section of Cartographer's sub-menubar the Play button sits in; registered in manager-toolbar.js. */
+const GROUP = 'Routes';
+const PLAY_ID = `${MODULE.ID}-routes-play`;
+/** How often the GM's client checks journeys for terrain and arrival, in ms. */
+const WATCH_MS = 250;
+
+/**
+ * Running a journey from its map: Play and Stop, speed and pace, for the GM,
+ * in the Routes window and the sub-menubar.
+ *
+ * A journey can be shown by animated scenes (their Travel section follows it)
+ * or by none. Followed, the animated scenes drive it -- their pace, ease and
+ * world clock are the journey's -- so the map's controls change those scenes,
+ * through parallaxManager.commitScene, which writes a scene that need not be
+ * the one on the canvas; each pushes the change on to the journey, as it does
+ * for its own controls. Followed by none, the map's controls change the
+ * journey itself.
+ *
+ * The GM's client also watches every journey that is moving, wherever the GM
+ * is looking: animated scenes not on the canvas get their scenery slowed for
+ * the terrain and their world-clock rate kept up, and a journey that reaches
+ * its end with no animated scene on the canvas to notice is stopped there.
+ * (manager-travel.js does both for the animated scene on the canvas.)
+ */
+class JourneysManager {
+    constructor() {
+        this._hooks = [];
+        this._busy = new Set();
+        this._lastWatch = 0;
+        this._watch = this._watch.bind(this);
+        this._watching = false;
+    }
+
+    initialize() {
+        if (!game.user.isGM) return;
+        this._registerButton();
+        const on = (name, fn) => this._hooks.push({ name, id: Hooks.on(name, fn) });
+        on('canvasReady', () => {
+            this._startWatch();
+            this._refreshButton();
+            this._recordClockRate();
+        });
+        on('canvasTearDown', () => this._stopWatch());
+        on(`${MODULE.ID}.routesChanged`, () => this._refreshButton());
+        on('blacksmith.worldClockRateChanged', ({ rate } = {}) => this._recordClockRate(rate));
+        this._startWatch();
+        this._recordClockRate();
+    }
+
+    // ==================================================================
+    // ===== WHO SHOWS A JOURNEY ========================================
+    // ==================================================================
+
+    /** Whether a scene's parallax follows a route or journey. */
+    static follows(scene, link) {
+        const route = scene?.getFlag(MODULE.ID, 'parallax')?.travel?.route;
+        if (!route || route.sceneId !== link.sceneId) return false;
+        return link.journeyId ? route.journeyId === link.journeyId : (!route.journeyId && route.routeId === link.routeId);
+    }
+
+    /** The animated scenes following a route or journey. */
+    linkedScenes(link) {
+        return game.scenes.contents.filter(scene => JourneysManager.follows(scene, link));
+    }
+
+    // ==================================================================
+    // ===== CONTROLS ===================================================
+    // ==================================================================
+
+    /**
+     * Make a change to a journey: through the animated scenes that follow it,
+     * or to the journey itself when none does. \`scene\` changes the scenes'
+     * parallax state; \`path\` is the journey's travel change.
+     */
+    async _drive(link, { scene, path }) {
+        if (!game.user.isGM) return;
+        const scenes = this.linkedScenes(link);
+        if (scenes.length) {
+            for (const each of scenes) await parallaxManager.commitScene(each, scene);
+        } else {
+            await routesManager.setPathTravel(link, path);
+        }
+        this._refreshButton();
+    }
+
+    progress(link) {
+        return routesManager.progress(link);
+    }
+
+    isPlaying(link) {
+        return !!this.progress(link)?.travel.motion.playing;
+    }
+
+    /**
+     * Set out, or carry on. A journey no animated scene follows needs a pace
+     * of its own first; \`pace\` (map units an hour) gives it one if it has
+     * none. Playing a journey makes it the one the map's Play button runs.
+     */
+    async play(link, pace = null) {
+        const progress = this.progress(link);
+        if (!progress) return;
+        if (!this.linkedScenes(link).length && !(progress.travel.pace > 0) && !(pace > 0)) {
+            ui.notifications.warn(game.i18n.localize(`${MODULE.ID}.routes.needsPace`));
+            return;
+        }
+        const path = { playing: true, arrived: false };
+        if (!(progress.travel.pace > 0) && pace > 0) path.pace = pace;
+        if (!(progress.travel.motion.easeSeconds > 0)) path.easeSeconds = DEFAULT_EASE_SECONDS;
+        // Setting out again from the end starts from the beginning.
+        if (progress.travel.arrived && progress.effort >= progress.totalEffort - 1e-9) path.effort = 0;
+        await this._drive(link, {
+            scene: state => {
+                state.playing = true;
+                state.travel.arrived = false;
+            },
+            path
+        });
+        // Followed, the scenes push only the motion; the journey's own marks are set here.
+        if (this.linkedScenes(link).length) await routesManager.setPathTravel(link, { arrived: false, ...(path.effort === 0 ? { effort: 0 } : {}) });
+        await routesManager.setSettings({ active: link.journeyId ? { journeyId: link.journeyId } : { routeId: link.routeId } });
+    }
+
+    async stop(link) {
+        await this._drive(link, { scene: state => { state.playing = false; }, path: { playing: false } });
+    }
+
+    toggle(link) {
+        return this.isPlaying(link) ? this.stop(link) : this.play(link);
+    }
+
+    /** The master speed: a multiple of the pace; negative runs back along the way. */
+    async setSpeed(link, speed) {
+        const value = Number(speed);
+        if (!Number.isFinite(value)) return;
+        await this._drive(link, { scene: state => { state.masterSpeed = value; }, path: { masterSpeed: value } });
+    }
+
+    /**
+     * The pace, in the map's units an hour. Followed by animated scenes, it
+     * sets their ground layers' speed (in their own units), which is where a
+     * followed journey's pace comes from.
+     */
+    async setPace(link, perHour) {
+        const pace = Math.max(0, Number(perHour) || 0);
+        const mapUnits = game.scenes.get(link.sceneId)?.grid?.units;
+        await this._drive(link, {
+            scene: (state, scene) => {
+                const own = convertDistance(pace, mapUnits, scene.grid?.units);
+                if (own !== null) parallaxManager.applyGroundPace(state, own, scene);
+            },
+            path: { pace }
+        });
+    }
+
+    /**
+     * Follow the world clock, or real time. Following it, where the party is
+     * goes with the date and time: scrubbing time moves them along the way,
+     * forward or back. Followed by animated scenes, it is their switch too.
+     */
+    async setFollowClock(link, follow) {
+        const rate = travelManager.constructor.clockApi()?.rate;
+        await this._drive(link, {
+            scene: state => {
+                state.travel.followClock = !!follow;
+                if (rate !== undefined) state.travel.clockRate = Math.max(0, Number(rate) || 0);
+            },
+            path: { followClock: !!follow }
+        });
+    }
+
+    /** Back to the start of the way. */
+    async reset(link) {
+        await routesManager.setPathTravel(link, { effort: 0, arrived: false });
+        for (const scene of this.linkedScenes(link)) {
+            await parallaxManager.commitScene(scene, state => {
+                state.travel.distance = 0;
+                state.travel.arrived = false;
+            });
+        }
+    }
+
+    // ==================================================================
+    // ===== THE SUB-MENUBAR'S PLAY BUTTON ==============================
+    // ==================================================================
+
+    /** The route or journey the map on the canvas runs from its Play button: the last one played here. */
+    activeLink(scene = canvas.scene) {
+        const active = routesManager.settings(scene).active;
+        return active && scene ? { sceneId: scene.id, ...active } : null;
+    }
+
+    _registerButton() {
+        cartographerToolbar.registerTool(PLAY_ID, {
+            icon: 'fa-solid fa-person-walking-arrow-right',
+            tooltip: game.i18n.localize(`${MODULE.ID}.routes.barPlay`),
+            group: GROUP,
+            order: 4,
+            toggleable: true,
+            active: () => {
+                const link = this.activeLink();
+                return !!link && this.isPlaying(link);
+            },
+            onClick: () => {
+                const link = this.activeLink();
+                if (link) return this.toggle(link);
+                ui.notifications.info(game.i18n.localize(`${MODULE.ID}.routes.noActiveJourney`));
+                return routesManager.openWindow();
+            }
+        });
+    }
+
+    _refreshButton() {
+        const api = game.modules.get('coffee-pub-blacksmith')?.api;
+        const link = this.activeLink();
+        api?.updateSecondaryBarItemActive?.(MODULE.ID, PLAY_ID, !!link && this.isPlaying(link));
+    }
+
+    // ==================================================================
+    // ===== WATCHING, ON THE GM'S CLIENT ===============================
+    // ==================================================================
+
+    _startWatch() {
+        if (this._watching || !canvas?.app?.ticker) return;
+        canvas.app.ticker.add(this._watch);
+        this._watching = true;
+    }
+
+    _stopWatch() {
+        if (this._watching) canvas?.app?.ticker?.remove(this._watch);
+        this._watching = false;
+    }
+
+    /** Every route and journey, on every map, that is moving: as links. */
+    _moving() {
+        const links = [];
+        for (const scene of game.scenes.contents) {
+            for (const route of routesManager.routes(scene)) {
+                if (route.travel?.motion?.playing) links.push({ sceneId: scene.id, routeId: route.id });
+            }
+            for (const journey of routesManager.journeys(scene)) {
+                if (journey.travel?.motion?.playing) links.push({ sceneId: scene.id, journeyId: journey.id });
+            }
+        }
+        return links;
+    }
+
+    _watch() {
+        const now = performance.now();
+        if (now - this._lastWatch < WATCH_MS) return;
+        this._lastWatch = now;
+        if (!game.user.isGM) return;
+        for (const link of this._moving()) {
+            const progress = routesManager.progress(link);
+            if (!progress) continue;
+            const scenes = this.linkedScenes(link);
+            const onCanvas = scenes.some(scene => scene.id === canvas.scene?.id);
+            // The scenery of animated scenes not on the canvas, slowed for the terrain.
+            for (const scene of scenes) {
+                if (scene.id === canvas.scene?.id) continue;
+                const state = scene.getFlag(MODULE.ID, 'parallax');
+                if ((state?.terrainFactor ?? 1) === progress.factor) continue;
+                this._once(`terrain-${scene.id}`, () => parallaxManager.commitScene(scene, s => { s.terrainFactor = progress.factor; }));
+            }
+            // The end of the way, when no animated scene on the canvas is watching for it.
+            const forward = (progress.travel.motion.masterSpeed ?? 1) >= 0;
+            if (!onCanvas && forward && !progress.travel.arrived && progress.effort >= progress.totalEffort - 1e-9) {
+                this._once(`arrive-${link.journeyId ?? link.routeId}`, () => this._arrive(link, progress));
+            }
+        }
+    }
+
+    /** Run a change once at a time per key, so the watch does not repeat it while the write is under way. */
+    _once(key, fn) {
+        if (this._busy.has(key)) return;
+        this._busy.add(key);
+        Promise.resolve(fn()).finally(() => this._busy.delete(key));
+    }
+
+    async _arrive(link, progress) {
+        ui.notifications.info(game.i18n.format(`${MODULE.ID}.routes.arrivedNotice`, { name: progress.path.name }));
+        await this.stop(link);
+        await routesManager.setPathTravel(link, { arrived: true });
+        for (const scene of this.linkedScenes(link)) {
+            await parallaxManager.commitScene(scene, state => { state.travel.arrived = true; });
+        }
+    }
+
+    /**
+     * Keep the world clock's rate in animated scenes that follow a journey and
+     * the clock but are not on the canvas. (The one on the canvas is kept up
+     * by manager-travel.js.)
+     */
+    _recordClockRate(rate = travelManager.constructor.clockApi()?.rate) {
+        if (!game.user.isGM || rate === undefined) return;
+        const value = Math.max(0, Number(rate) || 0);
+        for (const scene of game.scenes.contents) {
+            if (scene.id === canvas.scene?.id) continue;
+            const travel = scene.getFlag(MODULE.ID, 'parallax')?.travel;
+            if (!travel?.route || !travel.followClock || travel.clockRate === value) continue;
+            this._once(`clock-${scene.id}`, () => parallaxManager.commitScene(scene, s => { s.travel.clockRate = value; }));
+        }
+    }
+}
+
+export const journeysManager = new JourneysManager();
+export { JourneysManager };
