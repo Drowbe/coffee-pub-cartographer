@@ -152,17 +152,21 @@ class TravelManager {
     }
 
     /**
-     * The odometer for a map: the route or journey under way on the scene on
-     * the canvas -- the map's active one if it is moving, else any that is --
-     * read from its progress, in the same shape as summary(). Null when
-     * nothing on this map is moving, or it is at rest after easing to a stop.
+     * The odometer for a map: the route or journey in progress on the scene
+     * on the canvas -- the map's active one (the one its bar runs), else any
+     * that is -- read from its progress, in the same shape as summary().
+     *
+     * In progress is having set out: moving, stopped along the way or
+     * arrived, until it is reset to the start. The odometer stays up through
+     * stops, rather than coming and going with Play; it goes only when
+     * nothing on the map is in progress. Null then.
      */
     mapSummary(now = game.time.serverTime) {
         const scene = canvas?.scene;
         if (!scene) return null;
         const underWay = link => {
             const progress = routesManager.progress(link, now);
-            return progress?.moving ? progress : null;
+            return progress && (progress.moving || progress.effort > 0) ? progress : null;
         };
         const active = routesManager.settings(scene).active;
         let progress = active ? underWay({ sceneId: scene.id, ...active }) : null;

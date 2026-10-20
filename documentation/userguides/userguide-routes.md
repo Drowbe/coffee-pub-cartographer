@@ -171,7 +171,8 @@ speeds up with the clock to match.
 
 While a route or journey is under way, the map shows only the routes it travels, and the same
 odometer as an animated scene's -- distance travelled, how far is left, the arrival time and a
-progress bar -- for everyone. It goes when the party comes to rest. Waypoints are shown only while a
+progress bar -- for everyone. It stays up while they are stopped or have arrived, and goes only
+when nothing on the map is in progress: never set out, or reset to the start. Waypoints are shown only while a
 route is drawn or edited; otherwise a route is its line and its label.
 
 The **Routes** section of the sub-menubar has a Play button too: it plays or stops what the bar runs
