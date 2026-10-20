@@ -920,6 +920,11 @@
     gap: 6px;
 }
 
+/* The world clock's rate, beside the direction, when a map follows the clock. */
+.cartographer-parallax-window .cartographer-routes-clock {
+    white-space: nowrap;
+}
+
 /* The journey the bar runs. */
 .cartographer-parallax-window .cartographer-routes-route.is-selected {
     border-color: var(--blacksmith-color-brand-accent);

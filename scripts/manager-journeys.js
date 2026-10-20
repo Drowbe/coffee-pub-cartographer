@@ -129,7 +129,7 @@ class JourneysManager {
             scene: state => {
                 state.playing = true;
                 state.travel.arrived = false;
-                if (!(Number(state.masterSpeed) || 0)) state.masterSpeed = 1;
+                if (!(Number(state.travel.timeRate ?? state.masterSpeed) || 0)) parallaxManager.applyTimeRate(state, 1);
             },
             path
         });
@@ -160,7 +160,7 @@ class JourneysManager {
     async setSpeed(link, speed) {
         const value = Number(speed);
         if (!Number.isFinite(value)) return;
-        await this._drive(link, { scene: state => { state.masterSpeed = value; }, path: { masterSpeed: value } });
+        await this._drive(link, { scene: state => parallaxManager.applyTimeRate(state, value), path: { masterSpeed: value } });
     }
 
     /**

@@ -115,8 +115,9 @@ class TravelManager {
         const speed = Math.abs(Number(state.masterSpeed) || 0);
         const journey = parallaxManager.journeyProgress(now);
         let etaSeconds = null;
-        if (journey && journey.travel.pace > 0 && speed > 0) {
-            etaSeconds = ((journey.totalEffort - journey.effort) / (journey.travel.pace * speed)) * 3600;
+        if (journey && journey.travel.pace > 0) {
+            // Hours on the road at the party's pace, however fast travel time is run.
+            etaSeconds = ((journey.totalEffort - journey.effort) / journey.travel.pace) * 3600;
         } else {
             const perHour = parallaxManager.groundPace() * speed;
             etaSeconds = remaining !== null && perHour > 0 ? (remaining / perHour) * 3600 : null;
@@ -183,10 +184,11 @@ class TravelManager {
         if (!progress) return null;
         const units = scene.grid?.units ?? '';
         const remaining = Math.max(0, progress.length - progress.distance);
-        const speed = Math.abs(Number(progress.travel.motion.masterSpeed) || 0);
         const pace = Number(progress.travel.pace) || 0;
-        // The rest of the way in effort, so difficult terrain ahead makes it longer.
-        const etaSeconds = pace > 0 && speed > 0 ? ((progress.totalEffort - progress.effort) / (pace * speed)) * 3600 : null;
+        // The rest of the way as hours on the road at the party's pace -- travel
+        // time, however fast it is run -- counted in effort, so difficult
+        // terrain ahead makes it longer.
+        const etaSeconds = pace > 0 ? ((progress.totalEffort - progress.effort) / pace) * 3600 : null;
         const arrived = progress.travel.arrived || progress.distance >= progress.length * (1 - 1e-9) - 1e-9;
         return {
             configured: true,

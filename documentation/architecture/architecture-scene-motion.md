@@ -135,6 +135,13 @@ handling of its own: the next frame reads the new time. `routesManager.worldTime
 time on at Blacksmith's clock rate between updates, for at most ten seconds, so the marker moves
 smoothly rather than stepping.
 
+**Pace is speed; the master speed is time.** A path's `pace` is the party's speed. Its
+`motion.masterSpeed` is how fast travel time runs: in real-time mode, in-world seconds per real
+second (the bar steps through `TIME_RATES`, 1 to 3600, either way); following the clock, only its
+sign counts, since the clock is the time. An animated scene following a path keeps the path's rate
+in `travel.timeRate` and runs its scenery at that rate capped at `MAX_CLOCK_SCENERY`
+(`applyTimeRate`), so an hour a second from the map does not blur its layers.
+
 **Controls from the map** (manager-journeys.js). A journey followed by animated scenes is driven
 through them: the map's Play, speed and pace change each following scene with
 `parallaxManager.commitScene`, which rebases and writes a scene's parallax from its own flag and

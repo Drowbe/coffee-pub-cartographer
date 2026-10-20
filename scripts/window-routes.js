@@ -7,21 +7,23 @@ import { travelPinsManager } from './manager-travelpins.js';
 import { journeysManager } from './manager-journeys.js';
 import { formatDistance, formatSpan, paceChoices, PACE_GROUPS, gridStep } from './utils-travel.js';
 import {
-    legTerrains, travelHours, terrainFactor, TERRAINS, travelPlan, MOUNT_HOURS_PER_DAY, FORCED_MARCH_HOURS
+    legTerrains, travelHours, terrainFactor, TERRAINS, travelPlan, MOUNT_HOURS_PER_DAY, FORCED_MARCH_HOURS,
+    TIME_RATES, timeRateIndex
 } from './utils-routes.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
 const APP_ID = `${MODULE.ID}-routes`;
-/** Near zero, the speed slider snaps to a stop, as the scene-motion window's does. */
-const SPEED_SNAP = 0.1;
-const SPEED_RANGE = { min: -10, max: 10, step: 0.05 };
-
-/** A master speed as the bar shows it: "+1.50×", "−2.00×", "0×". */
-function formatSpeed(value) {
+/**
+ * A time rate as the bar shows it: how much travel time passes in a real
+ * second. "1×" is real time, "10×", then "1 m/s", "10 m/s", "1 h/s"; a minus
+ * runs back along the way.
+ */
+function formatRate(value) {
     const n = Number(value) || 0;
-    if (n === 0) return '0×';
-    return `${n > 0 ? '+' : '−'}${Math.abs(n).toFixed(2)}×`;
+    const sign = n < 0 ? '−' : '';
+    const abs = Math.abs(n);
+    return abs < 60 ? `${sign}${abs}×` : `${sign}${formatSpan(abs)}/s`;
 }
 /** The window's choices, per browser: the tab, the pace times are shown at, and which routes show their legs. */
 const PREFS_KEY = `${MODULE.ID}.routes.windowPrefs`;
@@ -75,6 +77,11 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         'routes-tab': (_event, target, app) => app.setTab(target.dataset.tab),
         'routes-play': (_event, _target, app) => app.togglePlay(app._barPath()),
         'routes-reset': (_event, _target, app) => app.confirmReset(app._barPath()),
+        // Onward or back along the way, when the world clock is the time.
+        'routes-direction': (_event, target, app) => {
+            const link = app._barPath();
+            if (link) return journeysManager.setSpeed(link, Number(target.dataset.dir) || 1);
+        },
         'toggle-settings': (_event, _target, app) => app.toggleSettings(),
         'route-draw': (_event, _target, app) => (app.manager.draft ? app.manager.finishDrawing() : app.manager.startDrawing()),
         'route-focus': (_event, target, app) => void app.manager.focus(target.dataset.routeId),
@@ -155,10 +162,11 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         return { sceneId: canvas.scene?.id, ...(journeyId ? { journeyId } : { routeId }) };
     }
 
-    _button({ action, icon, label, text = '', className = '', disabled = false }) {
+    _button({ action, icon, label, text = '', className = '', dataset = {}, disabled = false }) {
         const safe = foundry.utils.escapeHTML(label ?? '');
         const caption = text ? `<span>${foundry.utils.escapeHTML(text)}</span>` : '';
-        return `<button type="button" class="cartographer-parallax-button ${className}${text ? ' is-labelled' : ''}" data-action="${action}" data-tooltip="${safe}" aria-label="${safe}"${disabled ? ' disabled' : ''}><i class="${icon}"></i>${caption}</button>`;
+        const data = Object.entries(dataset).map(([name, value]) => ` data-${name}="${foundry.utils.escapeHTML(String(value))}"`).join('');
+        return `<button type="button" class="cartographer-parallax-button ${className}${text ? ' is-labelled' : ''}" data-action="${action}" data-tooltip="${safe}" aria-label="${safe}"${data}${disabled ? ' disabled' : ''}><i class="${icon}"></i>${caption}</button>`;
     }
 
     _buildBar(localize) {
@@ -173,8 +181,9 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const link = this._barPath();
         const travel = link ? this.manager.progress(link)?.travel : null;
         const playing = !!travel?.motion?.playing;
-        const speed = Number(travel?.motion?.masterSpeed ?? 1);
+        const speed = Number(travel?.motion?.masterSpeed ?? 1) || 1;
         const disabled = !link;
+        const followClock = this.manager.settings().followClock;
         const play = this._button({
             action: 'routes-play',
             icon: playing ? 'fa-solid fa-stop' : 'fa-solid fa-play',
@@ -183,16 +192,37 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             className: playing ? 'is-active' : '',
             disabled
         });
-        const label = esc(localize('speedHint'));
         const off = disabled ? ' disabled' : '';
-        const slider = `<div class="cartographer-parallax-field cartographer-parallax-bar-speed${disabled ? ' is-disabled' : ''}">
-            <i class="fa-solid fa-backward cartographer-parallax-arrow" data-tooltip="${esc(localize('speedBack'))}"></i>
-            <input type="range" data-field="journeySpeed" value="${esc(speed)}" min="${SPEED_RANGE.min}" max="${SPEED_RANGE.max}" step="${SPEED_RANGE.step}"
-                list="cartographer-routes-zero" aria-label="${label}" data-tooltip="${label}"${off}>
-            <i class="fa-solid fa-forward cartographer-parallax-arrow" data-tooltip="${esc(localize('speedForward'))}"></i>
-            <span class="cartographer-parallax-value">${esc(formatSpeed(speed))}</span>
-            <datalist id="cartographer-routes-zero"><option value="0"></option></datalist>
-        </div>`;
+        // The party always goes at its pace. What the bar sets is time: with
+        // the world clock, the clock is the time, so only the direction is
+        // chosen here; without it, how fast travel time runs.
+        let slider;
+        if (followClock) {
+            const clock = game.modules.get('coffee-pub-blacksmith')?.api?.worldClock;
+            const rate = Number(clock?.rate) || 0;
+            const clockText = clock?.running && rate > 0
+                ? game.i18n.format(`${MODULE.ID}.routes.clockRate`, { rate: formatRate(rate) })
+                : localize('clockStopped');
+            const direction = (dir, icon, key) => this._button({
+                action: 'routes-direction',
+                icon,
+                label: localize(key),
+                className: `cartographer-parallax-segment${Math.sign(speed) === dir ? ' is-active' : ''}`,
+                dataset: { dir },
+                disabled
+            });
+            slider = `<div class="cartographer-parallax-segmented" role="radiogroup">${direction(-1, 'fa-solid fa-backward', 'speedBack')}${direction(1, 'fa-solid fa-forward', 'speedForward')}</div>`
+                + `<span class="cartographer-parallax-value cartographer-routes-clock" data-tooltip="${esc(localize('clockRateHint'))}">${esc(clockText)}</span>`;
+        } else {
+            const label = esc(localize('timeRateHint'));
+            slider = `<div class="cartographer-parallax-field cartographer-parallax-bar-speed${disabled ? ' is-disabled' : ''}">
+                <i class="fa-solid fa-backward cartographer-parallax-arrow" data-tooltip="${esc(localize('speedBack'))}"></i>
+                <input type="range" data-field="journeyRate" value="${timeRateIndex(speed)}" min="0" max="${TIME_RATES.length - 1}" step="1"
+                    aria-label="${label}" data-tooltip="${label}"${off}>
+                <i class="fa-solid fa-forward cartographer-parallax-arrow" data-tooltip="${esc(localize('speedForward'))}"></i>
+                <span class="cartographer-parallax-value">${esc(formatRate(speed))}</span>
+            </div>`;
+        }
         // Journeys and routes: either can be run.
         const journeys = this.manager.journeys();
         const routes = this.manager.visibleRoutes();
@@ -466,22 +496,19 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
 
     _onRender(context, options) {
         super._onRender?.(context, options);
+        // The bar shows the world clock's rate when the map follows it; keep it current.
+        this._clockHook ??= Hooks.on('blacksmith.worldClockRateChanged', () => this.render());
         this.element?.classList.toggle('is-settings-closed', !this.settingsOpen);
         this._startLiveProgress();
         if (this._inputsBound || !this.element) return;
         this.element.addEventListener('change', this._onChange);
         this.element.addEventListener('input', event => {
-            // The speed's readout follows the slider while it moves; the change is made on release.
-            if (event.target?.dataset?.field !== 'journeySpeed') return;
+            // The time rate's readout follows the slider while it moves; the change is made on release.
+            if (event.target?.dataset?.field !== 'journeyRate') return;
             const readout = event.target.parentElement?.querySelector('.cartographer-parallax-value');
-            if (readout) readout.textContent = formatSpeed(RoutesWindow.snap(event.target.value));
+            if (readout) readout.textContent = formatRate(TIME_RATES[Number(event.target.value)]);
         });
         this._inputsBound = true;
-    }
-
-    static snap(value) {
-        const n = Number(value) || 0;
-        return Math.abs(n) < SPEED_SNAP ? 0 : n;
     }
 
     /**
@@ -520,9 +547,10 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             void this.manager.setTerrain(target.dataset.routeId, Number(target.dataset.leg), target.value);
         } else if (field === 'routeTerrain' && target.value) {
             void this.manager.setTerrain(target.dataset.routeId, null, target.value);
-        } else if (field === 'journeySpeed') {
+        } else if (field === 'journeyRate') {
             const link = this._barPath();
-            if (link) void journeysManager.setSpeed(link, RoutesWindow.snap(target.value));
+            const rate = TIME_RATES[Number(target.value)];
+            if (link && rate) void journeysManager.setSpeed(link, rate);
         } else if (field === 'barPath' && target.value) {
             const [kind, id] = target.value.split(':');
             void this.manager.setSettings({ active: kind === 'j' ? { journeyId: id } : { routeId: id } });
@@ -638,6 +666,8 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
     _onClose(options) {
         clearInterval(this._liveTimer);
         this._liveTimer = null;
+        if (this._clockHook) Hooks.off('blacksmith.worldClockRateChanged', this._clockHook);
+        this._clockHook = null;
         this.manager?.onWindowClosed(this);
         return super._onClose?.(options);
     }

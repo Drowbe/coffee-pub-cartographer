@@ -21,7 +21,8 @@ import {
     convertDistance, legPixels, routePixels, gridDistance, pointAlong, cleanPoints,
     distancePixels, nearestWaypoint, nearestOnRoute, legTerrains, travelHours, insertWaypoint,
     removeWaypoint, snapTo, chainRoutes, pathLegs, totalEffort, distanceForEffort, effortForDistance,
-    legIndexAt, travelEffort, defaultPathTravel, travelPlan, timelineEffort, timelineWith
+    legIndexAt, travelEffort, defaultPathTravel, travelPlan, timelineEffort, timelineWith,
+    TIME_RATES, timeRateIndex
 } from '../scripts/utils-routes.js';
 
 let bad = 0;
@@ -311,6 +312,17 @@ console.log('\nthe world-time timeline');
     for (let i = 0; i < 600; i++) long = timelineWith(long, { w: i, effort: i, rate: 0 });
     if (long.length !== 500 || long[0].w !== 100) fail('the timeline grows without limit');
     else ok('the timeline keeps its last 500 changes');
+}
+
+console.log('\ntime rates');
+{
+    const at = rate => TIME_RATES[timeRateIndex(rate)];
+    const cases = [[1, 1], [60, 60], [-10, -10], [3600, 3600], [2, 1], [45, 60], [-700, -600], [0, 1]];
+    const wrong = cases.filter(([rate, want]) => at(rate) !== want);
+    if (wrong.length) fail(`time rates snap wrongly: ${wrong.map(c => `${c[0]} -> ${at(c[0])}`).join(', ')}`);
+    else ok('a time rate finds its nearest step, on the side it runs');
+    if (TIME_RATES.includes(0)) fail('the time rates include standing still');
+    else ok('every step moves: stopping is Stop\'s job');
 }
 
 console.log('\nplanning travel days');

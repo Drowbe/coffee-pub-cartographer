@@ -197,6 +197,27 @@ export function removeWaypoint(points, terrain, index) {
     return { points: next, terrain: legs.filter((_, i) => i !== index) };
 }
 
+/**
+ * How fast travel time runs when a map does not follow the world clock: in-world
+ * seconds per real second, the choices the bar's slider steps through, back
+ * along the way (negative) or onward. 1 is real time; 3600 is an hour a second.
+ * The party's own speed is its pace, which these never change.
+ */
+export const TIME_RATES = [-3600, -600, -60, -10, -1, 1, 10, 60, 600, 3600];
+
+/** The step of TIME_RATES nearest a rate, for the slider's position. */
+export function timeRateIndex(rate) {
+    const value = Number(rate) || 1;
+    let best = 0;
+    TIME_RATES.forEach((step, i) => {
+        if (Math.sign(step) !== Math.sign(value)) return;
+        const off = Math.abs(Math.log(Math.abs(step)) - Math.log(Math.abs(value)));
+        const was = Math.abs(Math.log(Math.abs(TIME_RATES[best])) - Math.log(Math.abs(value)));
+        if (Math.sign(TIME_RATES[best]) !== Math.sign(value) || off < was) best = i;
+    });
+    return best;
+}
+
 /** Hours of travel in a day, unless the map says otherwise: D&D's travel day. */
 export const DEFAULT_HOURS_PER_DAY = 8;
 /** Past this many hours a day, mounts are pushed too hard. */

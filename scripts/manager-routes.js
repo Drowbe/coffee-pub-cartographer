@@ -587,7 +587,9 @@ class RoutesManager {
                     ? timelineWith(travel.timeline, {
                         w: world,
                         effort: travel.effort,
-                        rate: travel.motion.playing ? (travel.pace / 3600) * (Number(travel.motion.masterSpeed) || 0) : 0
+                        // Following the clock, the clock is the time: the party goes at its pace,
+                        // onward or back, and the master speed gives only the direction.
+                        rate: travel.motion.playing ? (travel.pace / 3600) * Math.sign(Number(travel.motion.masterSpeed) || 0) : 0
                     })
                     : [];
                 item.travel = travel;

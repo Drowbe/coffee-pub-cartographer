@@ -428,7 +428,8 @@ class ParallaxManager {
         const pace = convertDistance(this.groundPace(state, scene), scene?.grid?.units, map?.grid?.units);
         return {
             playing: !!state.playing,
-            masterSpeed: Number(state.masterSpeed) || 0,
+            // The journey's time rate: set from the map, it can run faster than the scenery shows.
+            masterSpeed: Number(travel.timeRate ?? state.masterSpeed) || 0,
             easeSeconds: Math.max(0, Number(state.easeSeconds) || 0),
             // Whether the journey follows the clock is its map's setting, not this
             // scene's (manager-journeys.js setMapClock); this scene's switch only
@@ -484,7 +485,10 @@ class ParallaxManager {
         travel.clockMotion.masterSpeed = rate * (Number(state.masterSpeed) || 0);
         state.clockFactor = following ? Math.min(rate, MAX_CLOCK_SCENERY) : 1;
         // Terrain only slows the scenery while it follows a journey.
-        if (!travel.route) state.terrainFactor = 1;
+        if (!travel.route) {
+            state.terrainFactor = 1;
+            delete travel.timeRate;
+        }
     }
 
     // ==================================================================
@@ -508,7 +512,22 @@ class ParallaxManager {
     setMasterSpeed(speed) {
         const value = Number(speed);
         if (!Number.isFinite(value)) return;
-        return this._commit(s => { s.masterSpeed = value; });
+        return this._commit(s => {
+            s.masterSpeed = value;
+            // Following a journey, this scene's speed is also the journey's time rate.
+            if (s.travel?.route) s.travel.timeRate = value;
+        });
+    }
+
+    /**
+     * A journey's time rate, set from its map, on a scene following it. The
+     * journey runs at it; the scenery runs with it but never faster than
+     * MAX_CLOCK_SCENERY times its pace, since an hour a second is a blur.
+     */
+    applyTimeRate(state, rate) {
+        const value = Number(rate) || 0;
+        state.travel.timeRate = value;
+        state.masterSpeed = Math.sign(value) * Math.min(Math.abs(value), MAX_CLOCK_SCENERY);
     }
 
     // ==================================================================

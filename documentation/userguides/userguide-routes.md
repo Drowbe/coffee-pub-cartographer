@@ -148,8 +148,12 @@ window's bar works as the Scene Motion window's does. From the left:
   Play eases it back up. Playing a journey that has arrived starts it again from the beginning.
 - **Back to the start** (the rewind button) -- takes the party back to the beginning of the route or
   journey, after asking, since how far they had come is lost.
-- **Speed** -- centred on zero, as a multiple of the pace. Right of centre runs onward, left of
-  centre runs back along the way, and it snaps to a stop near the middle.
+- **Time** -- the party always travels at its **pace**; the bar sets time, not speed.
+  - Without the world clock, a slider sets how fast travel time runs: 1× is real time, then 10×,
+    a minute a second, ten minutes a second, an hour a second. Left of centre runs back along the
+    way. At an hour a second, a 6 mph horse covers 6 miles each real second.
+  - Following the world clock (the map's Setup tab), the clock is the time: the bar chooses only
+    onward or back, and shows the clock's rate. How fast time runs is set on Blacksmith's clock.
 - **Which** -- the route or journey the bar runs, from the map's journeys and routes. It is outlined
   in the window.
 - **The gear** -- shows and hides the settings. Hidden, the window is just the bar.
@@ -158,6 +162,9 @@ Each journey's and route's card, opened, holds its
 **Pace**, how fast the party travels it, and **Reset** (the rewind button), back to the start. One
 no animated scene shows needs a pace before it can set out; Play uses the pace chosen under **Times
 at** if it has none.
+
+The odometer's arrival time is hours on the road at the party's pace, slowed by terrain ahead --
+travel time, whichever way time is run.
 
 **Follow world clock**, on the Setup tab, is one setting for the whole map -- there is one party, on
 one clock. On, it ties where the party is to the world's date and time (Coffee Pub Blacksmith's
