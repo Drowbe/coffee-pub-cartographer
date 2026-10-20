@@ -1,43 +1,46 @@
 // ==================================================================
-// ===== THE JOURNEY'S MARKER =======================================
+// ===== THE PARTY'S MARKER =========================================
 // ==================================================================
 
 import { MODULE } from './const.js';
 import { routesManager } from './manager-routes.js';
 
-/** The pin type Cartographer's markers are, for Blacksmith's pins UI. */
+/** The pin type Cartographer's marker is, for Blacksmith's pins UI. */
 const PIN_TYPE = 'journey';
 /** A marker this far, in scene pixels, from where it should be is moved. */
 const MOVE_EPSILON = 0.5;
+/** How often the GM's client may save the marker where a party at rest is, in ms. */
+const SAVE_EVERY_MS = 500;
 
 /**
- * The party's marker on the map: a Blacksmith pin for each route or journey
- * that has set out, standing where the party is along it.
+ * The party's marker on a map: one Blacksmith pin per map, standing where
+ * the party is along the route or journey the map runs -- the one its bar
+ * and Play button run, the last one played there. There is one party, so
+ * there is one marker; choosing another route or journey moves it there.
  *
  * It is an ordinary pin, so the GM styles it in Blacksmith's Configure Pin
- * window -- an icon, a portrait, a wagon, its label and size -- and it shows
- * in Blacksmith's pin filters like any other. Cartographer creates it (as the
- * GM, the first time the journey moves), shows and hides it from players,
- * and moves it.
+ * window -- an icon, a portrait, a wagon, its label and size. Cartographer
+ * creates it (as the GM, once the map's route or journey has set out), shows
+ * and hides it from players, and moves it.
  *
- * Moving: every client works out where the party is from the journey's
- * progress and the shared clock, every frame, and puts the pin there with
- * Blacksmith's client-local live position, which is never saved or sent. A
- * pin with a live position cannot be dragged. When the journey comes to
- * rest -- stopped, its ease run out, or arrived -- the GM's client saves the
- * pin's position once, and each client lets go of its live position once
- * the saved one has caught up, so nothing jumps.
+ * Moving: every client works out where the party is, every frame, and
+ * wherever that differs from the saved position -- moving, or moved by a
+ * scrub of the world time -- puts the pin there with Blacksmith's
+ * client-local live position, which is never saved or sent and locks the pin
+ * against dragging. When the party is at rest, the GM's client saves the pin
+ * there, and each client lets go of its live position once the saved one
+ * has caught up, so nothing jumps.
  *
  * Without the live position (an older Blacksmith), the pin moves only when
- * the journey comes to rest.
+ * the GM saves it, at rest.
  */
 class TravelPinsManager {
     constructor() {
         this._hooks = [];
         /** Pins this client has given a live position, by pin id: the last point set. */
         this._live = new Map();
-        /** Pending saves on the GM's client, by pin id. */
-        this._saves = new Map();
+        this._busy = new Set();
+        this._lastSave = 0;
         this._tick = this._tick.bind(this);
         this._ticking = false;
     }
@@ -49,14 +52,11 @@ class TravelPinsManager {
         on('canvasReady', () => {
             this._live.clear();
             this._start();
+            void this._removeOldPins();
         });
         on('canvasTearDown', () => this._stop());
-        on(`${MODULE.ID}.pathTravelChanged`, ({ link, travel }) => this._onTravelChanged(link, travel));
-        on(`${MODULE.ID}.pathRemoved`, link => this._onPathRemoved(link));
-        // Scrubbing the world time moves a party that follows the clock, even
-        // stopped; the GM saves where it lands once the scrubbing settles.
-        on('updateWorldTime', () => this._onWorldTime());
         this._start();
+        void this._removeOldPins();
     }
 
     /** Blacksmith's pins API, when it is there and ready. */
@@ -70,9 +70,17 @@ class TravelPinsManager {
         return typeof TravelPinsManager.pins()?.setLivePosition === 'function';
     }
 
-    /** The pin id for a route or journey: one marker each, found again by its id. */
-    static pinId(link) {
-        return `${MODULE.ID}-travel-${link.journeyId ? `j-${link.journeyId}` : `r-${link.routeId}`}`;
+    /** The party's pin on a map. */
+    static pinId(sceneId) {
+        return `${MODULE.ID}-party-${sceneId}`;
+    }
+
+    /** The route or journey a map's marker follows: the one its bar runs, once it has set out. */
+    static followed(scene) {
+        const active = scene ? routesManager.settings(scene).active : null;
+        if (!active) return null;
+        const link = { sceneId: scene.id, ...active };
+        return routesManager._pathItem(link, scene)?.travel ? link : null;
     }
 
     _start() {
@@ -87,100 +95,66 @@ class TravelPinsManager {
         this._live.clear();
     }
 
-    // ==================================================================
-    // ===== WHERE THE PARTY IS =========================================
-    // ==================================================================
-
-    /** The routes and journeys on the map on the canvas that have set out, as links. */
-    _travelling(scene = canvas.scene) {
-        const links = [];
-        for (const route of routesManager.routes(scene)) if (route.travel) links.push({ sceneId: scene.id, routeId: route.id });
-        for (const journey of routesManager.journeys(scene)) if (journey.travel) links.push({ sceneId: scene.id, journeyId: journey.id });
-        return links;
+    /** Run a change at most once at a time per key. */
+    _once(key, fn) {
+        if (this._busy.has(key)) return;
+        this._busy.add(key);
+        Promise.resolve(fn()).finally(() => this._busy.delete(key));
     }
 
-    /** At rest: not playing, and any ease to a stop is over. */
-    static atRest(travel, now) {
-        const motion = travel?.motion ?? {};
-        if (motion.playing) return false;
-        return now >= (Number(motion.anchorAt) || 0) + Math.max(0, Number(motion.easeSeconds) || 0) * 1000;
-    }
+    // ==================================================================
+    // ===== EVERY FRAME ================================================
+    // ==================================================================
 
     /**
-     * Each frame, on every client: put each marker on this map where the
-     * party is. Wherever that differs from the saved position -- moving, or
-     * moved by a scrub of the world time -- the marker takes a live position;
-     * once the saved one has caught up, it lets go of it.
+     * On every client: put the map's marker where the party is. On the GM's,
+     * also make the marker if the map has a route or journey under way and no
+     * marker yet, and save it where a party at rest is.
      */
     _tick() {
         const pins = TravelPinsManager.pins();
-        if (!pins || !canvas?.ready || !canvas.scene || !TravelPinsManager.canMoveLive()) return;
-        const near = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) <= MOVE_EPSILON;
-        for (const link of this._travelling()) {
-            const id = TravelPinsManager.pinId(link);
-            if (!pins.exists?.(id, { sceneId: link.sceneId })) continue;
-            const point = routesManager.progress(link)?.point;
-            if (!point) continue;
-            const live = this._live.get(id);
-            const stored = pins.get?.(id, { sceneId: link.sceneId });
-            if (stored && near(stored, point)) {
-                if (live) {
-                    pins.clearLivePosition(id);
-                    this._live.delete(id);
-                }
-                continue;
-            }
-            if (live && near(live, point)) continue;
-            pins.setLivePosition(id, { x: point.x, y: point.y });
-            this._live.set(id, { x: point.x, y: point.y });
+        const scene = canvas?.scene;
+        if (!pins || !canvas?.ready || !scene) return;
+        const link = TravelPinsManager.followed(scene);
+        if (!link) return;
+        const id = TravelPinsManager.pinId(scene.id);
+        if (!pins.exists?.(id, { sceneId: scene.id })) {
+            if (game.user.isGM) this._once(`create-${id}`, () => this._ensurePin(link));
+            return;
         }
-    }
-
-    /**
-     * The world time changed: a stopped party that follows the clock may have
-     * been moved by a scrub. The GM saves their markers once it settles.
-     */
-    _onWorldTime() {
-        if (!game.user.isGM || !TravelPinsManager.pins()) return;
-        clearTimeout(this._worldSave);
-        this._worldSave = setTimeout(() => {
-            for (const scene of game.scenes.contents) {
-                for (const link of this._travelling(scene)) {
-                    const travel = routesManager.progress(link)?.travel;
-                    if (travel?.followClock && !travel.motion.playing) void this.savePosition(link);
-                }
+        const progress = routesManager.progress(link);
+        const point = progress?.point;
+        if (!point) return;
+        const near = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) <= MOVE_EPSILON;
+        const stored = pins.get?.(id, { sceneId: scene.id });
+        const settled = stored && near(stored, point);
+        if (game.user.isGM && !settled && !progress.moving && performance.now() - this._lastSave > SAVE_EVERY_MS) {
+            this._lastSave = performance.now();
+            this._once(`save-${id}`, () => this.savePosition(link));
+        }
+        if (!TravelPinsManager.canMoveLive()) return;
+        const live = this._live.get(id);
+        if (settled) {
+            if (live) {
+                pins.clearLivePosition(id);
+                this._live.delete(id);
             }
-        }, 600);
+            return;
+        }
+        if (live && near(live, point)) return;
+        pins.setLivePosition(id, { x: point.x, y: point.y });
+        this._live.set(id, { x: point.x, y: point.y });
     }
 
     // ==================================================================
-    // ===== THE GM'S SIDE: CREATING AND SAVING =========================
+    // ===== THE GM'S SIDE ==============================================
     // ==================================================================
 
-    /**
-     * A journey's travel changed (on the GM's client, which wrote it): give it
-     * a marker if it has none, and when it is coming to rest, save the
-     * marker where it will stop once the ease has run out.
-     */
-    async _onTravelChanged(link, travel) {
-        if (!game.user.isGM || !TravelPinsManager.pins()) return;
-        await this._ensurePin(link);
-        const id = TravelPinsManager.pinId(link);
-        clearTimeout(this._saves.get(id));
-        this._saves.delete(id);
-        if (travel?.motion?.playing) return;
-        const wait = Math.max(0, (Number(travel.motion.anchorAt) || 0) + (Number(travel.motion.easeSeconds) || 0) * 1000 - game.time.serverTime);
-        this._saves.set(id, setTimeout(() => {
-            this._saves.delete(id);
-            void this.savePosition(link);
-        }, wait + 50));
-    }
-
-    /** Create the marker for a route or journey, where the party is, if it has none. GM only. */
+    /** Make the map's marker where the party is, if it has none. GM only. */
     async _ensurePin(link) {
         const pins = TravelPinsManager.pins();
-        const id = TravelPinsManager.pinId(link);
-        if (!pins || pins.exists?.(id)) return;
+        const id = TravelPinsManager.pinId(link.sceneId);
+        if (!game.user.isGM || !pins || pins.exists?.(id)) return;
         const progress = routesManager.progress(link);
         const scene = game.scenes.get(link.sceneId);
         if (!progress?.point || !scene) return;
@@ -189,7 +163,7 @@ class TravelPinsManager {
             id,
             moduleId: MODULE.ID,
             type: PIN_TYPE,
-            text: progress.path.name,
+            text: game.i18n.localize(`${MODULE.ID}.routes.partyMarker`),
             image: '<i class="fa-solid fa-person-hiking"></i>',
             size: { w: size, h: size },
             x: progress.point.x,
@@ -199,48 +173,70 @@ class TravelPinsManager {
         }, { sceneId: link.sceneId });
     }
 
+    /**
+     * Open Blacksmith's Configure Pin window for the map's marker, where the
+     * GM sets its look: image or icon, shape, size, label, colours,
+     * animations. Before the party has set out there is no marker yet, so it
+     * is made first, at the start of the way, to be styled in advance.
+     */
+    async configure(sceneId) {
+        const pins = TravelPinsManager.pins();
+        const scene = game.scenes.get(sceneId);
+        const active = scene ? routesManager.settings(scene).active : null;
+        if (!game.user.isGM || !pins || !active) return null;
+        const id = TravelPinsManager.pinId(sceneId);
+        if (!pins.exists?.(id)) await this._ensurePin({ sceneId, ...active });
+        if (!pins.exists?.(id)) return null;
+        return pins.configure(id, { sceneId });
+    }
+
     /** Save the marker where the party is now. GM only; the pin moves for everyone through Blacksmith. */
     async savePosition(link) {
         const pins = TravelPinsManager.pins();
         if (!game.user.isGM || !pins) return;
-        const id = TravelPinsManager.pinId(link);
+        const id = TravelPinsManager.pinId(link.sceneId);
         const point = routesManager.progress(link)?.point;
         if (!point || !pins.exists?.(id)) return;
         await pins.update(id, { x: point.x, y: point.y }, { sceneId: link.sceneId });
     }
 
-    /** A deleted route or journey takes its marker with it. */
-    async _onPathRemoved(link) {
+    /**
+     * An earlier version gave every route and journey its own marker; there
+     * is one party, so those go, on the GM's client, as each map loads.
+     */
+    async _removeOldPins() {
         const pins = TravelPinsManager.pins();
-        if (!game.user.isGM || !pins) return;
-        const id = TravelPinsManager.pinId(link);
-        clearTimeout(this._saves.get(id));
-        this._saves.delete(id);
-        if (pins.exists?.(id)) await pins.delete(id, { sceneId: link.sceneId });
+        const scene = canvas?.scene;
+        if (!game.user.isGM || !pins || !scene) return;
+        const old = [
+            ...routesManager.routes(scene).map(route => `${MODULE.ID}-travel-r-${route.id}`),
+            ...routesManager.journeys(scene).map(journey => `${MODULE.ID}-travel-j-${journey.id}`)
+        ];
+        for (const id of old) if (pins.exists?.(id)) await pins.delete(id, { sceneId: scene.id });
     }
 
     // ==================================================================
     // ===== SHOWN OR HIDDEN ============================================
     // ==================================================================
 
-    /** The marker for a route or journey, as Blacksmith holds it, or null. */
-    pinFor(link) {
+    /** The map's marker, as Blacksmith holds it, or null. */
+    pinFor(sceneId) {
         const pins = TravelPinsManager.pins();
-        const id = TravelPinsManager.pinId(link);
-        return pins?.exists?.(id) ? pins.get(id, { sceneId: link.sceneId }) : null;
+        const id = TravelPinsManager.pinId(sceneId);
+        return pins?.exists?.(id) ? pins.get(id, { sceneId }) : null;
     }
 
-    /** Whether players see the marker. Blacksmith's pin visibility; the GM always sees it. */
-    isShown(link) {
-        return this.pinFor(link)?.config?.blacksmithVisibility !== 'hidden';
+    /** Whether players see the map's marker. Blacksmith's pin visibility; the GM always sees it. */
+    isShown(sceneId) {
+        return this.pinFor(sceneId)?.config?.blacksmithVisibility !== 'hidden';
     }
 
-    /** Show the marker to players, or hide it from them. GM only. */
-    async setShown(link, shown) {
+    /** Show the map's marker to players, or hide it from them. GM only. */
+    async setShown(sceneId, shown) {
         const pins = TravelPinsManager.pins();
-        const pin = this.pinFor(link);
+        const pin = this.pinFor(sceneId);
         if (!game.user.isGM || !pins || !pin) return;
-        await pins.update(pin.id, { config: { ...(pin.config ?? {}), blacksmithVisibility: shown ? 'visible' : 'hidden' } }, { sceneId: link.sceneId });
+        await pins.update(pin.id, { config: { ...(pin.config ?? {}), blacksmithVisibility: shown ? 'visible' : 'hidden' } }, { sceneId });
         routesManager.window?.render();
     }
 }

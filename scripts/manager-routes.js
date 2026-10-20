@@ -9,7 +9,7 @@ import {
     cleanPoints, legPixels, routePixels, gridDistance, distancePixels, pointAlong, convertDistance,
     nearestWaypoint, nearestOnRoute, legTerrains, terrainFactor, insertWaypoint, removeWaypoint,
     snapTo, chainRoutes, TERRAINS, pathLegs, totalEffort, distanceForEffort, legIndexAt,
-    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith
+    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate
 } from './utils-routes.js';
 import { motionSpeed } from './utils-motion.js';
 import { formatDistance } from './utils-travel.js';
@@ -114,6 +114,18 @@ class RoutesManager {
         this._registerButtons();
         // When the world time last changed here, for carrying it on smoothly between updates.
         this._hooks.push({ name: 'updateWorldTime', id: Hooks.on('updateWorldTime', () => { this._worldSeenAt = performance.now(); }) });
+        // Which routes are drawn depends on what is moving, which the world
+        // time changes without any write: a scrub, an arrival. Checked a few
+        // times a second, redrawn only when it changes.
+        this._movingSignature = '';
+        setInterval(() => {
+            if (!canvas?.ready) return;
+            const ids = this.travellingRouteIds();
+            const signature = ids ? [...ids].sort().join() : '';
+            if (signature === this._movingSignature) return;
+            this._movingSignature = signature;
+            this.draw();
+        }, 300);
         socketManager.registerToolHandlers('routes', {
             request: data => this._handleRequest(data)
         });
@@ -230,7 +242,9 @@ class RoutesManager {
         const active = stored.active?.journeyId && this.getJourney(stored.active.journeyId, scene) ? { journeyId: stored.active.journeyId }
             : stored.active?.routeId && this.get(stored.active.routeId, scene) ? { routeId: stored.active.routeId }
             : null;
-        return { hoursPerDay: hours > 0 && hours <= 24 ? hours : DEFAULT_HOURS_PER_DAY, active };
+        // Whether the map's routes and journeys follow the world clock: one setting for
+        // the map, since there is one party and one clock.
+        return { hoursPerDay: hours > 0 && hours <= 24 ? hours : DEFAULT_HOURS_PER_DAY, active, followClock: !!stored.followClock };
     }
 
     /** Change the map's travel plan. The GM's; it is the same plan for everyone. */
@@ -244,15 +258,16 @@ class RoutesManager {
      * one is under way, only those are drawn. Null when nothing is moving.
      */
     travellingRouteIds(scene = canvas.scene) {
+        if (!scene) return null;
         const ids = new Set();
         let moving = false;
         for (const route of this.routes(scene)) {
-            if (!route.travel?.motion?.playing) continue;
+            if (!route.travel || !this.progress({ sceneId: scene.id, routeId: route.id })?.moving) continue;
             moving = true;
             ids.add(route.id);
         }
         for (const journey of this.journeys(scene)) {
-            if (!journey.travel?.motion?.playing) continue;
+            if (!journey.travel || !this.progress({ sceneId: scene.id, journeyId: journey.id })?.moving) continue;
             moving = true;
             for (const id of journey.routeIds) ids.add(id);
         }
@@ -386,6 +401,14 @@ class RoutesManager {
         const total = totalEffort(legs);
         const effort = Math.min(total, Math.max(0, travelEffort(travel, now, world)));
         const distance = distanceForEffort(legs, effort);
+        // Whether the party is moving at this moment: following the clock, read
+        // from the timeline at this world time, so a scrub to a time they were
+        // travelling shows them travelling; otherwise from the motion, easing
+        // included. Never past the end they are heading for.
+        const rate = travel.followClock && travel.timeline?.length
+            ? timelineRate(travel.timeline, world)
+            : (travel.motion.playing ? Number(travel.motion.masterSpeed) || 0 : motionSpeed(travel.motion, now));
+        const moving = rate > 0 ? effort < total : rate < 0 ? effort > 0 : false;
         const leg = legIndexAt(legs, distance);
         return {
             scene,
@@ -397,6 +420,7 @@ class RoutesManager {
             distance,
             length: legs.reduce((sum, l) => sum + l.distance, 0),
             leg,
+            moving,
             factor: legs[leg]?.factor ?? 1,
             terrain: path.terrain[leg] ?? null,
             point: pointAlong(path.points, distancePixels(distance, scene.grid))
@@ -494,7 +518,9 @@ class RoutesManager {
             if (!scene) return null;
             const list = this.routes(scene);
             let journeys = this.journeys(scene);
-            const save = () => scene.setFlag(MODULE.ID, FLAG_KEY, { list, journeys });
+            // The map's settings ride along unchanged, so no write can lose them.
+            const settings = scene.getFlag(MODULE.ID, FLAG_KEY)?.settings;
+            const save = () => scene.setFlag(MODULE.ID, FLAG_KEY, { list, journeys, ...(settings ? { settings } : {}) });
             const name = (value, fallback) => String(value ?? '').trim().slice(0, 100) || fallback;
 
             if (data.action === 'create') {
@@ -520,6 +546,7 @@ class RoutesManager {
                 const stored = scene.getFlag(MODULE.ID, FLAG_KEY)?.settings ?? {};
                 const hours = Number(data.changes?.hoursPerDay);
                 const settings = { ...stored, ...(hours > 0 && hours <= 24 ? { hoursPerDay: Math.round(hours * 4) / 4 } : {}) };
+                if ('followClock' in (data.changes ?? {})) settings.followClock = !!data.changes.followClock;
                 // The route or journey the map's bar and Play button run: the last one played here.
                 if ('active' in (data.changes ?? {})) {
                     const active = data.changes.active;
@@ -537,6 +564,8 @@ class RoutesManager {
                 if (!item) return null;
                 const travel = { ...defaultPathTravel(), ...(item.travel ?? {}) };
                 travel.motion = { ...defaultPathTravel().motion, ...(item.travel?.motion ?? {}) };
+                // A path setting out for the first time follows the clock if its map does.
+                if (!item.travel) travel.followClock = !!settings?.followClock;
                 const now = Number(data.now) || game.time.serverTime;
                 const world = Number.isFinite(Number(data.world)) ? Number(data.world) : this.worldTime();
                 const path = this.path(data.link, scene);
@@ -609,7 +638,8 @@ class RoutesManager {
             }
             const changes = data.changes ?? {};
             if ('name' in changes) route.name = name(changes.name, route.name);
-            if ('color' in changes && ROUTE_COLORS.includes(changes.color)) route.color = changes.color;
+            // Any colour, as #rrggbb: what a colour picker gives, and nothing else gets in.
+            if ('color' in changes && /^#[0-9a-f]{6}$/i.test(String(changes.color))) route.color = String(changes.color).toLowerCase();
             if ('hidden' in changes) route.hidden = !!changes.hidden;
             if ('points' in changes) {
                 const points = cleanPoints(changes.points);

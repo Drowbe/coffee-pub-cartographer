@@ -115,7 +115,12 @@ class JourneysManager {
             ui.notifications.warn(game.i18n.localize(`${MODULE.ID}.routes.needsPace`));
             return;
         }
+        // One party: setting out on one route or journey stops any other moving on this map.
+        await this._stopOthers(link);
         const path = { playing: true, arrived: false };
+        // At 0x the party would stand still while playing; Play means going, so it goes at 1x.
+        const stillSpeed = !(Number(progress.travel.motion.masterSpeed) || 0);
+        if (stillSpeed) path.masterSpeed = 1;
         if (!(progress.travel.pace > 0) && pace > 0) path.pace = pace;
         if (!(progress.travel.motion.easeSeconds > 0)) path.easeSeconds = DEFAULT_EASE_SECONDS;
         // Setting out again from the end starts from the beginning.
@@ -124,12 +129,23 @@ class JourneysManager {
             scene: state => {
                 state.playing = true;
                 state.travel.arrived = false;
+                if (!(Number(state.masterSpeed) || 0)) state.masterSpeed = 1;
             },
             path
         });
         // Followed, the scenes push only the motion; the journey's own marks are set here.
         if (this.linkedScenes(link).length) await routesManager.setPathTravel(link, { arrived: false, ...(path.effort === 0 ? { effort: 0 } : {}) });
         await routesManager.setSettings({ active: link.journeyId ? { journeyId: link.journeyId } : { routeId: link.routeId } });
+    }
+
+    async _stopOthers(link) {
+        const scene = game.scenes.get(link.sceneId);
+        const same = other => (link.journeyId ? other.journeyId === link.journeyId : other.routeId === link.routeId);
+        const others = [
+            ...routesManager.journeys(scene).map(journey => ({ sceneId: link.sceneId, journeyId: journey.id })),
+            ...routesManager.routes(scene).map(route => ({ sceneId: link.sceneId, routeId: route.id }))
+        ].filter(other => !same(other) && routesManager.progress(other)?.travel.motion.playing);
+        for (const other of others) await this.stop(other);
     }
 
     async stop(link) {
@@ -171,6 +187,8 @@ class JourneysManager {
      */
     async setFollowClock(link, follow) {
         const rate = travelManager.constructor.clockApi()?.rate;
+        // The scenes are written whether or not the journey's travel changes,
+        // so their scenery keeps step with the clock setting.
         await this._drive(link, {
             scene: state => {
                 state.travel.followClock = !!follow;
@@ -178,6 +196,21 @@ class JourneysManager {
             },
             path: { followClock: !!follow }
         });
+    }
+
+    /**
+     * Follow the world clock on a whole map, or not: every route and journey
+     * on it that has set out, and the animated scenes following them. The
+     * map's setting; a route or journey setting out later takes it up too.
+     */
+    async setMapClock(scene, follow) {
+        if (!game.user.isGM || !scene) return;
+        await routesManager.setSettings({ followClock: !!follow });
+        const links = [
+            ...routesManager.journeys(scene).filter(j => j.travel).map(j => ({ sceneId: scene.id, journeyId: j.id })),
+            ...routesManager.routes(scene).filter(r => r.travel).map(r => ({ sceneId: scene.id, routeId: r.id }))
+        ];
+        for (const link of links) await this.setFollowClock(link, follow);
     }
 
     /** Back to the start of the way. */

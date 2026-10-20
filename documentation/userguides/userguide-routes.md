@@ -53,7 +53,7 @@ mountains, swamp, desert, snow or water. Forest, hills, mountains, swamp, desert
 difficult terrain, which halves the pace, as in the D&D rules; road, open ground and water do not.
 Legs over difficult terrain are drawn dashed.
 
-In the Routes window, open a route's legs: **Every leg** sets them all at once, and each leg has its
+In the Routes window, open a route's card (the chevron before its name): **Every leg** sets them all at once, and each leg has its
 own choice beside its length. A new route is open ground throughout. Adding a waypoint splits a leg
 into two of the same terrain; removing one joins its two legs, keeping the first's terrain.
 
@@ -86,20 +86,28 @@ Deleting a route takes it out of every journey; deleting a journey leaves its ro
 
 ## The Routes window
 
-The window lists the map's routes. Each shows its colour, its name and its total length, and below
-that how many legs it has and how long it takes at a pace.
+The window has three tabs: **Routes**, **Journeys** and **Setup**.
 
-- **Times at** -- the pace the times are worked out at: with D&D 5e, the
-  rules' paces, mounts and vehicles; in other systems, everyday ones.
+On the Routes and Journeys tabs, each card shows its name and total length, and below that its legs
+or routes and how long it takes at a pace. The chevron before the name opens it, for its pace, its
+legs and their terrain, or a journey's routes in order.
+
+- The coloured dot before a route's name opens a colour picker: any colour.
+- The crosshairs show the whole route on the map; the eye hides it from players; the bezier curve
+  edits its waypoints; the pen renames it; the bin deletes it, after asking.
+
+The **Setup** tab holds what every route and journey on the map share:
+
+- **Grid square** -- the map's grid, as the routes are measured on it.
+- **Times at** -- the pace the times are worked out at: with D&D 5e, the rules' paces, mounts and
+  vehicles; in other systems, everyday ones.
 - **Travel day** -- how many hours a day the party plans to travel (8 to start). The GM sets it for
   the map, so everyone plans with the same day. Each time is the hours of travel the trip takes, and,
   when that is more than a day, the days it fills: "30 h of travel: 3 days of 8 h + 6 h". More than
   6 hours a day at a mounted pace warns that it is hard on the mounts; more than 8 warns that it is a
   forced march.
-- Click a route's legs to list each leg's length.
-- The coloured dot changes the route's colour; the crosshairs show the whole route on the map; the
-  eye hides it from players; the bezier curve edits its waypoints; the pen renames it; the bin
-  deletes it, after asking.
+- **Follow world clock** -- see below; it is the map's, for all its routes and journeys.
+- **Party marker** -- see below.
 
 The window lists every route you can see. A route someone else drew shows their name, and only its
 maker and the GM can change it.
@@ -123,14 +131,12 @@ it. **Reset odometer** resets the journey too.
 Terrain slows the party: a leg of forest takes twice as long as a leg of road, and when the party
 reaches one, the scenery eases down to half speed until they are out of it. The arrival time counts
 the difficult terrain still ahead. The Routes window shows each route's and journey's progress,
-and the terrain the party is in, once it has set out. The
-link-slash button stops following the route and keeps its length as the destination.
+and the terrain the party is in, once it has set out. The link-slash button stops following the
+route and keeps its length as the destination.
 
 A route on a map in hexes or squares, or any unit that cannot be converted to the scene's, is listed
-but cannot be chosen.
-
-The map does not yet show where along the route the party is; the odometer's distance is the only
-measure of progress for now.
+but cannot be chosen. Whether the journey follows the world clock is its map's setting; the scene
+shows it rather than offering its own switch.
 
 ## Run a route or journey from the map
 
@@ -140,24 +146,28 @@ window's bar works as the Scene Motion window's does. From the left:
 
 - **Play / Stop** -- the button says what pressing it will do. Stop eases the journey to a halt;
   Play eases it back up. Playing a journey that has arrived starts it again from the beginning.
+- **Back to the start** (the rewind button) -- takes the party back to the beginning of the route or
+  journey, after asking, since how far they had come is lost.
 - **Speed** -- centred on zero, as a multiple of the pace. Right of centre runs onward, left of
   centre runs back along the way, and it snaps to a stop near the middle.
 - **Which** -- the route or journey the bar runs, from the map's journeys and routes. It is outlined
   in the window.
 - **The gear** -- shows and hides the settings. Hidden, the window is just the bar.
 
-Each journey's settings on the Journeys tab -- and each route's, with its legs open -- hold its
+Each journey's and route's card, opened, holds its
 **Pace**, how fast the party travels it, and **Reset** (the rewind button), back to the start. One
 no animated scene shows needs a pace before it can set out; Play uses the pace chosen under **Times
 at** if it has none.
 
-**Follow world clock**, in the same settings, ties where the party is to the world's date and time
-(Coffee Pub Blacksmith's world clock, or Foundry's own time). As the clock runs, they travel at the
+**Follow world clock**, on the Setup tab, is one setting for the whole map -- there is one party, on
+one clock. On, it ties where the party is to the world's date and time (Coffee Pub Blacksmith's
+world clock, or Foundry's own time), on every route and journey on the map, including ones that set
+out later. As the clock runs, they travel at the
 pace, slowed by terrain; stopped, they stay put however much time passes. Scrubbing time moves them:
 forward to where they will be, back to where they were then -- including back past a stop, to where
 they were still travelling. Play, Stop or a change of speed or pace made after scrubbing back
-replaces what had followed. With an animated scene following the journey, this is that scene's own
-Follow world clock switch.
+replaces what had followed. An animated scene following a journey takes the map's setting; its scenery
+speeds up with the clock to match.
 
 While a route or journey is under way, the map shows only the routes it travels, and the same
 odometer as an animated scene's -- distance travelled, how far is left, the arrival time and a
@@ -176,16 +186,21 @@ At the end of the way the journey stops, for everyone, and is marked arrived.
 
 ## The party's marker
 
-The first time a route or journey moves, a marker appears on its map where the party is, and moves
-along it as they travel -- for everyone, in step with the odometer. It is a Coffee Pub Blacksmith pin,
-so the GM styles it from the pin's own menu (Configure Pin): an icon, a portrait, a wagon, its label
-and size.
+There is one party, so each map has one marker. Once the route or journey the bar runs has set out,
+the marker appears where the party is, and moves along it as they travel -- for everyone, in step
+with the odometer, and with the world time when it follows the clock, scrubbing included. Choose
+another route or journey in the bar and the marker moves to where the party is on that one. It is a
+Coffee Pub Blacksmith pin, so the GM styles it from the pin's own menu (Configure Pin): an icon, a
+portrait, a wagon, its label and size.
 
-- The location-dot button beside a journey's progress in the Routes window shows the marker to
-  players or hides it from them. The GM always sees it.
+- **Party marker**, on the Routes window's Setup tab, is the GM's: **Shown to players**
+  switches it on and off for them (the GM always sees it), and **Change look** opens Blacksmith's
+  Configure Pin window for it -- image or icon, shape, size, label, colours, animations. Before the
+  party has set out there is no marker yet; Change look makes one at the start of the way, so it can
+  be styled in advance.
 - While the party is moving, the marker cannot be dragged. When they stop or arrive, it stays where
   they are.
-- Deleting the route or journey deletes its marker.
+- Setting out on one route or journey stops any other moving on the same map: it is one party.
 
 With an older Blacksmith, the marker jumps to where the party is each time they stop, rather than
 moving smoothly.

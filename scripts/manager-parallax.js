@@ -430,9 +430,9 @@ class ParallaxManager {
             playing: !!state.playing,
             masterSpeed: Number(state.masterSpeed) || 0,
             easeSeconds: Math.max(0, Number(state.easeSeconds) || 0),
-            // Following the clock, the journey's place is read from the world time
-            // (its timeline); only the scenery runs at the capped clock rate.
-            followClock: !!travel.followClock,
+            // Whether the journey follows the clock is its map's setting, not this
+            // scene's (manager-journeys.js setMapClock); this scene's switch only
+            // speeds up its scenery with the clock.
             clockFactor: 1,
             pace: pace ?? 0
         };
@@ -491,8 +491,16 @@ class ParallaxManager {
     // ===== CONTROLS ===================================================
     // ==================================================================
 
-    /** Start the scenery moving, easing up to the master speed. */
-    play() { return this._commit(s => { s.playing = true; }); }
+    /**
+     * Start the scenery moving, easing up to the master speed. At 0x it would
+     * play standing still; Play means going, so it goes at 1x.
+     */
+    play() {
+        return this._commit(s => {
+            s.playing = true;
+            if (!(Number(s.masterSpeed) || 0)) s.masterSpeed = 1;
+        });
+    }
     /** Ease the scenery to a halt. The master speed is kept, so Play resumes at it. */
     stop() { return this._commit(s => { s.playing = false; }); }
     togglePlaying() { return this.state.playing ? this.stop() : this.play(); }

@@ -639,12 +639,9 @@
     font-size: 0.85em;
 }
 
-.cartographer-parallax-window .cartographer-parallax-measures dt {
-    color: var(--blacksmith-tool-text-muted);
-}
-
-.cartographer-parallax-window .cartographer-parallax-measures dd {
-    margin: 0;
+/* Plain spans and divs, not a <dl>: Foundry styles dt and dd itself (bold,
+   shadowed), and these should read like every other row in the window. */
+.cartographer-parallax-window .cartographer-parallax-measure {
     color: var(--blacksmith-tool-text);
 }
 
@@ -928,10 +925,17 @@
     border-color: var(--blacksmith-color-brand-accent);
 }
 
+/* The marker's row: its switch, what the switch means, then its look. */
+.cartographer-parallax-window .cartographer-routes-marker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* How far the party has come. */
 .cartographer-parallax-window .cartographer-routes-progress {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
 }
 
@@ -961,6 +965,23 @@
     display: flex;
     align-items: center;
     gap: 6px;
+}
+
+/* A route's colour opens the browser's colour picker; drawn as the same dot. */
+.cartographer-parallax-window input[type="color"].cartographer-routes-swatch {
+    appearance: none;
+    -webkit-appearance: none;
+    background: none;
+    overflow: hidden;
+}
+
+.cartographer-parallax-window input[type="color"].cartographer-routes-swatch::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.cartographer-parallax-window input[type="color"].cartographer-routes-swatch::-webkit-color-swatch {
+    border: none;
+    border-radius: 50%;
 }
 
 .cartographer-parallax-window .cartographer-routes-swatch {
@@ -1010,21 +1031,6 @@
     font-size: 0.85em;
 }
 
-.cartographer-parallax-window button.cartographer-routes-legs-toggle {
-    flex: 0 0 auto;
-    width: auto;
-    height: auto;
-    min-height: 0;
-    padding: 0;
-    margin: 0;
-    border: none;
-    background: none;
-    color: inherit;
-    font-size: inherit;
-    line-height: inherit;
-    cursor: pointer;
-}
-
 .cartographer-parallax-window .cartographer-routes-legs {
     display: grid;
     gap: 2px;
@@ -1072,10 +1078,13 @@
     padding: 0 3px;
 }
 
+/* A setting on a route or journey: its label, then its control right beside
+   it, on the same columns as every other row -- never pushed to the far edge. */
 .cartographer-parallax-window .cartographer-routes-terrain-all {
-    display: flex;
+    display: grid;
+    grid-template-columns: 120px auto;
+    justify-content: start;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
     font-size: 0.85em;
 }

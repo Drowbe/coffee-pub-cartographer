@@ -162,10 +162,7 @@ class TravelManager {
         if (!scene) return null;
         const underWay = link => {
             const progress = routesManager.progress(link, now);
-            const motion = progress?.travel.motion;
-            if (!motion) return null;
-            const resting = !motion.playing && now >= (Number(motion.anchorAt) || 0) + (Number(motion.easeSeconds) || 0) * 1000;
-            return resting ? null : progress;
+            return progress?.moving ? progress : null;
         };
         const active = routesManager.settings(scene).active;
         let progress = active ? underWay({ sceneId: scene.id, ...active }) : null;

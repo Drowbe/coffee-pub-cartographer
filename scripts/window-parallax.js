@@ -597,6 +597,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             routeGroups,
             hasRoutes: routeGroups.length > 0 || !!link,
             routeLinked: !!link,
+            mapClock: link ? routesManager.settings(game.scenes.get(link.sceneId)).followClock : false,
             routeText: !link ? ''
                 : !linked ? localize('travelRouteMissing')
                 : linked.converted === null ? localize('travelRouteUnits')
@@ -1432,7 +1433,10 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const ref = id.startsWith('j:') ? { sceneId, journeyId: id.slice(2) } : { sceneId, routeId: id };
         const linked = routesManager.linked(ref, canvas.scene?.grid?.units);
         if (!linked || linked.converted === null) return;
-        void this.manager.setTravel({ route: ref, destination: linked.converted });
+        // The map decides whether its journeys follow the clock; this scene's
+        // scenery speeds up with the clock to match.
+        const mapClock = routesManager.settings(game.scenes.get(sceneId)).followClock;
+        void this.manager.setTravel({ route: ref, destination: linked.converted, followClock: mapClock });
     }
 
     /** A pace typed in mph or km/h sets the ground layer's speed. */

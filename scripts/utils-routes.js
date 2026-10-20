@@ -382,6 +382,16 @@ export function timelineEffort(timeline, worldTime) {
     return at.effort + at.rate * (worldTime - at.w);
 }
 
+/** The effort per in-world second a timeline has at a world time: 0 before it starts. */
+export function timelineRate(timeline, worldTime) {
+    let rate = 0;
+    for (const change of timeline ?? []) {
+        if (change.w <= worldTime) rate = change.rate;
+        else break;
+    }
+    return rate;
+}
+
 /**
  * A change to a timeline at world time `w`: everything after it is
  * replaced -- changing course after scrubbing back rewrites what followed --

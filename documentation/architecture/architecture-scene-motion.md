@@ -133,8 +133,7 @@ on a path that follows the clock adds a change at the GM's world time, dropping 
 change made after scrubbing back rewrites what followed; the last 500 are kept. Scrubbing needs no
 handling of its own: the next frame reads the new time. `routesManager.worldTime()` carries the world
 time on at Blacksmith's clock rate between updates, for at most ten seconds, so the marker moves
-smoothly rather than stepping. The marker takes a live position wherever the party's place differs
-from the saved pin, and the GM saves a stopped party's marker after a scrub settles.
+smoothly rather than stepping.
 
 **Controls from the map** (manager-journeys.js). A journey followed by animated scenes is driven
 through them: the map's Play, speed and pace change each following scene with
@@ -147,21 +146,30 @@ following scene is on the canvas to notice (manager-travel.js covers the one tha
 "active" journey -- the one the sub-menubar's Play runs -- is `settings.active` in the `routes`
 flag: the last one played there.
 
-**The marker** is a Blacksmith pin, id `coffee-pub-cartographer-travel-j-<journeyId>` (or
-`-r-<routeId>`), type `journey`, created by the GM's client the first time the path's travel is
-written (`coffee-pub-cartographer.pathTravelChanged`, fired by `_apply` on the GM's client). Every
-client puts it at `progress().point` each frame with Blacksmith's client-local
-`pins.setLivePosition`, which is never saved or sent and locks the pin against dragging. At rest
-(stopped and its ease run out) the GM's client saves the point with `pins.update`, and each client
-clears its live position once the saved one matches, so nothing jumps. Without
-`setLivePosition` (an older Blacksmith) the pin moves only at those saves. Shown or hidden is the
-pin's own `config.blacksmithVisibility`. Its length, converted from the map's units to the scene's,
+**Moving** is read, not stored: `progress().moving` is the timeline's rate at the world time for a path
+that follows the clock, and the motion's speed (easing included) otherwise, and false at the end it
+is heading for. So a scrub back to a time the party was travelling shows them travelling. While
+anything on a map is moving, only the routes it travels are drawn (`travellingRouteIds`), checked
+a few times a second, since a scrub changes it without any write. There is one party: playing one
+route or journey on a map stops any other playing there.
+
+**The marker** is one Blacksmith pin per map, id `coffee-pub-cartographer-party-<sceneId>`, type
+`journey`, following the map's active route or journey (`settings.active`). The GM's client creates
+it once that has set out. Every client puts it at `progress().point` with Blacksmith's client-local
+`pins.setLivePosition` wherever that differs from the saved pin -- moving, or moved by a scrub --
+which is never saved or sent and locks the pin against dragging; the GM's client saves the point
+with `pins.update` whenever the party is not moving, and each client clears its live position once
+the saved one matches, so nothing jumps. Without `setLivePosition` (an older Blacksmith) the pin
+moves only at those saves. Shown or hidden is the pin's own `config.blacksmithVisibility`. Pins from
+the first version, one per route or journey (`-travel-r-` / `-travel-j-`), are deleted as maps load.
+
+**Destination.** A followed path's length, converted from the map's units to the scene's,
 is written into `travel.destination` when it is chosen, and again by the GM (`_syncRoute` in
 manager-travel.js) when the scene loads or any route changes -- `updateScene` on the map fires
 `coffee-pub-cartographer.routesChanged`. Storing the length rather than reading it live keeps the
 odometer working when the map is not loaded and after the route is deleted. Where the party is on
 the route is `routesManager.pointAt(id, distance)`, the odometer's distance converted back to
-the map's units: what the planned marker will read. Routes draw in `canvas.interface`, above tokens;
+the map's units. Routes draw in `canvas.interface`, above tokens;
 the drawing tool captures left clicks in the capture phase, as the sketch tool does, and leaves
 right-drag to pan.
 

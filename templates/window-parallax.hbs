@@ -447,9 +447,9 @@
             {{/if}}
 
             {{! What the odometer reads from the scene: read-only. }}
-            <dl class="cartographer-parallax-measures">
-                {{#each travel.measures}}<dt>{{label}}</dt><dd>{{value}}</dd>{{/each}}
-            </dl>
+            <div class="cartographer-parallax-measures">
+                {{#each travel.measures}}<span class="cartographer-parallax-label">{{label}}</span><div class="cartographer-parallax-measure">{{value}}</div>{{/each}}
+            </div>
 
             {{> switchRow label=(localize "coffee-pub-cartographer.parallax.travelShow") hint=(localize "coffee-pub-cartographer.parallax.travelShowHint")
                 action="travel-hud" on=travel.showHud}}
@@ -485,8 +485,16 @@
                 {{/if}}
             </div>
 
+            {{#if travel.routeLinked}}
+            {{! Following a route or journey, the clock is its map's setting, made on the map. }}
+            <div class="cartographer-parallax-field cartographer-parallax-switch-row" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelClockFromMapHint"}}">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelFollowClock"}}</span>
+                <span class="cartographer-parallax-hint">{{#if travel.mapClock}}{{localize "coffee-pub-cartographer.parallax.travelClockFromMapOn"}}{{else}}{{localize "coffee-pub-cartographer.parallax.travelClockFromMapOff"}}{{/if}}</span>
+            </div>
+            {{else}}
             {{> switchRow label=(localize "coffee-pub-cartographer.parallax.travelFollowClock") hint=(localize "coffee-pub-cartographer.parallax.travelFollowClockHint")
                 action="travel-clock" on=travel.followClock disabled=travel.clockUnavailable}}
+            {{/if}}
             {{#if travel.followClock}}
             <p class="cartographer-parallax-hint">{{travel.clockText}}</p>
             {{/if}}
