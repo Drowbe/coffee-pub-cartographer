@@ -769,6 +769,21 @@ console.log('\nroutes: who may change what');
     await tp2._ensurePin(one);
     check(placed.get('m-party-here')?.text === 'm.routes.partyMarker', 'with no party set in the world, it is simply "The party"');
 
+    console.log('\nwhat a drop says');
+    const realFormat = game.i18n.format;
+    game.i18n.format = (key, data) => `${key} ${JSON.stringify(data)}`;
+    partyName = 'The Company';
+    await tp2.placeParty(scene, { x: 700, y: 900 }, 24);
+    const onMsg = tp2.dropMessage({ onRoute: true, link: lateLink }, null, scene);
+    check(onMsg.startsWith('m.routes.partyMovedOn') && onMsg.includes('"party":"The Company"') && onMsg.includes('"name":"Late"') && onMsg.includes('atDistance'),
+        'put on a route: "The Company has moved on to Late at 25 ft along"');
+    await tp2.placeParty(scene, { x: 5, y: 900 }, 24);
+    check(tp2.dropMessage({ onRoute: true, link: lateLink }, null, scene).includes('m.routes.atStart'), 'at its start, it says so');
+    const offMsg = tp2.dropMessage({ onRoute: false }, 'Late', scene);
+    check(offMsg.startsWith('m.routes.partyMovedOff') && offMsg.includes('"name":"Late"'), 'moved off a route: "The Company has moved off of Late"');
+    check(tp2.dropMessage({ onRoute: false }, null, scene) === null, 'moved from off every route to elsewhere off every route: nothing said');
+    game.i18n.format = realFormat;
+
     console.log('\ndeleting the marker');
     const styled = { ...placed.get('m-party-here'), image: 'wagon.webp', text: 'Caravan' };
     placed.delete('m-party-here');

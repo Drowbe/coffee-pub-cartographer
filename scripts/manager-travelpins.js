@@ -4,6 +4,7 @@
 
 import { MODULE } from './const.js';
 import { routesManager } from './manager-routes.js';
+import { formatDistance } from './utils-travel.js';
 import { journeysManager } from './manager-journeys.js';
 import { nearestOnRoute, legPixels, gridDistance, pathLegs, effortForDistance } from './utils-routes.js';
 
@@ -99,8 +100,30 @@ class TravelPinsManager {
         const pin = event.pin ?? TravelPinsManager.pins()?.get?.(event.pinId, { sceneId: canvas.scene.id });
         this._dragging = false;
         if (!pin) return;
-        const result = await this.placeParty(canvas.scene, { x: pin.x, y: pin.y }, DROP_SNAP_PIXELS / (canvas.stage?.scale?.x || 1));
-        if (!result.onRoute) ui.notifications.info(game.i18n.localize(`${MODULE.ID}.routes.partyDroppedOffRoute`));
+        const scene = canvas.scene;
+        // Where the party was: on a trip, or set down off every route.
+        const was = routesManager.settings(scene).offRoute ? null : routesManager.shownPath(scene);
+        const wasName = was ? routesManager.path(was, scene)?.name : null;
+        const result = await this.placeParty(scene, { x: pin.x, y: pin.y }, DROP_SNAP_PIXELS / (canvas.stage?.scale?.x || 1));
+        const message = this.dropMessage(result, wasName, scene);
+        if (message) ui.notifications.info(message);
+    }
+
+    /**
+     * What to tell the GM about a drop: "<party> has moved on to <trip> at
+     * <where>", or "<party> has moved off of <trip>". Moved from off every
+     * route to elsewhere off every route, nothing.
+     */
+    dropMessage(result, wasName, scene) {
+        const format = (key, data) => game.i18n.format(`${MODULE.ID}.routes.${key}`, data);
+        const party = TravelPinsManager.partyName();
+        if (!result?.onRoute) return wasName ? format('partyMovedOff', { party, name: wasName }) : null;
+        const progress = routesManager.progress(result.link);
+        if (!progress) return null;
+        const where = progress.distance <= 1e-9 ? game.i18n.localize(`${MODULE.ID}.routes.atStart`)
+            : progress.distance >= progress.length - 1e-9 ? game.i18n.localize(`${MODULE.ID}.routes.atEnd`)
+            : format('atDistance', { distance: formatDistance(progress.distance, scene.grid?.units) });
+        return format('partyMovedOn', { party, name: progress.path.name, where });
     }
 
     /** Stop every route and journey moving on a map: there is one party. */
