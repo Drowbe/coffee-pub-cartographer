@@ -25,7 +25,23 @@ Anyone can draw a route. A player's route is saved by the GM's client, so a GM h
 - Right-drag still pans the map, and the mouse wheel still zooms, so a long road can be drawn
   across more than one screen.
 
-Finishing asks for a name; closing that box without saving discards the route.
+Finishing asks for its names; closing that box without saving discards the route.
+
+## Naming a route
+
+A route has a **Start** and an **End** -- the places it was drawn from and to -- and, if you like, a
+**Name**. Where a map note (a town, a landmark) sits at either end, that end is named after it
+already; a route with both ends named needs no name of its own.
+
+A route is called by its ends, the way the party is running it: **Zhentil Keep → Phlan**, or, turned
+round, **Phlan → Zhentil Keep**; with a name, **The Coast Road (Zhentil Keep → Phlan)**. Lists show
+it either way round (**Zhentil Keep ↔ Phlan**). The odometer, the drop messages ("…has moved on to
+Zhentil Keep → Phlan, 12 mi from Zhentil Keep") and Turn round ("Heading for Phlan…") use the names.
+A journey's ends are its first route's start and its last route's end, as it is being run.
+
+Routes from before had only a name. One named for two places -- "Zhentil Keep <> Phlan",
+"Teshwave to Zhentil Keep" -- has them as its ends once the GM next loads the world; any other
+name stays its name. The pen on a route's card changes all three.
 
 A route is measured as the true length of the line on the map's scale: a diagonal is as long as it
 looks, not as long as Foundry's ruler would count it in squares. On a map whose squares are 5 miles,
@@ -100,7 +116,7 @@ legs and their terrain, or a journey's routes in order.
 
 - The coloured dot before a route's name opens a colour picker: any colour.
 - The crosshairs show the whole route on the map; the eye hides it from players; the bezier curve
-  edits its waypoints; the pen renames it; the bin deletes it, after asking.
+  edits its waypoints; the pen names it and its ends; the bin deletes it, after asking.
 
 The **Setup** tab holds what every route and journey on the map share:
 

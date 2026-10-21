@@ -22,7 +22,7 @@ import {
     distancePixels, nearestWaypoint, nearestOnRoute, legTerrains, travelHours, insertWaypoint,
     removeWaypoint, snapTo, chainRoutes, pathLegs, totalEffort, distanceForEffort, effortForDistance,
     legIndexAt, travelEffort, defaultPathTravel, travelPlan, timelineEffort, timelineWith,
-    TIME_RATES, timeRateIndex
+    TIME_RATES, timeRateIndex, routeEnds, routeTitle, splitRouteName
 } from '../scripts/utils-routes.js';
 
 let bad = 0;
@@ -265,6 +265,23 @@ console.log('\nsnapping and journeys');
     const flipped = chainRoutes([{ points: [[100, 0], [0, 0]] }, b], 2);
     if (!flipped.parts[0].reversed || JSON.stringify(flipped.points) !== '[[0,0],[100,0],[100,100]]') fail('the first route is not turned to meet the second');
     else ok('the first route runs whichever way meets the second');
+}
+
+console.log('\na route\'s names');
+{
+    const keep = { name: '', from: 'Zhentil Keep', to: 'Phlan' };
+    if (routeTitle(keep) !== 'Zhentil Keep → Phlan' || routeTitle(keep, { reversed: true }) !== 'Phlan → Zhentil Keep') fail(`titles: ${routeTitle(keep)}`);
+    else ok('a route is called by its ends, the way it is run');
+    if (routeTitle({ ...keep, name: 'The Coast Road' }) !== 'The Coast Road (Zhentil Keep → Phlan)') fail('a name with ends is wrong');
+    else ok('a name comes first, its ends after');
+    if (routeTitle(keep, { both: true }) !== 'Zhentil Keep ↔ Phlan' || routeTitle({ name: 'Route 3' }) !== 'Route 3') fail('lists or bare names are wrong');
+    else ok('in a list, either way round; with no ends, just its name');
+    if (routeEnds(keep, true).join() !== 'Phlan,Zhentil Keep') fail('ends do not turn round');
+    else ok('turned round, its ends swap');
+    const splits = [['Zhentil Keep <> Phlan', 'Zhentil Keep|Phlan'], ['Teshwave to Zhentil Keep', 'Teshwave|Zhentil Keep'], ['A -> B', 'A|B'], ['Coast Road', null]];
+    const wrong = splits.filter(([name, want]) => { const got = splitRouteName(name); return (got ? `${got.from}|${got.to}` : null) !== want; });
+    if (wrong.length) fail(`names split wrongly: ${wrong.map(w => w[0]).join(', ')}`);
+    else ok('an old name of two places splits into its ends; any other name does not');
 }
 
 console.log('\neffort along a path');

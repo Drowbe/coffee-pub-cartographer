@@ -345,7 +345,7 @@ class TravelManager {
         const reversed = !!(link && routesManager.progress(link)?.path.reversed);
         turn.hidden = !link;
         turn.classList.toggle('is-active', reversed);
-        turn.dataset.tooltip = game.i18n.localize(`${MODULE.ID}.routes.${reversed ? 'headingReversed' : 'headingAsDrawn'}`);
+        turn.dataset.tooltip = routesManager.headingText(link ? routesManager.progress(link) : null);
         const end = controls.querySelector('[data-travel-control="end"]');
         end.dataset.tooltip ??= game.i18n.localize(`${MODULE.ID}.routes.endTrip`);
     }

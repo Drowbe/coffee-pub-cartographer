@@ -69,9 +69,12 @@ class JourneysManager {
         void this._loaded();
     }
 
-    /** On the GM's client loading: journeys' old progress moved onto their routes, then trips paused. */
+    /** On the GM's client loading: routes' names split into named ends, journeys' old progress moved onto their routes, then trips paused. */
     async _loaded() {
-        for (const scene of game.scenes?.contents ?? []) await routesManager.migrateJourneys(scene);
+        for (const scene of game.scenes?.contents ?? []) {
+            await routesManager.migrateEnds(scene);
+            await routesManager.migrateJourneys(scene);
+        }
         await this._pauseOnLoad();
     }
 

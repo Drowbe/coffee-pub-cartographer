@@ -14,6 +14,7 @@ import {
 } from './utils-travel.js';
 import { travelManager } from './manager-travel.js';
 import { routesManager } from './manager-routes.js';
+import { routeTitle } from './utils-routes.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -603,7 +604,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             },
             {
                 label: game.i18n.format(`${MODULE.ID}.parallax.travelMapRoutes`, { map: scene.name }),
-                routes: routes.map(route => option(scene, { routeId: route.id }, length => `${route.name} (${length})`))
+                routes: routes.map(route => option(scene, { routeId: route.id }, length => `${routeTitle(route, { both: true })} (${length})`))
             }
         ].filter(group => group.routes.length));
         const linked = link ? routesManager.linked(link, units) : null;

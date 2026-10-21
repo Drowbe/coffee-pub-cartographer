@@ -126,6 +126,44 @@ export function pointAlong(points, pixels) {
  * the one before dropped -- a double-click to finish places the last point
  * twice.
  */
+// ==================================================================
+// ===== NAMES ======================================================
+// ==================================================================
+
+/**
+ * A route's two ends as it is run: [where it sets out, where it is
+ * heading]. `from` is the end it was drawn from, `to` the end it was drawn
+ * to; reversed, they swap. Either may be empty.
+ */
+export function routeEnds(route, reversed = false) {
+    const from = String(route?.from ?? '').trim();
+    const to = String(route?.to ?? '').trim();
+    return reversed ? [to, from] : [from, to];
+}
+
+/**
+ * What a route is called: its ends, the way it is run ("Zhentil Keep →
+ * Phlan"), after its name if it has one ("The Coast Road (Zhentil Keep →
+ * Phlan)"); or just its name. `both` gives the ends as "↔", for lists where
+ * it can be run either way.
+ */
+export function routeTitle(route, { reversed = false, both = false } = {}) {
+    const [start, end] = routeEnds(route, reversed);
+    const ends = start && end ? `${start} ${both ? '↔' : '→'} ${end}` : '';
+    const name = String(route?.name ?? '').trim();
+    if (name && ends) return `${name} (${ends})`;
+    return name || ends || start || end;
+}
+
+/**
+ * A name made of two places -- "Zhentil Keep <> Phlan", "Teshwave to Zhentil
+ * Keep", "A -> B" -- as its two ends, { from, to }; null for any other name.
+ */
+export function splitRouteName(name) {
+    const parts = String(name ?? '').trim().split(/\s+(?:<->|<>|↔|→|->|to)\s+/i);
+    return parts.length === 2 && parts[0] && parts[1] ? { from: parts[0].trim(), to: parts[1].trim() } : null;
+}
+
 export function cleanPoints(points, minGap = 4) {
     const out = [];
     for (const [x, y] of points ?? []) {

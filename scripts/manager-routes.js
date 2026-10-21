@@ -9,7 +9,7 @@ import { socketManager } from './manager-sockets.js';
 import {
     cleanPoints, legPixels, routePixels, gridDistance, distancePixels, pointAlong, convertDistance,
     nearestWaypoint, nearestOnRoute, legTerrains, terrainFactor, insertWaypoint, removeWaypoint,
-    snapTo, chainRoutes, TERRAINS, pathLegs, totalEffort, distanceForEffort, legIndexAt,
+    snapTo, chainRoutes, TERRAINS, pathLegs, totalEffort, distanceForEffort, legIndexAt, routeEnds, routeTitle, splitRouteName,
     defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate, effortForDistance
 } from './utils-routes.js';
 import { motionSpeed } from './utils-motion.js';
@@ -32,6 +32,8 @@ const IDS = {
 export const ROUTE_COLORS = ['#b03a2e', '#1f618d', '#1e8449', '#7d3c98', '#ca6f1e', '#212f3c'];
 /** How near, in screen pixels, a pointer must be to a waypoint or the line to take hold of it. */
 const HIT_PIXELS = 12;
+/** How near a route's end, in grid squares, a map note must be to name that end. */
+const NOTE_SQUARES = 1;
 /** How far, in screen pixels, the pointer may move in a click on a route before it is a drag. */
 const CLICK_PIXELS = 4;
 /** How long, in ms, a click on a route waits to be sure it is not the start of a double-click. */
@@ -566,13 +568,31 @@ class RoutesManager {
         let item = null;
         if (ref?.routeId) {
             item = this.get(ref.routeId, scene);
-            if (item) path = { name: item.name, points: item.points, terrain: legTerrains(item.points, item.terrain), gaps: [] };
+            if (item) {
+                const reversed = !!item.travel?.reversed;
+                path = {
+                    name: routeTitle(item, { reversed }),
+                    ends: routeEnds(item, reversed),
+                    points: item.points,
+                    terrain: legTerrains(item.points, item.terrain),
+                    gaps: []
+                };
+            }
         } else if (ref?.journeyId) {
             // The way the party is running it: back from its last route when the
             // route it is on is turned round. Gaps stay counted in the routes'
             // listed order, as the window lists them.
             const view = this.journeyView({ sceneId: scene?.id, ...ref }, scene);
-            if (view) return { name: view.journey.name, points: view.points, terrain: view.terrain, gaps: view.chain.gaps, reversed: !view.forward };
+            if (view) {
+                // Its ends: where its first route sets out, and where its last is heading, as run.
+                const route = id => this.get(id, scene);
+                const ends = [
+                    routeEnds(route(view.order[0].routeId), view.order[0].reversed)[0],
+                    routeEnds(route(view.order.at(-1).routeId), view.order.at(-1).reversed)[1]
+                ];
+                const name = ends[0] && ends[1] ? `${view.journey.name} (${ends[0]} → ${ends[1]})` : view.journey.name;
+                return { name, ends, points: view.points, terrain: view.terrain, gaps: view.chain.gaps, reversed: !view.forward };
+            }
             const journey = this.getJourney(ref.journeyId, scene);
             return journey ? { name: journey.name, points: [], terrain: [], gaps: [] } : null;
         }
@@ -736,8 +756,24 @@ class RoutesManager {
             point: view.followed ? own.point : pointAlong(path.points, 0),
             rawEffort: effort,
             route,
-            journey: { index: view.index, count: view.order.length, routeName: this.get(view.routeId, scene)?.name ?? '' }
+            journey: {
+                index: view.index,
+                count: view.order.length,
+                name: view.journey.name,
+                routeName: routeTitle(this.get(view.routeId, scene), { reversed: !!own.path.reversed })
+            }
         };
+    }
+
+    /**
+     * Turn round's tooltip: where the party is heading and where turning
+     * takes it, by name when the trip's ends are named; else which end it
+     * heads for.
+     */
+    headingText(progress) {
+        const [start, end] = progress?.path?.ends ?? [];
+        if (start && end) return game.i18n.format(`${MODULE.ID}.routes.headingFor`, { to: end, from: start });
+        return game.i18n.localize(`${MODULE.ID}.routes.${progress?.path?.reversed ? 'headingReversed' : 'headingAsDrawn'}`);
     }
 
     /** A trip's name as the odometer gives it: a route's, or a journey's with the route the party is on. */
@@ -745,7 +781,7 @@ class RoutesManager {
         if (!progress) return '';
         if (!progress.journey) return progress.path.name ?? '';
         return game.i18n.format(`${MODULE.ID}.routes.journeyTripName`, {
-            journey: progress.path.name, route: progress.journey.routeName,
+            journey: progress.journey.name, route: progress.journey.routeName,
             index: progress.journey.index + 1, count: progress.journey.count
         });
     }
@@ -770,6 +806,15 @@ class RoutesManager {
      * Once, on the GM's client: a journey's own progress, from before journeys
      * were bundles of routes, moved onto the route the party was on in it.
      */
+    /**
+     * Once, on the GM's client: routes from before they had named ends get
+     * them -- split from a name like "Zhentil Keep <> Phlan", else left empty.
+     */
+    async migrateEnds(scene) {
+        if (!game.user.isGM || !scene || this.routes(scene).every(route => 'from' in route)) return null;
+        return this._apply({ action: 'routes-ends', sceneId: scene.id }, game.user);
+    }
+
     async migrateJourneys(scene) {
         if (!game.user.isGM || !scene || !this.journeys(scene).some(j => j.travel)) return null;
         return this._apply({ action: 'journey-migrate', sceneId: scene.id, now: game.time.serverTime, world: Number(game.time?.worldTime) || 0 }, game.user);
@@ -794,8 +839,52 @@ class RoutesManager {
     // ===== CHANGES, THROUGH THE GM ====================================
     // ==================================================================
 
-    async add({ name, points, color }) {
-        return this._request({ action: 'create', route: { name, points, color } });
+    async add({ name, from, to, points, color }) {
+        return this._request({ action: 'create', route: { name, from, to, points, color } });
+    }
+
+    /**
+     * What a map note at a point is called -- the nearest within a grid
+     * square -- to name a route's end after the town or landmark it reaches.
+     * Empty when there is none.
+     */
+    noteNameAt(point, scene = canvas.scene) {
+        if (!point || !scene) return '';
+        const reach = (Number(scene.grid?.size) || 100) * NOTE_SQUARES;
+        let best = null;
+        for (const note of scene.notes?.contents ?? []) {
+            const label = String(note.text || note.page?.name || note.entry?.name || '').trim();
+            const distance = Math.hypot(note.x - point[0], note.y - point[1]);
+            if (label && distance <= reach && (!best || distance < best.distance)) best = { label, distance };
+        }
+        return best?.label ?? '';
+    }
+
+    /**
+     * Ask for a route's name and the names of its two ends, side by side. The
+     * values given fill the fields. Null when the dialog is closed.
+     */
+    async promptNames({ title, intro = '', name = '', from = '', to = '', okLabel = null }) {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.routes.${key}`);
+        const esc = value => foundry.utils.escapeHTML(String(value ?? ''));
+        const field = (key, value, autofocus = false) => `<label class="cartographer-routes-names-row">
+                <span>${esc(localize(`names.${key}`))}</span>
+                <input type="text" name="${key}" value="${esc(value)}" placeholder="${esc(localize(`names.${key}Hint`))}"${autofocus ? ' autofocus' : ''}>
+            </label>`;
+        return foundry.applications.api.DialogV2.prompt({
+            window: { title, icon: 'fa-solid fa-route' },
+            content: (intro ? `<p>${esc(intro)}</p>` : '')
+                + `<div class="cartographer-routes-names">${field('from', from, true)}${field('to', to)}${field('name', name)}</div>`,
+            ok: {
+                ...(okLabel ? { label: okLabel } : {}),
+                callback: (_event, button) => ({
+                    name: button.form.elements.name.value,
+                    from: button.form.elements.from.value,
+                    to: button.form.elements.to.value
+                })
+            },
+            rejectClose: false
+        });
     }
 
     /** Rename, recolour, hide or show, reshape, or set the terrain of a route. */
@@ -862,9 +951,12 @@ class RoutesManager {
             if (data.action === 'create') {
                 const points = cleanPoints(data.route?.points);
                 if (points.length < 2) return null;
+                const ends = { from: name(data.route.from, ''), to: name(data.route.to, '') };
                 const route = {
                     id: foundry.utils.randomID(),
-                    name: name(data.route.name, this._nextName(list)),
+                    // With both ends named, a name is optional; without them, it has one.
+                    name: ends.from && ends.to ? name(data.route.name, '') : name(data.route.name, this._nextName(list)),
+                    ...ends,
                     color: ROUTE_COLORS.includes(data.route.color) ? data.route.color
                         : ROUTE_COLORS.find(c => !list.some(r => r.color === c)) ?? ROUTE_COLORS[list.length % ROUTE_COLORS.length],
                     points,
@@ -963,6 +1055,19 @@ class RoutesManager {
                 return travel;
             }
 
+            if (data.action === 'routes-ends') {
+                if (!user.isGM) return null;
+                for (const route of list) {
+                    if ('from' in route) continue;
+                    const split = splitRouteName(route.name);
+                    route.from = split?.from ?? '';
+                    route.to = split?.to ?? '';
+                    if (split) route.name = '';
+                }
+                await save();
+                return null;
+            }
+
             if (data.action === 'journey-migrate') {
                 if (!user.isGM) return null;
                 const now = Number(data.now) || game.time.serverTime;
@@ -1048,7 +1153,9 @@ class RoutesManager {
                 return null;
             }
             const changes = data.changes ?? {};
-            if ('name' in changes) route.name = name(changes.name, route.name);
+            if ('from' in changes) route.from = name(changes.from, '');
+            if ('to' in changes) route.to = name(changes.to, '');
+            if ('name' in changes) route.name = name(changes.name, route.from && route.to ? '' : route.name);
             // Any colour, as #rrggbb: what a colour picker gives, and nothing else gets in.
             if ('color' in changes && /^#[0-9a-f]{6}$/i.test(String(changes.color))) route.color = String(changes.color).toLowerCase();
             if ('hidden' in changes) route.hidden = !!changes.hidden;
@@ -1383,18 +1490,21 @@ class RoutesManager {
         this._endDrawing();
         if (points.length < 2) return;
         const localize = key => game.i18n.localize(`${MODULE.ID}.routes.${key}`);
-        const suggested = this._nextName(this.routes());
         const length = formatDistance(gridDistance(routePixels(points), canvas.scene.grid), canvas.scene.grid.units);
-        const name = await foundry.applications.api.DialogV2.prompt({
-            window: { title: localize('nameTitle'), icon: 'fa-solid fa-route' },
-            content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.routes.nameBody`, { length }))}</p>`
-                + `<input type="text" name="name" value="${foundry.utils.escapeHTML(suggested)}" autofocus>`,
-            ok: { label: localize('save'), callback: (_event, button) => button.form.elements.name.value },
-            rejectClose: false
+        // Its ends named after the map notes they reach, where there are any.
+        const from = this.noteNameAt(points[0]);
+        const to = this.noteNameAt(points.at(-1));
+        const names = await this.promptNames({
+            title: localize('nameTitle'),
+            intro: game.i18n.format(`${MODULE.ID}.routes.nameBody`, { length }),
+            from,
+            to,
+            name: from && to ? '' : this._nextName(this.routes()),
+            okLabel: localize('save')
         });
         // Closing the dialog discards the route; that is the way out of a mis-drawn one.
-        if (name === null || name === undefined) return;
-        await this.add({ name, points });
+        if (!names) return;
+        await this.add({ ...names, points });
         this.openWindow();
     }
 
@@ -1512,7 +1622,7 @@ class RoutesManager {
             this._routes.addChild(this._line(points, color, sizes, { alpha, terrain, editing, selected: editing ? this.editing.selected : null, ring: editing }));
             const distance = gridDistance(routePixels(points), canvas.scene.grid);
             const middle = pointAlong(points, routePixels(points) / 2);
-            const label = this._label(`${route.name} · ${formatDistance(distance, canvas.scene.grid.units)}`, middle, sizes);
+            const label = this._label(`${routeTitle(route, { both: true })} · ${formatDistance(distance, canvas.scene.grid.units)}`, middle, sizes);
             label.alpha = alpha;
             this._routes.addChild(label);
             this._drawnRoutes.push({ id: route.id, points });

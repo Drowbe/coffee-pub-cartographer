@@ -755,6 +755,19 @@
     }
 }
 
+/* A route's names, when drawing or renaming it: each label beside its field. */
+.cartographer-routes-names {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 6px 10px;
+    align-items: center;
+    margin: 6px 0;
+}
+
+.cartographer-routes-names-row {
+    display: contents;
+}
+
 /* The GM's controls at the odometer's right: Play/Pause and Back to the start. */
 .cartographer-travel-hud-controls {
     display: inline-flex;

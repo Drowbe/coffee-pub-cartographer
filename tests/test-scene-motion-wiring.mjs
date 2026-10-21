@@ -114,7 +114,7 @@ console.log('\nthe routes window: actions, strings and styles');
     else ok(`${used.size} keys, all present`);
     // Keys built from a name are used if the name is quoted in the scripts
     // ('tabRoutes', 'defaultJourney'), or are under a prefix built from data.
-    const dynamic = ['routes.terrain.'];
+    const dynamic = ['routes.terrain.', 'routes.names.'];
     const unusedRoutes = Object.keys(lang).filter(key => key.startsWith('routes.') && !used.has(key))
         .filter(key => !dynamic.some(prefix => key.startsWith(prefix)))
         .filter(key => !(rjs + rman).includes(`'${key.slice('routes.'.length)}'`));

@@ -8,7 +8,7 @@ import { journeysManager } from './manager-journeys.js';
 import { formatDistance, formatSpan, paceChoices, defaultPace, PACE_GROUPS, gridStep } from './utils-travel.js';
 import {
     legTerrains, travelHours, terrainFactor, TERRAINS, travelPlan, MOUNT_HOURS_PER_DAY, FORCED_MARCH_HOURS,
-    TIME_RATES, timeRateIndex
+    TIME_RATES, timeRateIndex, routeTitle
 } from './utils-routes.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
@@ -223,7 +223,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const turn = this._button({
             action: 'routes-direction',
             icon: 'fa-solid fa-right-left',
-            label: disabled ? localize('noJourneyToPlay') : localize(reversed ? 'headingReversed' : 'headingAsDrawn'),
+            label: disabled ? localize('noJourneyToPlay') : this.manager.headingText(progress),
             className: reversed ? 'is-active' : '',
             disabled
         });
@@ -232,7 +232,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const routes = this.manager.visibleRoutes();
         const group = (labelKey, items, prefix, selectedId) => items.length
             ? `<optgroup label="${esc(localize(labelKey))}">${items.map(item =>
-                `<option value="${prefix}:${esc(item.id)}"${item.id === selectedId ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</optgroup>`
+                `<option value="${prefix}:${esc(item.id)}"${item.id === selectedId ? ' selected' : ''}>${esc(prefix === 'r' ? routeTitle(item, { both: true }) : item.name)}</option>`).join('')}</optgroup>`
             : '';
         const pick = journeys.length || routes.length
             ? `<select class="cartographer-parallax-set-select" data-field="barPath" aria-label="${esc(localize('whichJourney'))}" data-tooltip="${esc(localize('whichJourney'))}">`
@@ -417,7 +417,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             const allSame = terrain.every(t => t === terrain[0]);
             return {
                 id: route.id,
-                name: route.name,
+                name: routeTitle(route, { both: true }),
                 color: route.color,
                 canEdit,
                 hidden: !!route.hidden,
@@ -466,7 +466,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
                 routes: members.map((route, index) => ({
                     index,
                     number: index + 1,
-                    name: route.name,
+                    name: routeTitle(route, { both: true }),
                     color: route.color,
                     length: formatDistance(this.manager.measure(route, scene).distance, units),
                     // A gap after this route, before the next.
@@ -474,7 +474,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
                     isFirst: index === 0,
                     isLast: index === members.length - 1
                 })),
-                addable: visible.map(route => ({ id: route.id, name: route.name }))
+                addable: visible.map(route => ({ id: route.id, name: routeTitle(route, { both: true }) }))
             };
         });
 
@@ -634,16 +634,24 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         });
     }
 
+    /** A route's name and the names of its ends, side by side. */
     async promptRename(id) {
         const route = this.manager.get(id);
         if (!route) return;
-        const label = await this._promptName('rename', route.name);
-        if (label && label !== route.name) await this.manager.update(id, { name: label });
+        const names = await this.manager.promptNames({
+            title: game.i18n.localize(`${MODULE.ID}.routes.rename`),
+            name: route.name, from: route.from, to: route.to
+        });
+        if (!names) return;
+        const changes = Object.fromEntries(['name', 'from', 'to']
+            .filter(key => String(names[key] ?? '').trim() !== String(route[key] ?? '').trim())
+            .map(key => [key, names[key]]));
+        if (Object.keys(changes).length) await this.manager.update(id, changes);
     }
 
     async confirmRemove(id) {
         const route = this.manager.get(id);
-        if (route && await this._confirm('remove', 'removeConfirm', route.name)) await this.manager.remove(id);
+        if (route && await this._confirm('remove', 'removeConfirm', routeTitle(route, { both: true }))) await this.manager.remove(id);
     }
 
     async promptNewJourney() {

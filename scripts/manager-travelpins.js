@@ -130,9 +130,12 @@ class TravelPinsManager {
         if (!result?.onRoute) return wasName ? format('partyMovedOff', { party, name: wasName }) : null;
         const progress = routesManager.progress(result.link);
         if (!progress) return null;
-        const where = progress.distance <= 1e-9 ? game.i18n.localize(`${MODULE.ID}.routes.atStart`)
-            : progress.distance >= progress.length - 1e-9 ? game.i18n.localize(`${MODULE.ID}.routes.atEnd`)
-            : format('atDistance', { distance: formatDistance(progress.distance, scene.grid?.units) });
+        // Where on it, by the names of its ends where they have them: "at Phlan", "12 mi from Phlan".
+        const [start, end] = progress.path.ends ?? [];
+        const distance = formatDistance(progress.distance, scene.grid?.units);
+        const where = progress.distance <= 1e-9 ? (start ? format('atPlace', { place: start }) : game.i18n.localize(`${MODULE.ID}.routes.atStart`))
+            : progress.distance >= progress.length - 1e-9 ? (end ? format('atPlace', { place: end }) : game.i18n.localize(`${MODULE.ID}.routes.atEnd`))
+            : start ? format('atDistanceFrom', { distance, place: start }) : format('atDistance', { distance });
         return format('partyMovedOn', { party, name: progress.path.name, where });
     }
 

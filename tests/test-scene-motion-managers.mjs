@@ -939,6 +939,22 @@ console.log('\nroutes: who may change what');
     await jm.choose(lateLink, scene);
     check(rm.partyMap()?.id === 'here', 'a map with a trip chosen is the one a scene follows the party on');
 
+    console.log('\na route\'s ends are named');
+    const ended = await rm._apply({ action: 'create', sceneId: 'here', route: { name: '', from: 'Zhentil Keep', to: 'Phlan', points: [[0, 1200], [700, 1200]] } }, gm);
+    check(ended.name === '' && rm.path({ routeId: ended.id }).name === 'Zhentil Keep → Phlan', 'a route with both ends named needs no name of its own');
+    await jm.setDirection({ sceneId: 'here', routeId: ended.id }, true);
+    check(rm.path({ routeId: ended.id }).name === 'Phlan → Zhentil Keep', 'turned round, it reads the other way');
+    const bare = await rm._apply({ action: 'create', sceneId: 'here', route: { points: [[0, 1300], [700, 1300]] } }, gm);
+    check(/^m\.routes\.defaultName \d+$|^.+ \d+$/.test(bare.name), 'one with no ends named gets a name, as before');
+    flags.routes.list.push({ id: 'old', name: 'Teshwave <> Zhentil Keep', color: '#000000', points: [[0, 1400], [700, 1400]], terrain: ['road'] });
+    await rm.migrateEnds(scene);
+    const old = rm.get('old');
+    check(old.from === 'Teshwave' && old.to === 'Zhentil Keep' && old.name === '' && bare.name === rm.get(bare.id).name && rm.get(bare.id).from === '',
+        'an older route named for two places has them as its ends; other names stay');
+    scene.notes = { contents: [{ x: 705, y: 1195, text: '', entry: { name: 'Phlan' } }, { x: 2000, y: 2000, text: 'Far away' }] };
+    check(rm.noteNameAt([700, 1200], scene) === 'Phlan' && rm.noteNameAt([0, 1200], scene) === '', 'a map note at a route\'s end names it; none nearby, nothing');
+    delete scene.notes;
+
     console.log('\nthe Routes window follows the scene');
     const openedBefore = rm.openWindow;
     let reopened = 0;
@@ -981,9 +997,19 @@ console.log('\nroutes: who may change what');
     await tp2.placeParty(scene, { x: 700, y: 900 }, 24);
     const onMsg = tp2.dropMessage({ onRoute: true, link: lateLink }, null, scene);
     check(onMsg.startsWith('m.routes.partyMovedOn') && onMsg.includes('"party":"The Company"') && onMsg.includes('"name":"Late"') && onMsg.includes('atDistance'),
-        'put on a route: "The Company has moved on to Late at 25 ft along"');
+        'put on a route: "The Company has moved on to Late, 25 ft along"');
     await tp2.placeParty(scene, { x: 5, y: 900 }, 24);
     check(tp2.dropMessage({ onRoute: true, link: lateLink }, null, scene).includes('m.routes.atStart'), 'at its start, it says so');
+    await rm._apply({ action: 'update', sceneId: 'here', id: late.id, changes: { from: 'Westgate', to: 'Eastgate' } }, gm);
+    await tp2.placeParty(scene, { x: 700, y: 900 }, 24);
+    const named = tp2.dropMessage({ onRoute: true, link: lateLink }, null, scene);
+    check(named.includes('m.routes.atDistanceFrom') && named.includes('Westgate\\"') && named.includes('Late (Westgate → Eastgate)'),
+        'with its ends named: "moved on to Late (Westgate → Eastgate), 25 ft from Westgate"');
+    await tp2.placeParty(scene, { x: 5, y: 900 }, 24);
+    const atNamedEnd = tp2.dropMessage({ onRoute: true, link: lateLink }, null, scene);
+    check(atNamedEnd.includes('m.routes.atPlace') && atNamedEnd.includes('Westgate\\"'), 'and at an end, "at Westgate"');
+    check(rm.headingText(rm.progress(lateLink)).includes('"to":"Eastgate"'), 'Turn round says where the party is heading, by name');
+    await rm._apply({ action: 'update', sceneId: 'here', id: late.id, changes: { from: '', to: '' } }, gm);
     const offMsg = tp2.dropMessage({ onRoute: false }, 'Late', scene);
     check(offMsg.startsWith('m.routes.partyMovedOff') && offMsg.includes('"name":"Late"'), 'moved off a route: "The Company has moved off of Late"');
     check(tp2.dropMessage({ onRoute: false }, null, scene) === null, 'moved from off every route to elsewhere off every route: nothing said');
