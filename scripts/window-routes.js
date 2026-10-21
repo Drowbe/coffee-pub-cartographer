@@ -5,7 +5,7 @@
 import { MODULE } from './const.js';
 import { travelPinsManager } from './manager-travelpins.js';
 import { journeysManager } from './manager-journeys.js';
-import { formatDistance, formatSpan, paceChoices, defaultPace, PACE_GROUPS, gridStep } from './utils-travel.js';
+import { formatDistance, formatSpan, paceChoices, defaultPace, matchPace, paceIcon, PACE_GROUPS, gridStep } from './utils-travel.js';
 import {
     legTerrains, travelHours, terrainFactor, TERRAINS, travelPlan, MOUNT_HOURS_PER_DAY, FORCED_MARCH_HOURS,
     TIME_RATES, timeRateIndex, routeTitle
@@ -355,11 +355,13 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const travel = progress?.travel;
         const pace = Number(travel?.pace) || 0;
         // Until one is chosen, the normal pace: what Play sets out at.
-        const chosen = pace > 0 ? paces.find(p => Math.abs(p.perHour - pace) <= p.perHour * 0.005) : defaultPace(paces);
+        const chosen = pace > 0 ? matchPace(paces, pace) : defaultPace(paces);
         const scenes = journeysManager.linkedScenes(link).map(scene => scene.name);
         return {
             playing: !!travel?.motion?.playing,
             followClock: !!travel?.followClock,
+            // How the party travels it: on foot, mounted, by boat, in the air.
+            paceIcon: paceIcon(chosen),
             paces: [
                 ...(pace > 0 && !chosen ? [{ id: '', label: game.i18n.format(`${MODULE.ID}.routes.customPace`, { pace: formatDistance(pace, units) }), selected: true }] : []),
                 ...paces.map(p => ({ id: p.id, label: p.label, selected: p === chosen }))

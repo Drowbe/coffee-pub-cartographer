@@ -157,6 +157,10 @@ class TravelManager {
             arrived: destination !== null && distance >= destination * (1 - 1e-9) - 1e-9,
             // The trip's name, when this scene follows a route or journey on a map.
             nameText: routesManager.tripName(journey),
+            // How the party travels: the trip's pace, or this scene's ground pace.
+            pace: journey
+                ? routesManager.paceLook(Number(journey.travel.pace) || 0, journey.scene.grid?.units)
+                : routesManager.paceLook(parallaxManager.groundPace(), canvas.scene?.grid?.units),
             // Travelling now: the trip's own say when there is one, else this scene's.
             moving: journey ? !!journey.moving : !!state.playing && !!speed,
             traveledText: formatDistance(distance, units),
@@ -215,6 +219,7 @@ class TravelManager {
             progress: progress.length > 0 ? Math.min(1, progress.distance / progress.length) : 0,
             arrived,
             nameText: routesManager.tripName(progress),
+            pace: routesManager.paceLook(Number(progress.travel.pace) || 0, units),
             moving: !!progress.moving,
             traveledText: formatDistance(progress.distance, units),
             remainingText: formatDistance(remaining, units),
@@ -235,7 +240,9 @@ class TravelManager {
             hud.className = 'cartographer-travel-hud';
             hud.dataset.tooltip = game.i18n.localize(`${MODULE.ID}.parallax.travelHudDragHint`);
             hud.innerHTML = `
-                <div class="cartographer-travel-hud-name" data-travel-hud="name"></div>
+                <div class="cartographer-travel-hud-name" data-travel-hud="name">
+                    <i data-travel-hud="pace"></i><span data-travel-hud="nameText"></span>
+                </div>
                 <div class="cartographer-travel-hud-row">
                     <i class="fa-solid fa-route"></i>
                     <span data-travel-hud="traveled"></span>
@@ -256,9 +263,14 @@ class TravelManager {
         this._drawControls(hud, summary);
         // The trip it is counting: a route or journey's name, when there is one.
         const name = hud.querySelector('[data-travel-hud="name"]');
-        name.textContent = summary.nameText ?? '';
-        name.dataset.tooltip = summary.nameText ?? '';
+        name.querySelector('[data-travel-hud="nameText"]').textContent = summary.nameText ?? '';
+        name.dataset.tooltip = summary.pace ? `${summary.nameText ?? ''} · ${summary.pace.label}` : summary.nameText ?? '';
         name.hidden = !summary.nameText;
+        // How the party travels, before the trip's name.
+        const pace = name.querySelector('[data-travel-hud="pace"]');
+        const icon = summary.pace?.icon ?? '';
+        if (pace.className !== icon) pace.className = icon;
+        pace.hidden = !icon;
         const remaining = hud.querySelector('[data-travel-hud="remaining"]');
         const bar = hud.querySelector('.cartographer-travel-hud-bar');
         if (summary.destination === null) {

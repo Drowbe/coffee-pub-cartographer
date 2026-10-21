@@ -12,6 +12,7 @@
 <div class="cartographer-routes-terrain-all" data-tooltip="{{localize "coffee-pub-cartographer.routes.journeyPaceHint"}}">
     <span>{{localize "coffee-pub-cartographer.routes.journeyPace"}}</span>
     <span class="cartographer-routes-controls">
+        <i class="{{controls.paceIcon}} cartographer-routes-pace-icon"></i>
         <select data-field="pathPace" {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}>
             {{#each controls.paces}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
         </select>
@@ -25,7 +26,7 @@
 {{! How far the party has come along a route or journey. }}
 {{#*inline "pathProgress"}}
 <p class="cartographer-parallax-hint cartographer-routes-progress">
-    <span><i class="fa-solid fa-person-walking"></i> <span {{#if (eq kind "journeyId")}}data-progress-journey="{{id}}"{{else}}data-progress-route="{{id}}"{{/if}}>{{progressText}}</span></span>
+    <span><i class="{{#if controls.paceIcon}}{{controls.paceIcon}}{{else}}fa-solid fa-person-walking{{/if}}"></i> <span {{#if (eq kind "journeyId")}}data-progress-journey="{{id}}"{{else}}data-progress-route="{{id}}"{{/if}}>{{progressText}}</span></span>
 </p>
 {{/inline}}
 

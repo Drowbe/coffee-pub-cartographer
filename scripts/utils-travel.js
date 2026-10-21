@@ -203,6 +203,26 @@ export function paceChoices(systemId, config, sceneUnits, nameOf) {
     });
 }
 
+/** The icon for each kind of pace: on foot, mounted, on water, in the air. */
+export const PACE_ICONS = {
+    foot: 'fa-solid fa-person-walking',
+    running: 'fa-solid fa-person-running',
+    mount: 'fa-solid fa-horse',
+    water: 'fa-solid fa-sailboat',
+    air: 'fa-solid fa-dove'
+};
+
+/** A pace's icon, by its kind; quick paces on foot run. A pace that is none of the presets walks. */
+export function paceIcon(pace) {
+    if (['jogging', 'running', 'dnd5e.fast'].includes(pace?.id)) return PACE_ICONS.running;
+    return PACE_ICONS[pace?.group] ?? PACE_ICONS.foot;
+}
+
+/** The preset a pace in scene units an hour is, within half a percent; null for one of its own. */
+export function matchPace(paces, perHour) {
+    return perHour > 0 ? paces.find(p => Math.abs(p.perHour - perHour) <= p.perHour * 0.005) ?? null : null;
+}
+
 /** The pace a trip goes at until one is chosen: the rules' normal pace, else plain walking. */
 export function defaultPace(paces) {
     return paces.find(p => p.id === 'dnd5e.normal') ?? paces.find(p => p.id === 'walking') ?? paces[0] ?? null;

@@ -246,7 +246,9 @@ keeps its own speed.
 While a route or journey is under way, the map shows only the routes it travels -- all of a journey's
 -- and, whenever a route or journey is chosen, the same odometer as an animated scene's -- the
 trip's name, distance travelled, how far is left, the arrival time and a progress bar -- for
-everyone; while the party is on the move, a light runs along the bar. On a journey, the name says
+everyone; while the party is on the move, a light runs along the bar. An icon before the name says how
+the party travels -- walking, running, on horseback, by boat or in the air -- from its pace, as on the
+route's card beside its Pace. On a journey, the name says
 which route the party is on ("Trip to Phlan: Zhentil Keep to Phlan (2 of 3)") and the figures are the
 whole journey's. It goes when **No route** is chosen. Waypoints are shown only while a
 route is drawn or edited; otherwise a route is just its line. Its name and length show when the

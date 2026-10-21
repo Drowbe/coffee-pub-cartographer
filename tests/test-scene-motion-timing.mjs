@@ -15,7 +15,7 @@ import {
 import {
     pixelsToDistance, formatDistance, formatSpan, toSceneUnits, unitChoices, gridStep,
     REAL_WORLD_PACES, rulesPaces, paceToSceneUnits, paceUnit, sceneUnitsToPace,
-    paceInputToSceneUnits, unitsPerHourToPixels, pixelsToUnitsPerHour
+    paceInputToSceneUnits, unitsPerHourToPixels, pixelsToUnitsPerHour, paceIcon, matchPace
 } from '../scripts/utils-travel.js';
 import {
     convertDistance, legPixels, routePixels, gridDistance, pointAlong, cleanPoints,
@@ -265,6 +265,15 @@ console.log('\nsnapping and journeys');
     const flipped = chainRoutes([{ points: [[100, 0], [0, 0]] }, b], 2);
     if (!flipped.parts[0].reversed || JSON.stringify(flipped.points) !== '[[0,0],[100,0],[100,100]]') fail('the first route is not turned to meet the second');
     else ok('the first route runs whichever way meets the second');
+}
+
+console.log('\na pace\'s icon');
+{
+    const paces = [{ id: 'walking', group: 'foot', perHour: 3 }, { id: 'running', group: 'foot', perHour: 10 },
+        { id: 'horseTrotting', group: 'mount', perHour: 8 }, { id: 'sailingShip', group: 'water', perHour: 5 }];
+    const icons = [3, 10, 8, 5, 7].map(perHour => paceIcon(matchPace(paces, perHour)));
+    if (icons.join() !== 'fa-solid fa-person-walking,fa-solid fa-person-running,fa-solid fa-horse,fa-solid fa-sailboat,fa-solid fa-person-walking') fail(`pace icons: ${icons}`);
+    else ok('a pace shows how the party travels: walking, running, mounted, by boat; one of its own walks');
 }
 
 console.log('\na route\'s names');

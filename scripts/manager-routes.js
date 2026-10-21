@@ -13,7 +13,7 @@ import {
     defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate, effortForDistance
 } from './utils-routes.js';
 import { motionSpeed } from './utils-motion.js';
-import { formatDistance } from './utils-travel.js';
+import { formatDistance, paceChoices, paceIcon, matchPace, defaultPace } from './utils-travel.js';
 
 /** Scene flag holding `{ list, journeys }`. */
 const FLAG_KEY = 'routes';
@@ -774,6 +774,18 @@ class RoutesManager {
         const [start, end] = progress?.path?.ends ?? [];
         if (start && end) return game.i18n.format(`${MODULE.ID}.routes.headingFor`, { to: end, from: start });
         return game.i18n.localize(`${MODULE.ID}.routes.${progress?.path?.reversed ? 'headingReversed' : 'headingAsDrawn'}`);
+    }
+
+    /**
+     * A pace, in a scene's units an hour, as a preset: { icon, label }. With
+     * none set, the normal pace a trip sets out at; one of its own walks,
+     * labelled with its speed.
+     */
+    paceLook(perHour, units) {
+        const paces = paceChoices(game.system?.id, globalThis.CONFIG, units,
+            pace => game.i18n.localize(pace.label ?? `${MODULE.ID}.parallax.pace.${pace.id}`));
+        const pace = perHour > 0 ? matchPace(paces, perHour) : defaultPace(paces);
+        return { icon: paceIcon(pace), label: pace?.label ?? `${formatDistance(perHour, units)}/h` };
     }
 
     /** A trip's name as the odometer gives it: a route's, or a journey's with the route the party is on. */

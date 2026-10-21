@@ -812,8 +812,23 @@
     /* The trip's name never widens the panel: a long one is cut short, whole in its tooltip. */
     width: 0;
     min-width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+}
+
+.cartographer-travel-hud-name span {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* How the party travels -- on foot, mounted, by boat -- beside a trip's pace. */
+.cartographer-routes-pace-icon {
+    width: 18px;
+    text-align: center;
+    opacity: 0.8;
 }
 
 .cartographer-travel-hud-name[hidden] {
