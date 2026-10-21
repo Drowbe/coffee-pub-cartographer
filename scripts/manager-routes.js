@@ -19,6 +19,8 @@ import { formatDistance } from './utils-travel.js';
 const FLAG_KEY = 'routes';
 /** Whether this viewer shows routes on the map at all, per browser. */
 const SHOW_KEY = `${MODULE.ID}.routes.show`;
+/** Whether this viewer left the Routes window open, per browser: it comes back on a scene with routes. */
+const OPEN_KEY = `${MODULE.ID}.routes.windowOpen`;
 /** The section of Cartographer's sub-menubar these sit in; registered in manager-toolbar.js. */
 const GROUP = 'Routes';
 const IDS = {
@@ -49,6 +51,22 @@ function readShow() {
         return localStorage.getItem(SHOW_KEY) !== 'false';
     } catch {
         return true;
+    }
+}
+
+function readOpen() {
+    try {
+        return localStorage.getItem(OPEN_KEY) === 'true';
+    } catch {
+        return false;
+    }
+}
+
+function writeOpen(open) {
+    try {
+        localStorage.setItem(OPEN_KEY, String(!!open));
+    } catch {
+        // Storage can be unavailable (private windows); the window just does not come back.
     }
 }
 
@@ -142,6 +160,7 @@ class RoutesManager {
         on('canvasReady', () => {
             this._listen();
             this.draw();
+            void this._syncWindowToScene();
         });
         on('canvasTearDown', () => {
             this.cancelDrawing();
@@ -259,6 +278,8 @@ class RoutesManager {
             hoursPerDay: hours > 0 && hours <= 24 ? hours : DEFAULT_HOURS_PER_DAY,
             active,
             followClock: !!stored.followClock,
+            // When a trip was last chosen here (ms).
+            activeAt: Number(stored.activeAt) || 0,
             // The party has been set down off every route: nothing to travel until it is put on one.
             offRoute: !!stored.offRoute,
             // { removed, look }: whether the GM deleted the party marker, and how it looked.
@@ -283,7 +304,7 @@ class RoutesManager {
     /** Change a map's settings (default: the map on the canvas). GM only. */
     async setSettings(changes, sceneId = canvas.scene?.id) {
         if (!game.user.isGM) return null;
-        return this._apply({ action: 'settings', sceneId, changes }, game.user);
+        return this._apply({ action: 'settings', sceneId, changes, now: game.time?.serverTime }, game.user);
     }
 
     /**
@@ -312,8 +333,20 @@ class RoutesManager {
         return activeLink;
     }
 
+    /**
+     * The trip a link names. `{ sceneId, party: true }` -- "the party's trip"
+     * on that map, as an animated scene can follow -- is whatever the map
+     * runs now (shownPath), or null when it runs nothing. Others are themselves.
+     */
+    resolveLink(link) {
+        if (!link?.party) return link ?? null;
+        const scene = game.scenes.get(link.sceneId);
+        return scene ? this.shownPath(scene) : null;
+    }
+
     /** The route a link puts the party on: itself, or the route it is on in a journey. Null when there is none. */
     routeLinkOf(link) {
+        link = this.resolveLink(link);
         if (!link?.journeyId) return link?.routeId ? link : null;
         const scene = game.scenes.get(link.sceneId);
         const view = scene ? this.journeyView(link, scene) : null;
@@ -376,6 +409,7 @@ class RoutesManager {
      * own bar, such as an animated scene following it. GM only.
      */
     async claimActive(link) {
+        link = this.resolveLink(link);
         if (!game.user.isGM || !link?.sceneId) return;
         const scene = game.scenes.get(link.sceneId);
         if (!scene) return;
@@ -459,6 +493,8 @@ class RoutesManager {
 
     /** Back to the start of a route, or of a journey -- its first route, as it is being run. GM only. */
     async resetTrip(link) {
+        link = this.resolveLink(link);
+        if (!link) return null;
         if (!link?.journeyId) return this.setPathTravel(link, { effort: 0, arrived: false });
         const view = this.journeyView(link);
         if (!view) return null;
@@ -484,6 +520,17 @@ class RoutesManager {
         const journey = active?.journeyId && ids.has(active.routeId) ? this.getJourney(active.journeyId, scene) : null;
         for (const id of journey?.routeIds ?? []) ids.add(id);
         return moving ? ids : null;
+    }
+
+    /**
+     * The map whose party trip an animated scene follows by default: the one
+     * with a trip under way, else the one where a trip was chosen most lately.
+     * Null when no map has a trip chosen.
+     */
+    partyMap() {
+        const maps = game.scenes.contents.filter(scene => this.shownPath(scene));
+        const moving = maps.find(scene => this.progress(this.shownPath(scene))?.moving);
+        return moving ?? maps.sort((a, b) => this.settings(b).activeAt - this.settings(a).activeAt)[0] ?? null;
     }
 
     /** A scene's journeys. */
@@ -567,6 +614,7 @@ class RoutesManager {
      * is gone.
      */
     linked(link, units) {
+        link = this.resolveLink(link);
         const scene = link?.sceneId ? game.scenes.get(link.sceneId) : null;
         const path = scene ? this.path(link, scene) : null;
         if (!path) return null;
@@ -609,6 +657,7 @@ class RoutesManager {
     }
 
     progress(link, now = game.time.serverTime, world = this.worldTime()) {
+        if (link?.party) link = this.resolveLink(link);
         if (link?.journeyId) return this._journeyProgress(link, now, world);
         const scene = link?.sceneId ? game.scenes.get(link.sceneId) : null;
         const item = scene ? this._pathItem(link, scene) : null;
@@ -709,6 +758,7 @@ class RoutesManager {
      * easeSeconds, clockFactor (on the motion) and effort, pace, arrived.
      */
     async setPathTravel(link, changes, now = game.time.serverTime) {
+        link = this.resolveLink(link);
         if (!game.user.isGM || !link?.sceneId) return null;
         // A journey's travel is the route's the party is on.
         const route = this.routeLinkOf(link);
@@ -843,7 +893,12 @@ class RoutesManager {
                 // Choosing what the map runs puts the party back on it.
                 if ('active' in (data.changes ?? {}) && data.changes.active && !('offRoute' in data.changes)) settings.offRoute = false;
                 // The route or journey the map's bar and Play button run: the last one played here.
-                if ('active' in (data.changes ?? {})) settings.active = this._validActive(data.changes.active, list, journeys);
+                if ('active' in (data.changes ?? {})) {
+                    const active = this._validActive(data.changes.active, list, journeys);
+                    // When a trip was last chosen here, so an animated scene can follow the map most lately in use.
+                    if (active && JSON.stringify(active) !== JSON.stringify(settings.active ?? null)) settings.activeAt = Number(data.now) || Date.now();
+                    settings.active = active;
+                }
                 await scene.setFlag(MODULE.ID, FLAG_KEY, { list, journeys, settings });
                 return settings;
             }
@@ -1607,6 +1662,7 @@ class RoutesManager {
     // ==================================================================
 
     async openWindow() {
+        writeOpen(true);
         if (this.window?.rendered) {
             this.window.bringToFront?.();
             return this.window;
@@ -1616,8 +1672,30 @@ class RoutesManager {
         return this.window;
     }
 
+    /** Closed by its user, it stays closed; closed here because the scene has no routes, it comes back. */
     onWindowClosed(window) {
         if (this.window === window) this.window = null;
+        if (!this._closingForScene) writeOpen(false);
+    }
+
+    /**
+     * On each scene load, as the Scene Motion window does: a scene with no
+     * routes closes the window, remembering it was open; a scene with routes
+     * brings it back if it was. It can still be opened on an empty scene, to
+     * draw the first route.
+     */
+    async _syncWindowToScene() {
+        if (this.routes(canvas?.scene).length) {
+            if (readOpen() && !this.window?.rendered) await this.openWindow();
+            return;
+        }
+        if (!this.window?.rendered) return;
+        this._closingForScene = true;
+        try {
+            await this.window.close();
+        } finally {
+            this._closingForScene = false;
+        }
     }
 
     /** Pan the canvas to show a whole route or journey. */

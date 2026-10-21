@@ -203,6 +203,11 @@ export function paceChoices(systemId, config, sceneUnits, nameOf) {
     });
 }
 
+/** The pace a trip goes at until one is chosen: the rules' normal pace, else plain walking. */
+export function defaultPace(paces) {
+    return paces.find(p => p.id === 'dnd5e.normal') ?? paces.find(p => p.id === 'walking') ?? paces[0] ?? null;
+}
+
 /**
  * Scene units per in-world hour for a pace in miles per hour. Feet and yards
  * take it in miles; metres in kilometres. A scene in some other unit (hexes,

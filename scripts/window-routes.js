@@ -5,7 +5,7 @@
 import { MODULE } from './const.js';
 import { travelPinsManager } from './manager-travelpins.js';
 import { journeysManager } from './manager-journeys.js';
-import { formatDistance, formatSpan, paceChoices, PACE_GROUPS, gridStep } from './utils-travel.js';
+import { formatDistance, formatSpan, paceChoices, defaultPace, PACE_GROUPS, gridStep } from './utils-travel.js';
 import {
     legTerrains, travelHours, terrainFactor, TERRAINS, travelPlan, MOUNT_HOURS_PER_DAY, FORCED_MARCH_HOURS,
     TIME_RATES, timeRateIndex
@@ -341,7 +341,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
     async togglePlay(link) {
         if (!link) return;
         if (journeysManager.isPlaying(link)) await journeysManager.stop(link);
-        else await journeysManager.play(link, this._barPace?.perHour ?? null);
+        else await journeysManager.play(link);
     }
 
     /**
@@ -354,14 +354,14 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const progress = this.manager.progress(link);
         const travel = progress?.travel;
         const pace = Number(travel?.pace) || 0;
-        const chosen = paces.find(p => pace > 0 && Math.abs(p.perHour - pace) <= p.perHour * 0.005);
+        // Until one is chosen, the normal pace: what Play sets out at.
+        const chosen = pace > 0 ? paces.find(p => Math.abs(p.perHour - pace) <= p.perHour * 0.005) : defaultPace(paces);
         const scenes = journeysManager.linkedScenes(link).map(scene => scene.name);
         return {
             playing: !!travel?.motion?.playing,
             followClock: !!travel?.followClock,
             paces: [
                 ...(pace > 0 && !chosen ? [{ id: '', label: game.i18n.format(`${MODULE.ID}.routes.customPace`, { pace: formatDistance(pace, units) }), selected: true }] : []),
-                ...(!(pace > 0) ? [{ id: '', label: game.i18n.localize(`${MODULE.ID}.routes.noPace`), selected: true }] : []),
                 ...paces.map(p => ({ id: p.id, label: p.label, selected: p === chosen }))
             ],
             drivenBy: scenes.length ? game.i18n.format(`${MODULE.ID}.routes.drivenBy`, { scenes: scenes.join(', ') }) : ''
@@ -405,10 +405,9 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         // The pace times are shown at: the one chosen here, or the system's
         // normal pace (or plain walking) to start with.
         const pace = paces.find(p => p.id === this.paceId)
-            ?? paces.find(p => p.id === 'dnd5e.normal') ?? paces.find(p => p.id === 'walking') ?? paces[0] ?? null;
+            ?? defaultPace(paces);
 
         const { hoursPerDay, followClock } = this.manager.settings(scene);
-        this._barPace = pace;
         const visible = this.manager.visibleRoutes(scene);
         const routes = visible.map(route => {
             const { distance, legs } = this.manager.measure(route, scene);

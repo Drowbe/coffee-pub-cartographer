@@ -90,6 +90,10 @@ Deleting a route takes it out of every journey; deleting a journey leaves its ro
 
 The window has three tabs: **Routes**, **Journeys** and **Setup**.
 
+Like the Scene Motion window, it follows the scene: loading a scene with no routes closes it, and a
+scene with routes brings it back if it was open. Closed by hand, it stays closed. It can still be
+opened on a scene with no routes, to draw the first one.
+
 On the Routes and Journeys tabs, each card shows its name and total length, and below that its legs
 or routes and how long it takes at a pace. The chevron before the name opens it, for its pace, its
 legs and their terrain, or a journey's routes in order.
@@ -116,8 +120,20 @@ maker and the GM can change it.
 
 ## Follow a route with the odometer
 
-On an animated scene, Scene Motion's Travel section has a **Route** choice listing the journeys and
-routes on every map. Choose one, and its length becomes the odometer's destination -- converted to the scene's units,
+On an animated scene, Scene Motion's Travel section has a **Route** choice listing, for every map,
+**The party's trip on** that map, then its journeys and routes.
+
+- **The party's trip** follows whatever that map runs -- the route or journey chosen there, as the
+  GM changes it, clicks another route or drops the party on one, and as a journey goes on from route
+  to route. With nothing chosen on the map, the scene waits. This is the usual choice.
+- **A journey or route** ties the scene to that one, whatever the map runs.
+
+An animated scene that shows its odometer and has never had a route chosen follows the party's trip
+by itself, on the map where a trip is under way, or else where one was chosen most lately. Once the GM
+chooses -- a route, the party's trip, or none -- it is left as chosen; scenery with no odometer is
+never linked.
+
+The trip's length becomes the odometer's destination -- converted to the scene's units,
 so a 60-mile route on a map in miles is 60 miles on a scene measured in feet. The distance traveled is
 then how far along the route the party has come.
 
@@ -194,9 +210,9 @@ when the GM last saw it, not hours further on; after a quick reload, where it is
 GM already on, trips go on.
 
 Each journey's and route's card, opened, holds its
-**Pace**, how fast the party travels it, and **Reset** (the rewind button), back to the start. One
-no animated scene shows needs a pace before it can set out; Play uses the pace chosen under **Times
-at** if it has none.
+**Pace**, how fast the party travels it, and **Reset** (the rewind button), back to the start. Until
+a pace is chosen it shows, and Play sets out at, the normal pace: the game system's (D&D 5e's Normal),
+or walking.
 
 The odometer's arrival time is hours on the road at the party's pace, slowed by terrain ahead --
 travel time, whichever way time is run.

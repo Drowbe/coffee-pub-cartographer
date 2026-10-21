@@ -99,7 +99,8 @@ feet.
   with the clock too, up to four times its pace -- faster than that only the numbers speed up, since
   the picture would be a blur -- and a stopped clock, paused or in combat, eases it to a halt and
   stops the odometer. Without Blacksmith's world clock the switch is greyed out.
-- **Route** -- follows a route drawn on a map: its length becomes the destination. See
+- **Route** -- follows the party's trip on a map (whatever route or journey is chosen there), or a
+  particular route or journey drawn on one: its length becomes the destination. See
   [Routes](userguide-routes.md).
 - **Destination** -- how far there is to go in all, in the scene's units or the longer one (feet or
   miles, metres or kilometres). With a destination set, the tab shows the distance remaining and the

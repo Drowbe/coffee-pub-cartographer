@@ -137,6 +137,9 @@ function defaultTravel() {
         arrived: false,
         followClock: false,
         route: null,
+        // Whether the GM has chosen what this scene follows -- a route, the party's
+        // trip, or none -- so it is never chosen for them after that.
+        routeChosen: false,
         clockRate: 0,
         clockMotion: { playing: false, masterSpeed: 0, easeSeconds: 0, anchorAt: 0, rampFrom: null }
     };
@@ -429,7 +432,7 @@ class ParallaxManager {
     }
 
     async _pushJourney(before, state, scene = canvas.scene) {
-        const key = link => (link ? `${link.sceneId}|${link.routeId ?? ''}|${link.journeyId ?? ''}` : '');
+        const key = link => (link ? `${link.sceneId}|${link.routeId ?? ''}|${link.journeyId ?? ''}|${link.party ? 'party' : ''}` : '');
         const was = before?.travel?.route;
         const link = state.travel?.route;
         // What was last written for each scene, so a change that does not touch the journey writes nothing.

@@ -9,6 +9,7 @@ import { routesManager } from './manager-routes.js';
 import { parallaxManager } from './manager-parallax.js';
 import { travelManager } from './manager-travel.js';
 import { DEFAULT_EASE_SECONDS } from './utils-motion.js';
+import { paceChoices, defaultPace } from './utils-travel.js';
 
 /** The section of Cartographer's sub-menubar the Play button sits in; registered in manager-toolbar.js. */
 const GROUP = 'Routes';
@@ -133,7 +134,8 @@ class JourneysManager {
      * journey on that route, or that route of a journey.
      */
     static follows(scene, link) {
-        const route = scene?.getFlag(MODULE.ID, 'parallax')?.travel?.route;
+        // Following the party's trip on a map: whatever that map runs now.
+        const route = routesManager.resolveLink(scene?.getFlag(MODULE.ID, 'parallax')?.travel?.route);
         if (!route || route.sceneId !== link?.sceneId) return false;
         if (link.journeyId ? route.journeyId === link.journeyId : (!route.journeyId && route.routeId === link.routeId)) return true;
         const current = each => (each.journeyId ? (routesManager.journeyView(each)?.followed ? routesManager.routeLinkOf(each) : null) : each);
@@ -194,6 +196,11 @@ class JourneysManager {
         const ended = this.progress(link);
         if (ended.travel.arrived && ended.effort >= ended.totalEffort - 1e-9) await routesManager.resetTrip(link);
         const progress = this.progress(link);
+        // With no pace chosen, the party goes at the normal pace for the map's units.
+        if (!(progress.travel.pace > 0) && !(pace > 0)) {
+            const units = game.scenes.get(link.sceneId)?.grid?.units;
+            pace = defaultPace(paceChoices(game.system?.id, globalThis.CONFIG, units, p => p.id))?.perHour ?? null;
+        }
         if (!this.linkedScenes(link).length && !(progress.travel.pace > 0) && !(pace > 0)) {
             notify(game.i18n.localize(`${MODULE.ID}.routes.needsPace`), { type: 'warn' });
             return;

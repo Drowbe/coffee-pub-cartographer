@@ -80,12 +80,30 @@ class TravelManager {
     _syncRoute() {
         if (!game.user.isGM || !canvas?.scene) return;
         const travel = parallaxManager.state.travel;
+        if (this._followParty()) return;
         if (!travel?.route) return;
         const linked = routesManager.linked(travel.route, canvas.scene.grid?.units);
         if (!linked || linked.converted === null) return;
         if (Math.abs(linked.converted - (Number(travel.destination) || 0)) > 1e-6) {
             void parallaxManager.setTravel({ destination: linked.converted });
         }
+    }
+
+    /**
+     * An animated scene showing its odometer, whose GM has not chosen what it
+     * follows, follows the party's trip on the map in use (routesManager.partyMap).
+     * Scenery with no odometer is left alone. GM only. True when it set one.
+     */
+    _followParty() {
+        const travel = parallaxManager.state.travel;
+        if (!parallaxManager.isConfigured || !travel?.showHud || travel.route || travel.routeChosen) return false;
+        const map = routesManager.partyMap();
+        if (!map || map.id === canvas.scene.id) return false;
+        const route = { sceneId: map.id, party: true };
+        const linked = routesManager.linked(route, canvas.scene.grid?.units);
+        if (!linked || linked.converted === null) return false;
+        void parallaxManager.setTravel({ route, destination: linked.converted });
+        return true;
     }
 
     _start() {
@@ -334,7 +352,7 @@ class TravelManager {
 
     /** The route or journey the odometer counts: the map's trip, or the one this animated scene follows. */
     _tripLink(summary) {
-        return summary?.link ?? parallaxManager.state?.travel?.route ?? null;
+        return summary?.link ?? routesManager.resolveLink(parallaxManager.state?.travel?.route) ?? null;
     }
 
     /** A control on the odometer: Play/Pause, Stop or Turn round, for the map's trip or this scene. */
@@ -361,7 +379,7 @@ class TravelManager {
         if (summary.link) await journeysManager.end(summary.link);
         else {
             // An animated scene: its trip, if it follows one, ends on its map; else its own odometer.
-            const link = parallaxManager.state.travel?.route;
+            const link = routesManager.resolveLink(parallaxManager.state.travel?.route);
             await parallaxManager.stop();
             if (link) await journeysManager.end(link);
             else await parallaxManager.resetOdometer();

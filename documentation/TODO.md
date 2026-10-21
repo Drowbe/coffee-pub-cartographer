@@ -190,6 +190,14 @@ which is roleplay support:
 - **Nothing resets it automatically.** Rest is roleplay; the GM clears exhaustion as the condition
   it is. What Cartographer counts (hours on the road today) starts again with each in-world day.
 
+**Moments on a route.** Let the GM mark points along a route -- an **encounter** (an ambush at the
+ford) or a **narrative** beat (the first sight of the city walls, a shrine by the road) -- that the trip
+reaches as the party travels. Open questions: whether reaching one pauses the trip (likely an option
+per moment, as Pause on arrival is), what the GM is told (a toast, a chat card for the GM, a journal
+page to open), whether players see them on the map, and how they sit on a journey (on its routes, so
+they travel with the route into every journey that uses it). The geometry is there: a moment is a
+distance along a route, and `routesManager.pointAt` gives its place.
+
 **A double-click on a route over a token** edits the route rather than opening the token's sheet,
 for anyone who may change that route. Fine on a map, where tokens rarely sit on roads; worth
 watching.

@@ -547,7 +547,9 @@ console.log('\nroutes: who may change what');
     flags.parallax = { layers: [], sets: [] };
     pm.state = pm._readState();
     await jm.play(go);
-    check(warnings.length === 1 && !jm.isPlaying(go), 'a journey nothing drives needs a pace before it can set out');
+    check(warnings.length === 0 && jm.isPlaying(go) && rm.progress(go).travel.pace === 3 * 5280, 'a journey with no pace chosen sets out at the normal pace: walking, 3 mph');
+    await jm.stop(go);
+    await rm.setPathTravel(go, { pace: 0 });
     await jm.play(go, 18000);
     check(jm.isPlaying(go) && rm.progress(go).travel.pace === 18000 && rm.progress(go).travel.motion.easeSeconds === 2,
         'played from the map, it sets out at the pace chosen, easing up');
@@ -923,6 +925,37 @@ console.log('\nroutes: who may change what');
     check(!rm.getJourney(walk.id).travel && rm.settings().active.routeId === m2.id
         && Math.abs(rm.progress({ sceneId: 'here', routeId: m2.id }).distance - 25) < 1e-6 && Math.abs(rm.progress(go).distance - 75) < 1e-6,
         'a journey 75 ft along becomes its second route 25 ft along, and the map follows the journey there');
+
+    console.log('\nan animated scene following the party\'s trip');
+    const partyTrip = { sceneId: 'here', party: true };
+    await jm.choose(go, scene);
+    check(!!rm.progress(partyTrip)?.journey && rm.progress(partyTrip).distance === rm.progress(go).distance,
+        'the party\'s trip on a map is whatever the map runs: here, the journey');
+    await jm.choose(lateLink, scene);
+    check(rm.progress(partyTrip)?.path.name === 'Late' && rm.routeLinkOf(partyTrip)?.routeId === late.id,
+        'and it follows when the GM chooses another');
+    await jm.choose(null, scene);
+    check(rm.progress(partyTrip) === null && rm.partyMap() === null, 'with nothing chosen there is none, and no map for a scene to follow');
+    await jm.choose(lateLink, scene);
+    check(rm.partyMap()?.id === 'here', 'a map with a trip chosen is the one a scene follows the party on');
+
+    console.log('\nthe Routes window follows the scene');
+    const openedBefore = rm.openWindow;
+    let reopened = 0;
+    rm.openWindow = async () => { reopened++; };
+    const routesKept = flags.routes;
+    rm.window = { rendered: true, close: async () => rm.onWindowClosed(rm.window) };
+    store.set('m.routes.windowOpen', 'true');
+    flags.routes = { list: [], journeys: [] };
+    await rm._syncWindowToScene();
+    check(!rm.window && store.get('m.routes.windowOpen') === 'true', 'on a scene with no routes it closes, and remembers it was open');
+    flags.routes = routesKept;
+    await rm._syncWindowToScene();
+    check(reopened === 1, 'back on a scene with routes, it reopens');
+    store.set('m.routes.windowOpen', 'false');
+    await rm._syncWindowToScene();
+    check(reopened === 1, 'closed by its user, it stays closed');
+    rm.openWindow = openedBefore;
 
     console.log('\nthe marker is the party\'s');
     placed.delete('m-party-here');
