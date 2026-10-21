@@ -76,6 +76,46 @@ class TravelPinsManager {
             pins.on('dragEnd', event => this._onDragEnd(event), { moduleId: MODULE.ID, dragEvents: true });
             pins.on('deleted', event => this._onPinDeleted(event), { moduleId: MODULE.ID });
         }
+        // A route clicked on the map: the one the party is to travel.
+        if (game.user.isGM) on(`${MODULE.ID}.routeClicked`, link => this.chooseTrip(link));
+    }
+
+    /**
+     * Choose what the map runs -- from the bar, or a click on a route -- never
+     * moving the party: the marker is where the party is. Already where the
+     * party stands on it, nothing more; with the marker on its line elsewhere,
+     * the party is put there, as a drop would; anywhere else, the trip is
+     * chosen but the party is not on it -- the GM is told to move the marker
+     * there, and Play waits until they do. GM only.
+     */
+    async chooseTrip(link, scene = canvas.scene) {
+        if (!game.user.isGM || !scene) return;
+        const pin = this.pinFor(scene.id);
+        // The marker is held while the choice is made: the map would otherwise
+        // move it to the trip chosen before this has looked at where it stands.
+        // Off the trip until it is seen to be on it, so no client draws the marker
+        // on the trip chosen in the meantime.
+        this._dragging = true;
+        try {
+            if (link && pin) await routesManager.setSettings({ offRoute: true }, scene.id);
+            await journeysManager.choose(link, scene);
+            if (!link) return;
+            const onIt = () => routesManager.setSettings({ offRoute: false }, scene.id);
+            if (!pin) return onIt();
+            const shown = routesManager.shownPath(scene);
+            const point = shown ? routesManager.progress(shown)?.point : null;
+            if (!point) return;
+            const radius = DROP_SNAP_PIXELS / (canvas.stage?.scale?.x || 1);
+            if (Math.hypot(point.x - pin.x, point.y - pin.y) <= radius) return onIt();
+            const ids = shown.journeyId ? routesManager.getJourney(shown.journeyId, scene)?.routeIds ?? [] : [routesManager.routeLinkOf(shown)?.routeId];
+            const placed = await this.placeParty(scene, { x: pin.x, y: pin.y }, radius, { only: ids });
+            if (placed.onRoute) return;
+            notify(game.i18n.format(`${MODULE.ID}.routes.partyNotOnRoute`, {
+                party: TravelPinsManager.partyName(), name: routesManager.path(shown, scene)?.name ?? ''
+            }), { type: 'warn' });
+        } finally {
+            this._dragging = false;
+        }
     }
 
     // ==================================================================
@@ -165,17 +205,20 @@ class TravelPinsManager {
      * every route, it stays where it was put, on no route, until it is put on
      * one. Whatever was moving there stops either way, and the trip it was
      * on, if it is put down anywhere but back on that trip, is cancelled:
-     * reset to the start.
+     * reset to the start. `only`: the routes it may land on -- off them, it
+     * changes nothing (for a trip just chosen; see chooseTrip).
      */
-    async placeParty(scene, point, radius) {
+    async placeParty(scene, point, radius, { only = null } = {}) {
         if (!game.user.isGM || !scene) return { onRoute: false };
         const shown = routesManager.shownPath(scene);
-        await this._stopAll(scene);
         let best = null;
         for (const route of routesManager.visibleRoutes(scene)) {
+            if (only && !only.includes(route.id)) continue;
             const hit = nearestOnRoute(route.points, [point.x, point.y]);
             if (hit && hit.distance <= radius && (!best || hit.distance < best.hit.distance)) best = { route, hit };
         }
+        if (only && !best) return { onRoute: false };
+        await this._stopAll(scene);
         // Put down anywhere but back on the trip it was on, that trip is
         // cancelled: stopped, and back to its start -- a journey to its first
         // route. Put down on another route of the journey it follows, it keeps
@@ -186,7 +229,7 @@ class TravelPinsManager {
         };
         if (!best) {
             await cancel(shown);
-            await routesManager.setSettings({ offRoute: true }, scene.id);
+            await routesManager.setSettings({ active: null, offRoute: true }, scene.id);
             return { onRoute: false };
         }
         const link = { sceneId: scene.id, routeId: best.route.id };
@@ -263,9 +306,9 @@ class TravelPinsManager {
         return `${MODULE.ID}-party-${sceneId}`;
     }
 
-    /** The route or journey a map's marker follows: the one its bar runs. */
+    /** The route or journey a map's marker follows: the one its bar runs -- unless the party is not on it. */
     static followed(scene) {
-        return scene ? routesManager.shownPath(scene) : null;
+        return scene && !routesManager.settings(scene).offRoute ? routesManager.shownPath(scene) : null;
     }
 
     _start() {

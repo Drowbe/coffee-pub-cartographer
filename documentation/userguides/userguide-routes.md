@@ -211,12 +211,17 @@ window's bar works as the Scene Motion window's does. From the left:
     rate. How fast time runs is set on Blacksmith's clock.
 - **Which** -- the route or journey the bar runs, or **No route**. Nothing is chosen for you: it is
   **No route** until a route or journey is chosen there, a route is clicked on the map, or the party
-  is dropped on one. Choosing a journey puts the party at its start -- or, if it is on one of the
-  journey's routes already, keeps it there and follows the journey from it. Choosing **No route**
-  stops the party and leaves it where it is.
+  is dropped on one. Choosing a journey sets out from its start -- or, if the party is on one of the
+  journey's routes already, follows the journey from there. Choosing **No route** stops the party
+  and leaves it where it is.
+
+  **Choosing never moves the party.** The marker is where the party is. If it already stands where
+  the party is on the trip chosen, that is that; if it stands on the trip's line somewhere else, the
+  party is put there, as a drop would. Anywhere else, the trip is chosen but the party is not on it:
+  you are told to move the marker onto it, the odometer waits, and Play says the same until you do.
 - **The gear** -- shows and hides the settings. Hidden, the window is just the bar.
 
-**Clicking a route** on the map (the GM, once) chooses it, as the bar does, and shows its odometer.
+**Clicking a route** on the map (the GM, once) chooses it, as the bar does.
 A double-click edits it instead, and clicking the route already chosen -- the party marker on it,
 say -- changes nothing.
 
@@ -270,8 +275,8 @@ is marked arrived.
 
 There is one party, so each map has one marker. Once a route or journey is chosen, the marker
 appears where the party is on it, and moves along it as they travel -- for everyone, in step
-with the odometer, and with the world time when it follows the clock, scrubbing included. Choose
-another route or journey in the bar and the marker moves to where the party is on that one. It is a
+with the odometer, and with the world time when it follows the clock, scrubbing included. Choosing
+another route or journey does not move it (see **Which**, above): the party is where the marker is. It is a
 Coffee Pub Blacksmith pin, so the GM styles it from the pin's own menu (Configure Pin): an icon, a
 portrait, a wagon, its label and size.
 
@@ -295,7 +300,7 @@ of their own.
   route), along with any animated scene following it. Moved to another route of the same journey,
   only the route it left goes back to its start. Dropped off every route, the party is on none: Play says
   to put it on one, and the Routes tab offers **Draw from the party**, a new route starting where the
-  marker stands. Choosing a route or journey in the bar also puts the party back on it. Players
+  marker stands. Choosing a route whose line the marker stands on also puts the party on it. Players
   cannot move the marker.
 - When the party stops or arrives, the marker stays where they are.
 - **Deleting the marker** (from the pin's own menu) takes it off the map and it stays off: the trip and

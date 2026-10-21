@@ -60,8 +60,6 @@ class JourneysManager {
         on('canvasTearDown', () => this._stopWatch());
         on(`${MODULE.ID}.routesChanged`, () => this._refreshButton());
         on('blacksmith.worldClockRateChanged', ({ rate } = {}) => this._recordClockRate(rate));
-        // A route clicked on the map: the one the party is to travel.
-        on(`${MODULE.ID}.routeClicked`, link => this.choose(link));
         this._startWatch();
         this._recordClockRate();
         // Closing the tab: note the time, so a trip pauses where it was left.
@@ -190,7 +188,7 @@ class JourneysManager {
         if (!this.progress(link)) return;
         // Set down off every route, the party has nowhere to go until it is on one.
         if (routesManager.settings(game.scenes.get(link.sceneId)).offRoute) {
-            notify(game.i18n.localize(`${MODULE.ID}.routes.partyOffRoute`), { type: 'warn' });
+            notify(game.i18n.format(`${MODULE.ID}.routes.partyOffRoute`, { name: this.progress(link)?.path.name ?? '' }), { type: 'warn' });
             return;
         }
         // A journey not being followed is set out on from its start.

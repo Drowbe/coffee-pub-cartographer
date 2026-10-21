@@ -320,7 +320,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const [kind, id] = String(value ?? '').split(':');
         const sceneId = canvas.scene?.id;
         const chosen = !id ? null : kind === 'j' ? { sceneId, journeyId: id } : { sceneId, routeId: id };
-        await journeysManager.choose(chosen, canvas.scene);
+        await travelPinsManager.chooseTrip(chosen, canvas.scene);
     }
 
     /** Take the route or journey the bar runs back to the start, after asking: its progress goes. */

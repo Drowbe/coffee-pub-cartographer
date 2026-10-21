@@ -314,11 +314,13 @@ class RoutesManager {
      * the route chosen there, or the journey being followed (read from the
      * route the party is on in it). A route set moving some other way, as by
      * an animated scene following it, shows until the GM's client claims it.
-     * Null when no route is chosen: the map shows none.
+     * Null when no route is chosen: the map shows none. Chosen with the party
+     * not on it (`offRoute`), it is still the bar's, but the odometer and the
+     * marker leave it be.
      */
     shownPath(scene = canvas.scene) {
         if (!scene) return null;
-        const { active, offRoute } = this.settings(scene);
+        const { active } = this.settings(scene);
         const activeLink = !active ? null
             : active.journeyId ? { sceneId: scene.id, journeyId: active.journeyId } : { sceneId: scene.id, routeId: active.routeId };
         // Under way: going, not easing to a stop after one. Following the clock,
@@ -330,8 +332,6 @@ class RoutesManager {
         if (active && underWay({ sceneId: scene.id, routeId: active.routeId })) return activeLink;
         const moving = this.routes(scene).filter(r => r.travel).map(r => ({ sceneId: scene.id, routeId: r.id })).find(underWay);
         if (moving) return moving;
-        // Set down off every route, the party is on none until it is put on one.
-        if (offRoute) return null;
         return activeLink;
     }
 
@@ -994,8 +994,6 @@ class RoutesManager {
                     const marker = data.changes.marker;
                     settings.marker = marker ? { removed: !!marker.removed, look: marker.look && typeof marker.look === 'object' ? marker.look : null } : null;
                 }
-                // Choosing what the map runs puts the party back on it.
-                if ('active' in (data.changes ?? {}) && data.changes.active && !('offRoute' in data.changes)) settings.offRoute = false;
                 // The route or journey the map's bar and Play button run: the last one played here.
                 if ('active' in (data.changes ?? {})) {
                     const active = this._validActive(data.changes.active, list, journeys);

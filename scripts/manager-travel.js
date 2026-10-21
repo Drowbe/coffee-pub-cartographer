@@ -196,7 +196,8 @@ class TravelManager {
         if (!scene) return null;
         // The same trip the bar and the party marker show (routesManager.shownPath), so the
         // odometer and the marker never disagree about where the party is.
-        const shown = routesManager.shownPath(scene);
+        // Chosen with the party somewhere else, it is not the party's progress to show.
+        const shown = routesManager.settings(scene).offRoute ? null : routesManager.shownPath(scene);
         const progress = shown ? routesManager.progress(shown, now) : null;
         if (!progress) return null;
         const units = scene.grid?.units ?? '';

@@ -760,8 +760,19 @@ console.log('\nroutes: who may change what');
     const warnedBefore = warnings.length;
     await jm.play(go);
     check(!jm.isPlaying(go) && warnings.length === warnedBefore + 1, 'and Play says to put it on a route first');
-    await rm.setSettings({ active: { routeId: late.id } });
-    check(!rm.settings().offRoute, 'choosing a route in the bar puts the party back on one');
+    // Choosing never moves the party: the marker is where it is.
+    placed.set('m-party-here', { ...placed.get('m-party-here'), x: 5000, y: 5000 });
+    const warnedChoosing = warnings.length;
+    await tp2.chooseTrip(lateLink, scene);
+    check(rm.settings().active?.routeId === late.id && rm.settings().offRoute && placed.get('m-party-here').x === 5000
+        && warnings.length === warnedChoosing + 1 && rm.shownPath()?.routeId === late.id && !tp2.constructor.followed(scene),
+        'choosing a route away from the party chooses it, leaves the marker where it is, and says to move it there');
+    placed.set('m-party-here', { ...placed.get('m-party-here'), x: 700, y: 502 });
+    await tp2.chooseTrip({ sceneId: 'here', routeId: lone.id }, scene);
+    check(!rm.settings().offRoute && rm.settings().active?.routeId === lone.id && Math.abs(rm.progress({ sceneId: 'here', routeId: lone.id }).distance - 25) < 1e-6,
+        'choosing a route the marker stands on puts the party there on it');
+    await tp2.chooseTrip(lateLink, scene);
+    check(rm.settings().offRoute && placed.get('m-party-here').y === 500, 'and choosing another, away from it, leaves the party where it stands');
     await tp2.placeParty(scene, { x: 700, y: 900 }, 24);
     check(Math.abs(rm.progress(lateLink).distance - 25) < 1e-6, 'the party back on its route, 25 ft along');
     await tp2.placeParty(scene, { x: 1050, y: 902 }, 24);
@@ -815,7 +826,8 @@ console.log('\nroutes: who may change what');
     check(!jm.isPlaying(lateLink) && rm.progress(lateLink).distance === 0, 'Stop halts the trip and puts its odometer back to the start');
     check(rm.settings().active == null && rm.settings().offRoute && rm.shownPath() === null, 'and the map has no trip: the party is on no route');
     check(placed.get('m-party-here').x === pinBefore.x && placed.get('m-party-here').y === pinBefore.y, 'the marker stays where the party stopped');
-    await rm.setSettings({ active: { routeId: late.id } });
+    // Back on the route, for what follows (as a drop on it would).
+    await rm.setSettings({ active: { routeId: late.id }, offRoute: false });
 
     console.log('\nthe GM loading pauses a trip');
     const savedUsers = game.users;
@@ -871,7 +883,7 @@ console.log('\nroutes: who may change what');
     rm.setPathTravel = realSetPathTravel;
     check(rm.settings().offRoute && placed.get('m-party-here').x === 5000 && placed.get('m-party-here').y === 5000,
         'pulled off a route, the marker stays where it was put, not saved back on to the route it left');
-    await jm.choose(lateLink, scene);
+    await tp2.placeParty(scene, { x: 700, y: 900 }, 24);
 
     console.log('\na journey is a run of routes');
     const roadLink = { sceneId: 'here', routeId: m1.id };
