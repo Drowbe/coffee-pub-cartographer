@@ -134,6 +134,8 @@ class TravelManager {
             arrived: destination !== null && distance >= destination * (1 - 1e-9) - 1e-9,
             // The trip's name, when this scene follows a route or journey on a map.
             nameText: journey?.path.name ?? '',
+            // Travelling now: the trip's own say when there is one, else this scene's.
+            moving: journey ? !!journey.moving : !!state.playing && !!speed,
             traveledText: formatDistance(distance, units),
             remainingText: remaining === null ? '' : formatDistance(remaining, units),
             destinationText: destination === null ? '' : formatDistance(destination, units),
@@ -193,6 +195,7 @@ class TravelManager {
             progress: progress.length > 0 ? Math.min(1, progress.distance / progress.length) : 0,
             arrived,
             nameText: progress.path.name ?? '',
+            moving: !!progress.moving,
             traveledText: formatDistance(progress.distance, units),
             remainingText: formatDistance(remaining, units),
             destinationText: formatDistance(progress.length, units),
@@ -243,6 +246,8 @@ class TravelManager {
             hud.querySelector('[data-travel-hud="fill"]').style.width = `${(summary.progress * 100).toFixed(1)}%`;
         }
         hud.classList.toggle('is-arrived', summary.arrived);
+        // Miles tick over slowly; this says at a glance that the party is on the move.
+        hud.classList.toggle('is-moving', !!summary.moving && !summary.arrived);
     }
 
     // ==================================================================

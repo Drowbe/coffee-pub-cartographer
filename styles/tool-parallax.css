@@ -713,6 +713,42 @@
     opacity: 0.75;
 }
 
+/* On the move: the icon steps and a light runs along the bar, since the
+   distance itself changes too slowly to show it. */
+.cartographer-travel-hud.is-moving .cartographer-travel-hud-row > i {
+    animation: cartographer-travel-step 0.9s ease-in-out infinite;
+}
+
+.cartographer-travel-hud.is-moving .cartographer-travel-hud-bar {
+    position: relative;
+    overflow: hidden;
+}
+
+.cartographer-travel-hud.is-moving .cartographer-travel-hud-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+    animation: cartographer-travel-shimmer 1.6s linear infinite;
+}
+
+@keyframes cartographer-travel-step {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-2px); }
+}
+
+@keyframes cartographer-travel-shimmer {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cartographer-travel-hud.is-moving .cartographer-travel-hud-row > i,
+    .cartographer-travel-hud.is-moving .cartographer-travel-hud-bar::after {
+        animation: none;
+    }
+}
+
 /* The trip the odometer counts, above its figures. */
 .cartographer-travel-hud-name {
     margin-bottom: 2px;

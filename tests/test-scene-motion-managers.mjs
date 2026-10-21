@@ -684,6 +684,16 @@ console.log('\nroutes: who may change what');
     check(!!withProgress && rm.progress(withProgress).effort > 0,
         'with none played there, it shows one the party has come some way along -- the odometer and the marker the same');
     await rm.setSettings({ active: { journeyId: go.journeyId } });
+    // A route set going behind the map's back, while the journey is the active one.
+    await rm.setPathTravel(lateLink, { playing: true, pace: 3600, masterSpeed: 1 });
+    jm._lastWatch = -Infinity;
+    jm._watch();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    check(rm.settings().active?.routeId === late.id, 'a moving trip becomes the one its map shows, however it was set going');
+    await jm.stop(lateLink);
+    now += 3000;
+    check(rm.shownPath()?.routeId === late.id, 'so stopping it leaves the map on it, not on the journey played before');
+    await rm.setSettings({ active: { journeyId: go.journeyId } });
 
     console.log('\nputting the party down');
     const placed = new Map();
@@ -722,6 +732,25 @@ console.log('\nroutes: who may change what');
     const moved = await tp2.placeParty(scene, { x: 350, y: 498 }, 24);
     check(moved.link.routeId === lone.id && Math.abs(rm.progress(one).distance - 12.5) < 1e-6 && rm.progress(lateLink).distance === 0,
         'dropped on a different route, the last trip is cancelled and the party starts the new one where it landed');
+
+    console.log('\nends and directions');
+    await tp2.placeParty(scene, { x: 1390, y: 903 }, 24);
+    check(Math.abs(rm.progress(lateLink).distance - 50) < 1e-6, 'dropped near the end of a route, the party is at its end exactly');
+    await tp2.placeParty(scene, { x: 15, y: 897 }, 24);
+    check(rm.progress(lateLink).distance === 0, 'and near its start, at its start');
+    await tp2.placeParty(scene, { x: 280, y: 900 }, 24);
+    check(Math.abs(rm.progress(lateLink).distance - 10) < 1e-6, 'anywhere else along it, exactly where it was put');
+    await jm.setDirection(lateLink, true);
+    const turned = rm.progress(lateLink);
+    check(Math.abs(turned.distance - 40) < 1e-6 && Math.abs(turned.point.x - 280) < 1e-6 && turned.path.reversed,
+        'turned round, the party stands where it was, now 40 ft from the far end it starts from');
+    await jm.play(lateLink, 3600);
+    now += 10000;
+    check(rm.progress(lateLink).point.x < 280, 'and travels back towards the start the route was drawn from');
+    await jm.stop(lateLink);
+    now += 3000;
+    await jm.setDirection(lateLink, false);
+    check(!rm.progress(lateLink).path.reversed, 'and can be turned back');
 
     console.log('\nthe marker is the party\'s');
     placed.delete('m-party-here');

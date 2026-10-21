@@ -9,7 +9,7 @@ import {
     cleanPoints, legPixels, routePixels, gridDistance, distancePixels, pointAlong, convertDistance,
     nearestWaypoint, nearestOnRoute, legTerrains, terrainFactor, insertWaypoint, removeWaypoint,
     snapTo, chainRoutes, TERRAINS, pathLegs, totalEffort, distanceForEffort, legIndexAt,
-    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate
+    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate, effortForDistance
 } from './utils-routes.js';
 import { motionSpeed } from './utils-motion.js';
 import { formatDistance } from './utils-travel.js';
@@ -362,19 +362,25 @@ class RoutesManager {
      * chained end to end; its gaps are where two do not meet.
      */
     path(ref, scene = canvas.scene) {
+        let path = null;
+        let item = null;
         if (ref?.routeId) {
-            const route = this.get(ref.routeId, scene);
-            if (!route) return null;
-            return { name: route.name, points: route.points, terrain: legTerrains(route.points, route.terrain), gaps: [] };
+            item = this.get(ref.routeId, scene);
+            if (item) path = { name: item.name, points: item.points, terrain: legTerrains(item.points, item.terrain), gaps: [] };
+        } else if (ref?.journeyId) {
+            item = this.getJourney(ref.journeyId, scene);
+            if (item) {
+                const routes = this.routes(scene);
+                const chain = chainRoutes(item.routeIds.map(id => routes.find(r => r.id === id)).filter(Boolean), JOIN_TOLERANCE);
+                path = { name: item.name, points: chain.points, terrain: chain.terrain, gaps: chain.gaps };
+            }
         }
-        if (ref?.journeyId) {
-            const journey = this.getJourney(ref.journeyId, scene);
-            if (!journey) return null;
-            const routes = this.routes(scene);
-            const chain = chainRoutes(journey.routeIds.map(id => routes.find(r => r.id === id)).filter(Boolean), JOIN_TOLERANCE);
-            return { name: journey.name, points: chain.points, terrain: chain.terrain, gaps: chain.gaps };
+        // Travelled the other way: from the end it was drawn to, back to its start.
+        // Gaps stay counted in the routes' own order, as the window lists them.
+        if (path && item?.travel?.reversed) {
+            path = { ...path, points: [...path.points].reverse(), terrain: [...path.terrain].reverse(), reversed: true };
         }
-        return null;
+        return path;
     }
 
     /**
@@ -642,6 +648,18 @@ class RoutesManager {
                 travel.motion.rampFrom = motionSpeed(travel.motion, now);
                 travel.motion.anchorAt = now;
                 const changes = data.changes ?? {};
+                // Turned round: the party stays where it stands, now counted from the other
+                // end, and the timeline starts again, since it was counted from the first.
+                if ('reversed' in changes && !!changes.reversed !== !!travel.reversed && path) {
+                    const legs = pathLegs(path.points, path.terrain, scene.grid);
+                    const length = legs.reduce((sum, leg) => sum + leg.distance, 0);
+                    const distance = distanceForEffort(legs, travel.effort);
+                    const turned = pathLegs([...path.points].reverse(), [...path.terrain].reverse(), scene.grid);
+                    travel.reversed = !!changes.reversed;
+                    travel.effort = effortForDistance(turned, length - distance);
+                    travel.arrived = false;
+                    travel.timeline = [];
+                }
                 for (const key of ['playing', 'masterSpeed', 'easeSeconds', 'clockFactor']) {
                     if (key in changes) travel.motion[key] = key === 'playing' ? !!changes[key] : Number(changes[key]) || 0;
                 }

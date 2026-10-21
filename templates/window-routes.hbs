@@ -19,6 +19,15 @@
             data-tooltip="{{localize "coffee-pub-cartographer.routes.resetJourney"}}"><i class="fa-solid fa-backward-fast"></i></button>
     </span>
 </div>
+<div class="cartographer-routes-terrain-all" data-tooltip="{{localize "coffee-pub-cartographer.routes.directionHint"}}">
+    <span>{{localize "coffee-pub-cartographer.routes.direction"}}</span>
+    <div class="cartographer-parallax-segmented" role="radiogroup">
+        <button type="button" class="cartographer-parallax-segment{{#unless controls.reversed}} is-active{{/unless}}" data-action="path-direction" data-reversed="false"
+            {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}>{{localize "coffee-pub-cartographer.routes.asDrawn"}}</button>
+        <button type="button" class="cartographer-parallax-segment{{#if controls.reversed}} is-active{{/if}}" data-action="path-direction" data-reversed="true"
+            {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}>{{localize "coffee-pub-cartographer.routes.reversed"}}</button>
+    </div>
+</div>
 {{#if controls.drivenBy}}<p class="cartographer-parallax-hint">{{controls.drivenBy}}</p>{{/if}}
 {{/inline}}
 

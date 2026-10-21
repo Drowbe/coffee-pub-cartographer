@@ -195,6 +195,11 @@ class JourneysManager {
         for (const link of links) await this.setFollowClock(link, follow);
     }
 
+    /** Travel a route or journey as drawn, or the other way: from its end back to its start. */
+    async setDirection(link, reversed) {
+        await this._drive(link, { path: { reversed: !!reversed } });
+    }
+
     /** Back to the start of the way. */
     async reset(link) {
         await routesManager.setPathTravel(link, { effort: 0, arrived: false });
@@ -279,6 +284,11 @@ class JourneysManager {
         for (const link of this._moving()) {
             const progress = routesManager.progress(link);
             if (!progress) continue;
+            // A trip moving is the one its map shows, however it was set going --
+            // so stopping it leaves the map on it, not on the last one played there.
+            const active = routesManager.settings(game.scenes.get(link.sceneId)).active;
+            const isActive = active && (link.journeyId ? active.journeyId === link.journeyId : (!active.journeyId && active.routeId === link.routeId));
+            if (!isActive && progress.travel.motion.playing) this._once(`claim-${link.sceneId}`, () => routesManager.claimActive(link));
             const scenes = this.linkedScenes(link);
             const onCanvas = scenes.some(scene => scene.id === canvas.scene?.id);
             // The end of the way, when no animated scene on the canvas is watching for it.

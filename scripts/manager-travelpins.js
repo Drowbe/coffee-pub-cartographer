@@ -150,7 +150,11 @@ class TravelPinsManager {
         const along = nearestOnRoute(path.points, [point.x, point.y]);
         const before = legPixels(path.points.slice(0, along.index + 1)).reduce((sum, leg) => sum + leg, 0);
         const start = path.points[along.index];
-        const pixels = before + Math.hypot(along.point[0] - start[0], along.point[1] - start[1]);
+        let pixels = before + Math.hypot(along.point[0] - start[0], along.point[1] - start[1]);
+        // Near either end, it is at that end exactly; anywhere else, where it was put.
+        const total = legPixels(path.points).reduce((sum, leg) => sum + leg, 0);
+        if (pixels <= radius) pixels = 0;
+        else if (total - pixels <= radius) pixels = total;
         const effort = effortForDistance(pathLegs(path.points, path.terrain, scene.grid), gridDistance(pixels, scene.grid));
         await routesManager.setPathTravel(link, { effort, playing: false, arrived: false });
         await routesManager.setSettings({ active: link.journeyId ? { journeyId: link.journeyId } : { routeId: link.routeId }, offRoute: false }, scene.id);

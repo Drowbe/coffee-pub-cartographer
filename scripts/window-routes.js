@@ -108,6 +108,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         'marker-configure': (_event, _target, _app) => travelPinsManager.configure(canvas.scene?.id),
         'marker-add': (_event, _target, _app) => travelPinsManager.addMarker(canvas.scene?.id),
         'path-reset': (_event, target, app) => void journeysManager.reset(app._linkFrom(target.dataset)),
+        'path-direction': (_event, target, app) => journeysManager.setDirection(app._linkFrom(target.dataset), target.dataset.reversed === 'true'),
         'map-clock': (_event, _target, app) => journeysManager.setMapClock(canvas.scene, !app.manager.settings().followClock)
     };
 
@@ -355,6 +356,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         return {
             playing: !!travel?.motion?.playing,
             followClock: !!travel?.followClock,
+            reversed: !!travel?.reversed,
             paces: [
                 ...(pace > 0 && !chosen ? [{ id: '', label: game.i18n.format(`${MODULE.ID}.routes.customPace`, { pace: formatDistance(pace, units) }), selected: true }] : []),
                 ...(!(pace > 0) ? [{ id: '', label: game.i18n.localize(`${MODULE.ID}.routes.noPace`), selected: true }] : []),

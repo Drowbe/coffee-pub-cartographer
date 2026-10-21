@@ -172,7 +172,9 @@ window's bar works as the Scene Motion window's does. From the left:
 Each journey's and route's card, opened, holds its
 **Pace**, how fast the party travels it, and **Reset** (the rewind button), back to the start. One
 no animated scene shows needs a pace before it can set out; Play uses the pace chosen under **Times
-at** if it has none.
+at** if it has none. **Direction** is **As drawn** (start to end) or **Reversed** (from the end back
+to the start): the distance to go and the arrival time count towards whichever end it is heading
+for, and turning it round keeps the party where it stands.
 
 The odometer's arrival time is hours on the road at the party's pace, slowed by terrain ahead --
 travel time, whichever way time is run.
@@ -189,7 +191,8 @@ keeps its own speed.
 
 While a route or journey is under way, the map shows only the routes it travels, and the same
 odometer as an animated scene's -- the trip's name, distance travelled, how far is left, the arrival time and a
-progress bar -- for everyone. It stays up while they are stopped or have arrived, and goes only
+progress bar -- for everyone; while the party is on the move, its icon steps and a light runs along the
+bar. It stays up while they are stopped or have arrived, and goes only
 when nothing on the map is in progress: never set out, or reset to the start. Waypoints are shown only while a
 route is drawn or edited; otherwise a route is just its line. Its name and length show when the
 pointer is over it (and while it is edited).
@@ -224,7 +227,8 @@ of their own.
   party has set out there is no marker yet; Change look makes one at the start of the way, so it can
   be styled in advance.
 - **The GM can pick the party up and put it down.** Picking the marker up stops the party,
-  whatever it was travelling. Dropped by a route's line, it snaps onto the line: the party is on that
+  whatever it was travelling. Dropped by a route's line, it snaps onto the line -- exactly where it was
+  put, or at the route's start or end when dropped near one: the party is on that
   route -- or on the journey the map is showing, if the route is part of it -- at that point,
   stopped, and Play carries on from there. Put down anywhere but back on the trip it was on -- on
   another route, or off every route -- that trip is cancelled: stopped, and its odometer back to the
