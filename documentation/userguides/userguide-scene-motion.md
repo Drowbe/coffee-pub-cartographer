@@ -27,7 +27,7 @@ The bar across the top runs the scene. From the left:
 
 - **Parallax, Tiles, Collections** -- which mode the rest of the bar and the settings below it work
   on.
-- **Play / Stop** -- the button says what pressing it will do. Stop eases the motion to a halt and
+- **Play / Pause** -- the button says what pressing it will do. Pause eases the motion to a halt and
   keeps its speed; Play eases it back up to that speed.
 - **Speed** -- centred on zero. Right of centre runs forward, left of centre runs in reverse, and the
   middle stops. It snaps to zero near the middle. Collections mode has no speed slider, because the
@@ -81,7 +81,10 @@ feet.
 - **Show odometer** -- shows the distance traveled, how far is left and when the party arrives, to
   everyone. It starts at the top of the canvas, below any menubars. Anyone can drag it somewhere else
   on their own screen, and it stays there for them; a right-click puts it back. A double-click opens
-  its window: this one on an animated scene (for the GM), the Routes window on a map.
+  its window: this one on an animated scene (for the GM), the Routes window on a map. At its right,
+  the GM has **Play / Pause**, **Stop** and **Back to the start** (both ask first) for what it counts;
+  Stop ends a map's trip, leaving the party where it is, on no route;
+  players see only the figures.
 - **Ground layer** -- the layer the party is travelling over. By default, the nearest layer below
   the Tokens line.
 - **Pace** -- how fast the party travels. Choosing one sets the ground layer's speed from the grid,
@@ -100,7 +103,7 @@ feet.
   [Routes](userguide-routes.md).
 - **Destination** -- how far there is to go in all, in the scene's units or the longer one (feet or
   miles, metres or kilometres). With a destination set, the tab shows the distance remaining and the
-  time to arrival, and **Stop on arrival** eases the scenery to a halt when it is reached.
+  time to arrival, and **Pause on arrival** eases the scenery to a halt when it is reached.
 - **Reset odometer** starts counting from zero again.
 
 The master speed runs the party faster or slower than its pace, and running in reverse backs the
@@ -165,7 +168,7 @@ The current collection is the one that matches what is on now; if two save the s
 made or chosen last. Change a group by hand and the bar reads **Custom** until the look matches a
 collection again.
 
-Play / Stop in Collections mode runs the layers and the tiles together.
+Play / Pause in Collections mode runs the layers and the tiles together.
 
 ## Macros
 

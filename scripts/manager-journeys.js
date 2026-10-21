@@ -203,6 +203,20 @@ class JourneysManager {
         await this._drive(link, { path: { reversed: !!reversed } });
     }
 
+    /**
+     * End a trip: it halts and goes back to the start, the map has no trip
+     * any more, and the party stays where it is, on no route -- as if set
+     * down off every route. Play then asks for a route. Pause, by contrast,
+     * keeps the trip; Back to the start keeps it, at its start.
+     */
+    async end(link) {
+        if (!game.user.isGM || !link) return;
+        await this.stop(link);
+        await this.reset(link);
+        await routesManager.setSettings({ active: null, offRoute: true }, link.sceneId);
+        this._refreshButton();
+    }
+
     /** Back to the start of the way. */
     async reset(link) {
         await routesManager.setPathTravel(link, { effort: 0, arrived: false });

@@ -753,6 +753,31 @@
     }
 }
 
+/* The GM's controls at the odometer's right: Play/Pause and Back to the start. */
+.cartographer-travel-hud-controls {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 4px;
+}
+
+.cartographer-travel-hud-controls[hidden] {
+    display: none;
+}
+
+.cartographer-travel-hud-control {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.cartographer-travel-hud-control:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
 /* The trip the odometer counts, above its figures. */
 .cartographer-travel-hud-name {
     margin-bottom: 2px;

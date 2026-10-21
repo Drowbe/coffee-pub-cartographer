@@ -80,6 +80,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         'routes-tab': (_event, target, app) => app.setTab(target.dataset.tab),
         'routes-play': (_event, _target, app) => app.togglePlay(app._barPath()),
         'routes-reset': (_event, _target, app) => app.confirmReset(app._barPath()),
+        'routes-end': (_event, _target, app) => app.confirmEnd(app.manager.shownPath()),
         // Onward or back along the way, when the world clock is the time.
         // Turn round: head for the other end, the party staying where it stands.
         'routes-direction': (_event, _target, app) => {
@@ -197,7 +198,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const followClock = this.manager.settings().followClock;
         const play = this._button({
             action: 'routes-play',
-            icon: playing ? 'fa-solid fa-stop' : 'fa-solid fa-play',
+            icon: playing ? 'fa-solid fa-pause' : 'fa-solid fa-play',
             label: disabled ? localize('noJourneyToPlay') : localize(playing ? 'stop' : 'play'),
             text: localize(playing ? 'stop' : 'play'),
             className: playing ? 'is-active' : '',
@@ -245,14 +246,22 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             ? `<select class="cartographer-parallax-set-select" data-field="barPath" aria-label="${esc(localize('whichJourney'))}" data-tooltip="${esc(localize('whichJourney'))}">`
                 + group('tabJourneys', journeys, 'j', link?.journeyId) + group('tabRoutes', routes, 'r', link?.routeId) + '</select>'
             : '';
-        // Back to the start, beside Play: what the bar runs, started over.
+        // Stop, beside Play: the trip ended, the party left where it is. Only with a trip on.
+        const onTrip = !!this.manager.shownPath();
+        const stop = this._button({
+            action: 'routes-end',
+            icon: 'fa-solid fa-stop',
+            label: onTrip ? localize('endTrip') : localize('noTrip'),
+            disabled: !onTrip
+        });
+        // Back to the start: what the bar runs, started over.
         const reset = this._button({
             action: 'routes-reset',
             icon: 'fa-solid fa-backward-fast',
             label: disabled ? localize('noJourneyToPlay') : localize('resetJourney'),
             disabled
         });
-        return { left: play + reset + turn + slider, right: pick + gear };
+        return { left: play + stop + reset + turn + slider, right: pick + gear };
     }
 
     /**
@@ -328,6 +337,13 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
     }
 
     /** Take the route or journey the bar runs back to the start, after asking: its progress goes. */
+    /** End the trip the map shows, after asking: it goes back to the start, and the party is on no route. */
+    async confirmEnd(link) {
+        if (!link) return;
+        const name = this.manager.progress(link)?.path.name ?? '';
+        if (await this._confirm('endTrip', 'endConfirm', name)) await journeysManager.end(link);
+    }
+
     async confirmReset(link) {
         if (!link) return;
         const name = this.manager.progress(link)?.path.name ?? '';

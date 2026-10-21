@@ -1169,16 +1169,19 @@ class RoutesManager {
     }
 
     /**
-     * Small arrows along the trip the map shows, pointing the way the party
-     * is heading -- to the end it was drawn to, or back, when turned round.
+     * Little arrows inside the line of the trip the map shows, every so often,
+     * pointing the way the party is heading -- to the end it was drawn to,
+     * or back, when turned round.
      */
     _drawDirection(sizes) {
         const link = this.shownPath();
         const path = link ? this.path(link) : null;
         if (!path || path.points.length < 2) return;
         const length = routePixels(path.points);
-        const spacing = Math.max(60, (Number(canvas.scene?.grid?.size) || 100) * 1.5);
-        const size = sizes.line * 1.6;
+        // Every ten line-widths or so: a steady rhythm along the line, whatever the grid.
+        const spacing = Math.max(30, sizes.line * 10);
+        // Small enough to sit inside the line itself.
+        const size = sizes.line * 0.32;
         const graphics = new PIXI.Graphics();
         for (let along = spacing / 2; along < length; along += spacing) {
             const at = pointAlong(path.points, along);
@@ -1187,15 +1190,13 @@ class RoutesManager {
             const sin = Math.sin(at.angle);
             // A chevron pointing along the way: two strokes meeting at its tip.
             const turn = (x, y) => [at.x + x * cos - y * sin, at.y + x * sin + y * cos];
-            const [tx, ty] = turn(size * 0.6, 0);
-            const [ax, ay] = turn(-size * 0.6, -size);
-            const [bx, by] = turn(-size * 0.6, size);
-            for (const [width, color, alpha] of [[sizes.line * 0.9, 0x111111, 0.6], [sizes.line * 0.5, 0xffffff, 0.95]]) {
-                graphics.lineStyle({ width, color, alpha, cap: 'round', join: 'round' });
-                graphics.moveTo(ax, ay);
-                graphics.lineTo(tx, ty);
-                graphics.lineTo(bx, by);
-            }
+            const [tx, ty] = turn(size * 0.5, 0);
+            const [ax, ay] = turn(-size * 0.5, -size);
+            const [bx, by] = turn(-size * 0.5, size);
+            graphics.lineStyle({ width: Math.max(1, sizes.line * 0.18), color: 0xffffff, alpha: 0.85, cap: 'round', join: 'round' });
+            graphics.moveTo(ax, ay);
+            graphics.lineTo(tx, ty);
+            graphics.lineTo(bx, by);
         }
         this._routes.addChild(graphics);
     }

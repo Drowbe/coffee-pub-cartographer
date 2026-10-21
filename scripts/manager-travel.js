@@ -6,6 +6,7 @@ import { MODULE } from './const.js';
 import { notify } from './utils-toast.js';
 import { parallaxManager } from './manager-parallax.js';
 import { routesManager } from './manager-routes.js';
+import { journeysManager } from './manager-journeys.js';
 import { formatDistance, formatSpan } from './utils-travel.js';
 
 const HUD_ID = `${MODULE.ID}-travel-hud`;
@@ -125,6 +126,9 @@ class TravelManager {
         }
         return {
             configured: parallaxManager.isConfigured,
+            // Playing: what the odometer's Play/Pause shows and toggles -- this scene.
+            playing: !!state.playing,
+            link: null,
             showHud: !!travel?.showHud,
             distance,
             destination,
@@ -189,6 +193,9 @@ class TravelManager {
         const arrived = progress.travel.arrived || progress.distance >= progress.length * (1 - 1e-9) - 1e-9;
         return {
             configured: true,
+            // Playing: the trip the map shows, which the odometer's Play/Pause toggles.
+            playing: !!progress.travel.motion.playing,
+            link: shown,
             showHud: true,
             distance: progress.distance,
             destination: progress.length,
@@ -221,6 +228,11 @@ class TravelManager {
                     <i class="fa-solid fa-route"></i>
                     <span data-travel-hud="traveled"></span>
                     <span class="cartographer-travel-hud-remaining" data-travel-hud="remaining"></span>
+                    <span class="cartographer-travel-hud-controls" data-travel-hud="controls" hidden>
+                        <span class="cartographer-travel-hud-control" data-travel-control="toggle"></span>
+                        <span class="cartographer-travel-hud-control" data-travel-control="end"><i class="fa-solid fa-stop"></i></span>
+                        <span class="cartographer-travel-hud-control" data-travel-control="reset"><i class="fa-solid fa-backward-fast"></i></span>
+                    </span>
                 </div>
                 <div class="cartographer-travel-hud-bar"><div class="cartographer-travel-hud-fill" data-travel-hud="fill"></div></div>`;
             document.body.appendChild(hud);
@@ -229,6 +241,7 @@ class TravelManager {
         }
         const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
         hud.querySelector('[data-travel-hud="traveled"]').textContent = summary.traveledText;
+        this._drawControls(hud, summary);
         // The trip it is counting: a route or journey's name, when there is one.
         const name = hud.querySelector('[data-travel-hud="name"]');
         name.textContent = summary.nameText ?? '';
@@ -296,11 +309,72 @@ class TravelManager {
         hud.style.top = `${Math.min(Math.max(0, top), maxTop)}px`;
     }
 
-    /** Drag anywhere on it; the spot is remembered for this viewer. A double-click puts it back. */
+    /**
+     * The GM's controls, at the odometer's right: Play/Pause, saying what
+     * pressing it will do, and Back to the start. Players have none; the
+     * route icon at the left stays the odometer's own. Redrawn only when the
+     * play state changes.
+     */
+    _drawControls(hud, summary) {
+        const controls = hud.querySelector('[data-travel-hud="controls"]');
+        if (!controls) return;
+        this._hudSummary = summary;
+        controls.hidden = !game.user.isGM;
+        if (!game.user.isGM) return;
+        const toggle = controls.querySelector('[data-travel-control="toggle"]');
+        const state = summary.playing ? 'pause' : 'play';
+        if (toggle.dataset.state !== state) {
+            toggle.dataset.state = state;
+            toggle.dataset.tooltip = game.i18n.localize(`${MODULE.ID}.routes.${summary.playing ? 'stop' : 'play'}`);
+            toggle.innerHTML = `<i class="fa-solid ${summary.playing ? 'fa-pause' : 'fa-play'}"></i>`;
+        }
+        const reset = controls.querySelector('[data-travel-control="reset"]');
+        reset.dataset.tooltip ??= game.i18n.localize(`${MODULE.ID}.routes.resetJourney`);
+        const end = controls.querySelector('[data-travel-control="end"]');
+        end.dataset.tooltip ??= game.i18n.localize(`${MODULE.ID}.routes.endTrip`);
+    }
+
+    /** A control on the odometer: Play/Pause or Back to the start, for the map's trip or this scene. */
+    async _control(which) {
+        const summary = this._hudSummary;
+        if (!game.user.isGM || !summary) return;
+        if (which === 'toggle') {
+            if (summary.link) await journeysManager.toggle(summary.link);
+            else await parallaxManager.togglePlaying();
+            return;
+        }
+        // Stop and Back to the start both lose how far the party had come: ask first, as the bar does.
+        const ending = which === 'end';
+        const ok = await foundry.applications.api.DialogV2.confirm({
+            window: { title: game.i18n.localize(`${MODULE.ID}.routes.${ending ? 'endTrip' : 'resetJourney'}`) },
+            content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.routes.${ending ? 'endConfirm' : 'resetConfirm'}`, { name: summary.nameText || '' }))}</p>`,
+            rejectClose: false
+        });
+        if (!ok) return;
+        if (ending && summary.link) await journeysManager.end(summary.link);
+        else if (ending) {
+            // An animated scene: its trip, if it follows one, ends on its map; else its own odometer.
+            const link = parallaxManager.state.travel?.route;
+            await parallaxManager.stop();
+            if (link) await journeysManager.end(link);
+            else await parallaxManager.resetOdometer();
+        } else if (summary.link) await journeysManager.reset(summary.link);
+        else await parallaxManager.resetOdometer();
+    }
+
+    /** Drag anywhere on it but its controls; the spot is remembered for this viewer. */
     _makeDraggable(hud) {
         let drag = null;
+        // The GM's controls: a click on one, never the start of a drag.
+        hud.addEventListener('click', event => {
+            const control = event.target.closest('[data-travel-control]');
+            if (!control || !game.user.isGM) return;
+            event.stopPropagation();
+            void this._control(control.dataset.travelControl);
+        });
         hud.addEventListener('pointerdown', event => {
             if (event.button !== 0) return;
+            if (game.user.isGM && event.target.closest('[data-travel-control]')) return;
             const rect = hud.getBoundingClientRect();
             drag = { dx: event.clientX - rect.left, dy: event.clientY - rect.top };
             hud.setPointerCapture(event.pointerId);
@@ -327,7 +401,10 @@ class TravelManager {
         // A double-click opens the window that runs what the odometer shows: the
         // Routes window on a map, the scene-motion window on an animated scene
         // (the GM's). A right-click puts the display back where it started.
-        hud.addEventListener('dblclick', () => this.openTool());
+        hud.addEventListener('dblclick', event => {
+            if (event.target.closest('[data-travel-control]')) return;
+            this.openTool();
+        });
         hud.addEventListener('contextmenu', event => {
             event.preventDefault();
             try {

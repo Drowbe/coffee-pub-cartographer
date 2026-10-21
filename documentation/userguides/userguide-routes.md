@@ -129,7 +129,7 @@ says "we are travelling":
 - Its scenery runs at the speeds set for its layers whenever the trip is moving, eases to a halt
   when it stops, and runs the other way when the trip runs back. It does not speed up with the clock
   or slow down on difficult ground; the trip does that, and the odometer shows it.
-- Its Play and Stop are the trip's.
+- Its Play and Pause are the trip's.
 - Its odometer shows the trip's progress and arrival time.
 - Its Pace and Follow world clock rows give way to a read-only **Travelling** line: "Riding horse
   (6 mph) · world clock, set on Faerun". They are changed on the map, in the Routes window.
@@ -155,8 +155,13 @@ The GM can run a single route or a whole journey from its map, with or without a
 showing it. The Routes
 window's bar works as the Scene Motion window's does. From the left:
 
-- **Play / Stop** -- the button says what pressing it will do. Stop eases the journey to a halt;
+- **Play / Pause** -- the button says what pressing it will do. Pause eases the journey to a halt;
   Play eases it back up. Playing a journey that has arrived starts it again from the beginning.
+  Paused, the trip is still the map's: Play carries on from where the party stopped.
+- **Stop** (the square) -- ends the trip, after asking: it halts, goes back to the start, and the
+  map has no trip any more -- the odometer clears, on linked animated scenes too. The party marker
+  stays where the party stopped, on no route, as if dropped off every route; choose a route in the
+  bar, or drop the marker on one, to set out again.
 - **Back to the start** (the rewind button) -- takes the party back to the beginning of the route or
   journey, after asking, since how far they had come is lost.
 - **Turn round** (the two-way arrow) -- which end the party is heading for: the end the route or
@@ -202,9 +207,9 @@ pointer is over it (and while it is edited).
 The **Routes** section of the sub-menubar has a Play button too: it plays or stops what the bar runs
 on the map on screen.
 
-If an animated scene follows the journey, Play and Stop on the map start and stop its scenery too,
+If an animated scene follows the journey, Play and Pause on the map start and pause its scenery too,
 even though it is not the scene on screen; the journey card names the scenes that follow it. Its own
-Play and Stop work too; both run the same journey. Choosing another route or journey in the bar
+Play and Pause work too; both run the same journey. Choosing another route or journey in the bar
 while one is moving is a change of plan: the moving one stops, and the party is on the one chosen,
 wherever it last was on it.
 

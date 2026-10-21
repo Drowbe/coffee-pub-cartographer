@@ -1075,7 +1075,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const disabled = !configured;
         return this._button({
             action: 'toggle-play',
-            icon: state.playing ? 'fa-solid fa-stop' : 'fa-solid fa-play',
+            icon: state.playing ? 'fa-solid fa-pause' : 'fa-solid fa-play',
             label: disabled
                 ? localize(this.target === 'tiles' ? 'tilesNotConfigured' : 'notConfigured')
                 : localize(state.playing ? 'stop' : 'play'),

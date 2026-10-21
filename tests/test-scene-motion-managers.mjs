@@ -779,6 +779,17 @@ console.log('\nroutes: who may change what');
     await jm.setDirection(lateLink, false);
     check(!rm.progress(lateLink).path.reversed, 'and can be turned back');
 
+    console.log('\nstop ends the trip');
+    await tp2.placeParty(scene, { x: 700, y: 900 }, 24);
+    await jm.play(lateLink, 3600);
+    now += 5000;
+    const pinBefore = { ...placed.get('m-party-here') };
+    await jm.end(lateLink);
+    check(!jm.isPlaying(lateLink) && rm.progress(lateLink).distance === 0, 'Stop halts the trip and puts its odometer back to the start');
+    check(rm.settings().active == null && rm.settings().offRoute && rm.shownPath() === null, 'and the map has no trip: the party is on no route');
+    check(placed.get('m-party-here').x === pinBefore.x && placed.get('m-party-here').y === pinBefore.y, 'the marker stays where the party stopped');
+    await rm.setSettings({ active: { routeId: late.id } });
+
     console.log('\nthe marker is the party\'s');
     placed.delete('m-party-here');
     await tp2._ensurePin(one);
