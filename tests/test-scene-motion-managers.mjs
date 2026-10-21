@@ -465,7 +465,8 @@ console.log('\nroutes: who may change what');
         update: async (id, patch) => { stored.set(id, { ...stored.get(id), ...structuredClone(patch) }); return stored.get(id); },
         delete: async id => { stored.delete(id); },
         setLivePosition: (id, point) => live.set(id, { ...point }),
-        clearLivePosition: id => live.delete(id)
+        clearLivePosition: id => live.delete(id),
+        getLivePosition: id => live.get(id) ?? null
     };
     game.modules = { get: id => (id === 'coffee-pub-blacksmith' ? { api: { pins: pinsApi } } : null) };
     globalThis.CONST = { DOCUMENT_OWNERSHIP_LEVELS: { OBSERVER: 2 } };
@@ -487,6 +488,17 @@ console.log('\nroutes: who may change what');
     check(stored.get(pinId).x === 700, 'at rest, the GM saves where it stopped');
     await tick();
     check(!live.has(pinId), 'and each client lets go of the live position once the saved one has caught up');
+    // A live position left over from the trip the party was on -- one this client
+    // has forgotten setting, as when the GM picks the marker up -- must not go on
+    // drawing the marker there.
+    live.set(pinId, { x: 0, y: 0 });
+    await tick();
+    check(!live.has(pinId), 'a live position left over is let go once the marker is where the party is');
+    await rm.setSettings({ offRoute: true });
+    live.set(pinId, { x: 0, y: 0 });
+    await tick();
+    check(!live.has(pinId), 'and set down off every route, the marker is drawn where it was put, not where the last trip left it');
+    await rm.setSettings({ offRoute: false });
     await tp.setShown('here', false);
     check(stored.get(pinId).config.blacksmithVisibility === 'hidden' && !tp.isShown('here'), 'the marker can be hidden from players');
     const configured = [];

@@ -90,7 +90,7 @@ class TravelPinsManager {
     async _onDragStart(event) {
         if (!game.user.isGM || !this._isPartyPin(event)) return;
         this._dragging = true;
-        this._live.delete(event.pinId);
+        this._clearLive(event.pinId);
         await this._stopAll(canvas.scene);
     }
 
@@ -274,8 +274,13 @@ class TravelPinsManager {
         const scene = canvas?.scene;
         if (!pins || !canvas?.ready || !scene) return;
         const link = TravelPinsManager.followed(scene);
-        if (!link) return;
         const id = TravelPinsManager.pinId(scene.id);
+        // On no trip -- set down off every route -- the marker stands where it was saved,
+        // not where a live position from the trip it left would draw it.
+        if (!link) {
+            this._clearLive(id);
+            return;
+        }
         if (!pins.exists?.(id, { sceneId: scene.id })) {
             // Deleted by the GM, it stays deleted until they add it again.
             if (game.user.isGM && !routesManager.settings(scene).marker?.removed) this._once(`create-${id}`, () => this._ensurePin(link));
@@ -296,16 +301,27 @@ class TravelPinsManager {
         if (!TravelPinsManager.canMoveLive()) return;
         const live = this._live.get(id);
         if (settled) {
-            if (live) {
-                pins.clearLivePosition(id);
-                this._live.delete(id);
-            }
+            this._clearLive(id);
             return;
         }
         if (live && near(live, point)) return;
         // The GM may still pick it up while it moves (where Blacksmith allows it).
         pins.setLivePosition(id, { x: point.x, y: point.y }, { draggable: game.user.isGM });
         this._live.set(id, { x: point.x, y: point.y });
+    }
+
+    /**
+     * Drop a live position, so the marker is drawn where it is saved. Asked of
+     * Blacksmith, not only of what this client remembers setting: one left
+     * over -- set before the GM picked the marker up, say -- would go on
+     * drawing it there.
+     */
+    _clearLive(id) {
+        const pins = TravelPinsManager.pins();
+        this._live.delete(id);
+        if (!TravelPinsManager.canMoveLive()) return;
+        if (pins.getLivePosition && !pins.getLivePosition(id)) return;
+        pins.clearLivePosition(id);
     }
 
     // ==================================================================
