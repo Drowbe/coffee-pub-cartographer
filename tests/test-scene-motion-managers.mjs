@@ -417,7 +417,7 @@ console.log('\nroutes: who may change what');
     await rm._apply({ action: 'journey-remove', sceneId: 'here', id: j.id }, ana);
     check(!rm.getJourney(j.id) && rm.get(r2.id), 'deleting a journey leaves its routes');
 
-    console.log('\nprogress lives on the journey');
+    console.log('\nprogress lives on the routes; a journey reads it');
     // 50 ft of road, then 50 ft of forest, on a 140 px, 5 ft grid.
     flags.routes = { list: [], journeys: [] };
     const road = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Road', points: [[0, 0], [1400, 0]] } }, gm);
@@ -429,16 +429,24 @@ console.log('\nroutes: who may change what');
     pm.state = pm._readState();
     pm._pushed = null;
     await pm.setTravel({ route: link, destination: 100 });
-    check(rm.getJourney(trip.id).travel.pace === 18000, 'the scene\'s pace is written to the journey');
+    check(rm.get(road.id).travel.pace === 18000 && !rm.getJourney(trip.id).travel, 'the scene\'s pace is written to the journey\'s first route, not the journey');
     await pm.play();
-    check(rm.getJourney(trip.id).travel.motion.playing === true, 'Play on the scene plays the journey');
+    check(rm.get(road.id).travel.motion.playing === true && rm.settings().active?.journeyId === trip.id && rm.settings().active.routeId === road.id,
+        'Play on the scene sets out on the journey: its first route plays, and the map follows the journey');
     now += 5000;
     check(Math.abs(pm.travelDistance(now) - 25) < 1e-6, 'the odometer reads the journey: 5 s on the road is 25 ft');
     now += 10000;
+    check(Math.abs(rm.progress({ sceneId: 'here', routeId: road.id }, now).distance - 50) < 1e-6, 'the road ends after 10 s');
+    // The GM's watch goes on to the next route; done here by hand, as it would be.
+    const roadNow = rm.progress({ sceneId: 'here', routeId: road.id }, now);
+    await rm.journeyStep(link, 1, { effort: roadNow.rawEffort - roadNow.totalEffort, steady: true });
+    check(rm.settings().active.routeId === wood.id && rm.get(wood.id).travel.motion.playing && !rm.get(road.id).travel.motion.playing,
+        'at the end of a route, the party goes on to the next route of the journey');
     // 50 ft of road in 10 s, then 5 s of forest at half pace: 12.5 ft more.
-    check(Math.abs(pm.travelDistance(now) - 62.5) < 1e-6, 'difficult terrain halves the pace: 15 s is 62.5 ft');
+    check(Math.abs(pm.travelDistance(now) - 62.5) < 1e-6, 'carrying on past the junction, at half pace in the forest: 15 s is 62.5 ft');
     const at = rm.progress(link, now);
-    check(at.factor === 0.5 && at.terrain === 'forest' && Math.abs(at.point.x - 1750) < 1e-6, 'the journey knows the leg, its terrain and the point on the map');
+    check(at.factor === 0.5 && at.terrain === 'forest' && Math.abs(at.point.x - 1750) < 1e-6 && at.journey.index === 1,
+        'the journey knows the route, its terrain and the point on the map');
     const { motionSpeed } = await import('../scripts/utils-motion.js');
     check(Math.abs(motionSpeed(pm.state, now) - 1) < 1e-12, 'the scenery keeps its own speed on difficult ground: only the trip slows');
     now += 30000;
@@ -449,7 +457,7 @@ console.log('\nroutes: who may change what');
     check((pm.state.terrainFactor ?? 1) === 1, 'and the scenery runs at its own pace again');
     await pm.setTravel({ route: link });
     await pm.resetOdometer();
-    check(rm.progress(link, now).distance === 0, 'resetting the odometer resets the journey');
+    check(rm.progress(link, now).distance === 0 && rm.settings().active.routeId === road.id, 'resetting the odometer takes the journey back to its first route');
     await pm.stop();
 
     console.log('\nthe party\'s marker');
@@ -708,9 +716,7 @@ console.log('\nroutes: who may change what');
     await rm.setPathTravel(lateLink, { playing: false });
     check(rm.shownPath()?.journeyId === go.journeyId, 'with nothing moving, it shows the one last played there');
     await rm.setSettings({ active: null });
-    const withProgress = rm.shownPath();
-    check(!!withProgress && rm.progress(withProgress).effort > 0,
-        'with none played there, it shows one the party has come some way along -- the odometer and the marker the same');
+    check(rm.shownPath() === null, 'with no route chosen there, it shows none, however far the party had come on one');
     await rm.setSettings({ active: { journeyId: go.journeyId } });
     // A route set going behind the map's back, while the journey is the active one.
     await rm.setPathTravel(lateLink, { playing: true, pace: 3600, masterSpeed: 1 });
@@ -743,8 +749,9 @@ console.log('\nroutes: who may change what');
         'its progress is where it landed, halfway along, and the marker sits on the line');
     await rm.setSettings({ active: { journeyId: go.journeyId } });
     const onJourney = await tp2.placeParty(scene, { x: 2100, y: 3 }, 24);
-    check(!onJourney.link.journeyId && Math.abs(rm.progress(onJourney.link).distance - 25) < 1e-6 && rm.progress(go).distance === 0,
-        'dropped on a route of the journey the map shows, it lands on that route, 25 ft along, and the journey is cancelled');
+    check(onJourney.link.routeId === m2.id && Math.abs(rm.progress(onJourney.link).distance - 25) < 1e-6
+        && rm.settings().active.journeyId === go.journeyId && Math.abs(rm.progress(go).distance - 75) < 1e-6,
+        'dropped on a route of the journey the map follows, it lands on that route, 25 ft along, still on the journey: 75 ft of it');
     const offRoute = await tp2.placeParty(scene, { x: 5000, y: 5000 }, 24);
     check(!offRoute.onRoute && rm.settings().offRoute && rm.shownPath() === null, 'dropped off every route, the party is on none');
     check(rm.progress(go).distance === 0, 'and the trip it was on is cancelled: its odometer back to the start');
@@ -774,9 +781,15 @@ console.log('\nroutes: who may change what');
 
     console.log('\nends and directions');
     await tp2.placeParty(scene, { x: 1390, y: 903 }, 24);
-    check(Math.abs(rm.progress(lateLink).distance - 50) < 1e-6, 'dropped near the end of a route, the party is at its end exactly');
+    const atEnd = rm.progress(lateLink);
+    check(atEnd.distance === 0 && atEnd.path.reversed && Math.abs(atEnd.point.x - 1400) < 1e-6,
+        'dropped near the end of a route, the party is at its end exactly, turned round to set out from there');
     await tp2.placeParty(scene, { x: 15, y: 897 }, 24);
-    check(rm.progress(lateLink).distance === 0, 'and near its start, at its start');
+    const atStart = rm.progress(lateLink);
+    check(atStart.distance === 0 && !atStart.path.reversed && atStart.point.x === 0,
+        'and near its start -- the end it now heads for -- turned back, at its start');
+    await tp2.placeParty(scene, { x: 15, y: 897 }, 24);
+    check(rm.progress(lateLink).distance === 0 && !rm.progress(lateLink).path.reversed, 'dropped at the end it sets out from, it is left as it is');
     await tp2.placeParty(scene, { x: 280, y: 900 }, 24);
     check(Math.abs(rm.progress(lateLink).distance - 10) < 1e-6, 'anywhere else along it, exactly where it was put');
     await jm.setDirection(lateLink, true);
@@ -837,6 +850,59 @@ console.log('\nroutes: who may change what');
     await jm.stop(lateLink);
     game.users = savedUsers;
     game.settings = savedSettings;
+
+    console.log('\na journey is a run of routes');
+    const roadLink = { sceneId: 'here', routeId: m1.id };
+    await jm.choose(null, scene);
+    check(rm.settings().active === null && rm.shownPath() === null, 'choosing no route: the map runs nothing and shows nothing');
+    await jm.choose(go, scene);
+    check(rm.settings().active?.journeyId === walk.id && rm.settings().active.routeId === m1.id && rm.progress(go).distance === 0,
+        'choosing a journey puts the party at its start, on its first route');
+    await jm.play(go, 18000);
+    await rm.setPathTravel(roadLink, { easeSeconds: 0, masterSpeed: 1, pace: 18000 });
+    now += 12000;
+    jm._lastWatch = -Infinity;
+    jm._watch();
+    await settle();
+    // 10 s of road at 5 ft/s; the 2 s over, in the wood at half pace: 5 ft.
+    check(rm.settings().active.routeId === m2.id && jm.isPlaying(go) && Math.abs(rm.progress(go).distance - 55) < 1e-6,
+        'at the end of the road the party goes on into the wood, losing none of the way');
+    now += 2000;
+    check(Math.abs(rm.progress(go).distance - 60) < 1e-6, 'and carries on at its pace');
+    await jm.setDirection(go, true);
+    const runBack = rm.progress(go);
+    check(runBack.path.reversed && Math.abs(runBack.distance - 40) < 1e-6 && Math.abs(runBack.point.x - 1680) < 1e-6,
+        'turned round, the journey runs back: 40 ft to its start, from where the party stands');
+    now += 6000;
+    jm._lastWatch = -Infinity;
+    jm._watch();
+    await settle();
+    const home = rm.progress(go);
+    check(rm.settings().active.routeId === m1.id && rm.progress(roadLink).path.reversed && Math.abs(home.distance - 60) < 1e-6 && Math.abs(home.point.x - 1120) < 1e-6,
+        'and back out of the wood on to the road, run back towards its start');
+    now += 60000;
+    jm._lastWatch = -Infinity;
+    jm._watch();
+    await settle();
+    check(!jm.isPlaying(go) && rm.progress(go).travel.arrived && rm.progress(go).point.x === 0,
+        'at the journey\'s start -- its end, run back -- the party arrives');
+    await jm.setDirection(go, false);
+    const junction = await tp2.placeParty(scene, { x: 1390, y: 3 }, 24);
+    check(junction.link.routeId === m2.id && rm.settings().active.journeyId === walk.id && Math.abs(rm.progress(go).distance - 50) < 1e-6,
+        'dropped at the end of a route of the journey, the party goes on to the next route, ready to set out');
+    await jm.choose(lateLink, scene);
+    check(rm.settings().active?.routeId === late.id && !rm.settings().active.journeyId, 'choosing a route leaves the journey');
+
+    console.log('\njourneys\' own progress, from before, moves onto their routes');
+    flags.routes.journeys.find(j => j.id === walk.id).travel = {
+        effort: 100, pace: 18000, followClock: false, reversed: false, arrived: false, timeline: [],
+        motion: { playing: false, masterSpeed: 1, easeSeconds: 0, anchorAt: now, rampFrom: null, clockFactor: 1 }
+    };
+    flags.routes.settings = { ...flags.routes.settings, active: { journeyId: walk.id } };
+    await rm.migrateJourneys(scene);
+    check(!rm.getJourney(walk.id).travel && rm.settings().active.routeId === m2.id
+        && Math.abs(rm.progress({ sceneId: 'here', routeId: m2.id }).distance - 25) < 1e-6 && Math.abs(rm.progress(go).distance - 75) < 1e-6,
+        'a journey 75 ft along becomes its second route 25 ft along, and the map follows the journey there');
 
     console.log('\nthe marker is the party\'s');
     placed.delete('m-party-here');

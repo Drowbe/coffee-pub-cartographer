@@ -63,7 +63,9 @@ Travel times count the terrain: 10 miles of road and 10 of forest at 2 miles an 
 
 A journey is routes in order, travelled end to end: Zhentil Keep to Phlan, then Phlan to Melvaunt.
 Routes stay routes -- each can be edited, and be part of more than one journey -- and a journey only
-says which to follow, in what order.
+says which to follow, in what order. The party is always on a route: following a journey, it travels
+one route, and at its end goes on to the next, the way they join, until the last. How far it has come
+and which way it is heading are the route's.
 
 On the Routes window's **Journeys** tab:
 
@@ -135,8 +137,8 @@ says "we are travelling":
   (6 mph) · world clock, set on Faerun". They are changed on the map, in the Routes window.
 
 So a road scene can be reused for one journey after another -- choose a
-different journey, and the first stops where it is and keeps its progress until you come back to
-it. **Reset odometer** resets the journey too. Playing it from the animated scene makes it the one its
+different journey, and the first stops where it is. **Reset odometer** takes the trip back to its
+start too: a journey, to its first route. Playing it from the animated scene makes it the one its
 map shows -- the Routes bar, the odometer on the map and the party marker -- and stops anything else
 moving on that map, since there is one party.
 
@@ -162,26 +164,34 @@ window's bar works as the Scene Motion window's does. From the left:
   map has no trip any more -- the odometer clears, on linked animated scenes too. The party marker
   stays where the party stopped, on no route, as if dropped off every route; choose a route in the
   bar, or drop the marker on one, to set out again.
-
-A trip still under way when the GM's client loads -- a new session, or a reload -- is paused, and
-the GM is told so; Play carries on. Paused after the world sat closed, the party is where it was
-when the GM last saw it, not hours further on; after a quick reload, where it is now. With another
-GM already on, trips go on.
-- **Back to the start** (the rewind button) -- takes the party back to the beginning of the route or
-  journey, after asking, since how far they had come is lost.
-- **Turn round** (the two-way arrow) -- which end the party is heading for: the end the route or
-  journey was drawn to, or, lit, back to its start. The distance to go and the arrival time count
-  towards that end, and turning round keeps the party where it stands. Small arrows along the line
-  on the map show the way they are going.
+- **Back to the start** (the rewind button) -- takes the party back to the beginning of the route,
+  or to the first route of the journey, after asking, since how far they had come is lost.
+- **Turn round** (the two-way arrow) -- which end the party is heading for: the end the route was
+  drawn to, or, lit, back to its start. On a journey it turns the whole journey round: the party
+  heads back along the route it is on, and on through the routes before it. The distance to go and
+  the arrival time count towards that end, and turning round keeps the party where it stands. Small
+  arrows along the line on the map show the way they are going.
 - **Time** -- the party always travels at its **pace**; the bar sets time, not speed.
   - Without the world clock, a slider sets how fast travel time runs: 1× is real time, then 10×,
     a minute a second, ten minutes a second, an hour a second. At an hour a second, a 6 mph horse
     covers 6 miles each real second.
   - Following the world clock (the map's Setup tab), the clock is the time, and the bar shows its
     rate. How fast time runs is set on Blacksmith's clock.
-- **Which** -- the route or journey the bar runs, from the map's journeys and routes. It is outlined
-  in the window.
+- **Which** -- the route or journey the bar runs, or **No route**. Nothing is chosen for you: it is
+  **No route** until a route or journey is chosen there, a route is clicked on the map, or the party
+  is dropped on one. Choosing a journey puts the party at its start -- or, if it is on one of the
+  journey's routes already, keeps it there and follows the journey from it. Choosing **No route**
+  stops the party and leaves it where it is.
 - **The gear** -- shows and hides the settings. Hidden, the window is just the bar.
+
+**Clicking a route** on the map (the GM, once) chooses it, as the bar does, and shows its odometer.
+A double-click edits it instead, and clicking the route already chosen -- the party marker on it,
+say -- changes nothing.
+
+A trip still under way when the GM's client loads -- a new session, or a reload -- is paused, and
+the GM is told so; Play carries on. Paused after the world sat closed, the party is where it was
+when the GM last saw it, not hours further on; after a quick reload, where it is now. With another
+GM already on, trips go on.
 
 Each journey's and route's card, opened, holds its
 **Pace**, how fast the party travels it, and **Reset** (the rewind button), back to the start. One
@@ -201,11 +211,12 @@ they were still travelling. Play, Stop or a change of speed or pace made after s
 replaces what had followed. An animated scene following a journey shows the map's setting; its scenery
 keeps its own speed.
 
-While a route or journey is under way, the map shows only the routes it travels, and the same
-odometer as an animated scene's -- the trip's name, distance travelled, how far is left, the arrival time and a
-progress bar -- for everyone; while the party is on the move, a light runs along the
-bar. It stays up while they are stopped or have arrived, and goes only
-when nothing on the map is in progress: never set out, or reset to the start. Waypoints are shown only while a
+While a route or journey is under way, the map shows only the routes it travels -- all of a journey's
+-- and, whenever a route or journey is chosen, the same odometer as an animated scene's -- the
+trip's name, distance travelled, how far is left, the arrival time and a progress bar -- for
+everyone; while the party is on the move, a light runs along the bar. On a journey, the name says
+which route the party is on ("Trip to Phlan: Zhentil Keep to Phlan (2 of 3)") and the figures are the
+whole journey's. It goes when **No route** is chosen. Waypoints are shown only while a
 route is drawn or edited; otherwise a route is just its line. Its name and length show when the
 pointer is over it (and while it is edited).
 
@@ -218,12 +229,13 @@ Play and Pause work too; both run the same journey. Choosing another route or jo
 while one is moving is a change of plan: the moving one stops, and the party is on the one chosen,
 wherever it last was on it.
 
-At the end of the way the journey stops, for everyone, and is marked arrived.
+At the end of a journey's last route -- or a route on its own -- the party stops, for everyone, and
+is marked arrived.
 
 ## The party's marker
 
-There is one party, so each map has one marker. Once the route or journey the bar runs has set out,
-the marker appears where the party is, and moves along it as they travel -- for everyone, in step
+There is one party, so each map has one marker. Once a route or journey is chosen, the marker
+appears where the party is on it, and moves along it as they travel -- for everyone, in step
 with the odometer, and with the world time when it follows the clock, scrubbing included. Choose
 another route or journey in the bar and the marker moves to where the party is on that one. It is a
 Coffee Pub Blacksmith pin, so the GM styles it from the pin's own menu (Configure Pin): an icon, a
@@ -240,11 +252,14 @@ of their own.
   be styled in advance.
 - **The GM can pick the party up and put it down.** Picking the marker up stops the party,
   whatever it was travelling. Dropped by a route's line, it snaps onto the line -- exactly where it was
-  put, or at the route's start or end when dropped near one: the party is on that
-  route at that point -- the route, even one of a journey under way, which is then cancelled --
-  stopped, and Play carries on from there. Put down anywhere but back on the trip it was on -- on
-  another route, or off every route -- that trip is cancelled: stopped, and its odometer back to the
-  start, along with any animated scene following it. Dropped off every route, the party is on none: Play says
+  put, or at the route's start or end when dropped near one: the party is on that route at that
+  point, stopped, and Play carries on from there. On a route of the journey it is following, it
+  stays on the journey. Dropped at the end it was heading for, it sets out from there: on to the
+  journey's next route, or, on a route of its own, turned round; dropped at the end it was coming
+  from, it already does. Put down anywhere but back on the trip it was on -- on another route, or
+  off every route -- that trip is cancelled: stopped, and back to its start (a journey, to its first
+  route), along with any animated scene following it. Moved to another route of the same journey,
+  only the route it left goes back to its start. Dropped off every route, the party is on none: Play says
   to put it on one, and the Routes tab offers **Draw from the party**, a new route starting where the
   marker stands. Choosing a route or journey in the bar also puts the party back on it. Players
   cannot move the marker.

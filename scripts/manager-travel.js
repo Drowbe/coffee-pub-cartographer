@@ -138,7 +138,7 @@ class TravelManager {
             // distance can differ in the last decimal place.
             arrived: destination !== null && distance >= destination * (1 - 1e-9) - 1e-9,
             // The trip's name, when this scene follows a route or journey on a map.
-            nameText: journey?.path.name ?? '',
+            nameText: routesManager.tripName(journey),
             // Travelling now: the trip's own say when there is one, else this scene's.
             moving: journey ? !!journey.moving : !!state.playing && !!speed,
             traveledText: formatDistance(distance, units),
@@ -165,23 +165,17 @@ class TravelManager {
      * (routesManager.shownPath -- the same one its bar and party marker
      * show), read from its progress, in the same shape as summary().
      *
-     * In progress is having set out: moving, stopped along the way or
-     * arrived, until it is reset to the start. The odometer stays up through
-     * stops, rather than coming and going with Play; it goes only when
-     * nothing on the map is in progress. Null then.
+     * Shown whenever a route is chosen there -- in the bar, by clicking it,
+     * or by dropping the party on it -- set out on or not, stopped or
+     * arrived; it goes when no route is. Null then.
      */
     mapSummary(now = game.time.serverTime) {
         const scene = canvas?.scene;
         if (!scene) return null;
-        const underWay = link => {
-            const progress = routesManager.progress(link, now);
-            return progress && (progress.moving || progress.effort > 0) ? progress : null;
-        };
-        // What is moving first, wherever it is driven from; then the last played here.
         // The same trip the bar and the party marker show (routesManager.shownPath), so the
         // odometer and the marker never disagree about where the party is.
         const shown = routesManager.shownPath(scene);
-        const progress = shown ? underWay(shown) : null;
+        const progress = shown ? routesManager.progress(shown, now) : null;
         if (!progress) return null;
         const units = scene.grid?.units ?? '';
         const remaining = Math.max(0, progress.length - progress.distance);
@@ -202,7 +196,7 @@ class TravelManager {
             remaining,
             progress: progress.length > 0 ? Math.min(1, progress.distance / progress.length) : 0,
             arrived,
-            nameText: progress.path.name ?? '',
+            nameText: routesManager.tripName(progress),
             moving: !!progress.moving,
             traveledText: formatDistance(progress.distance, units),
             remainingText: formatDistance(remaining, units),
@@ -330,7 +324,7 @@ class TravelManager {
         }
         const turn = controls.querySelector('[data-travel-control="turn"]');
         const link = this._tripLink(summary);
-        const reversed = !!(link && routesManager.progress(link)?.travel.reversed);
+        const reversed = !!(link && routesManager.progress(link)?.path.reversed);
         turn.hidden = !link;
         turn.classList.toggle('is-active', reversed);
         turn.dataset.tooltip = game.i18n.localize(`${MODULE.ID}.routes.${reversed ? 'headingReversed' : 'headingAsDrawn'}`);
@@ -354,7 +348,7 @@ class TravelManager {
         }
         if (which === 'turn') {
             const link = this._tripLink(summary);
-            if (link) await journeysManager.setDirection(link, !routesManager.progress(link)?.travel.reversed);
+            if (link) await journeysManager.setDirection(link, !routesManager.progress(link)?.path.reversed);
             return;
         }
         // Stop loses how far the party had come: ask first, as the bar does.

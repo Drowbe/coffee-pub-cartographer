@@ -402,6 +402,8 @@
 	"routes.endTrip": "Stop: end the trip, leaving the party where it is, on no route",
 	"routes.endConfirm": "End the trip on \"{name}\"? It goes back to the start, and the party stays where it is, on no route.",
 	"routes.noTrip": "No trip under way",
+	"routes.noRoute": "No route",
+	"routes.journeyTripName": "{journey}: {route} ({index} of {count})",
 	"routes.resetConfirm": "Take the party back to the start of \"{name}\"? How far they had come is lost.",
 	"routes.journeyPace": "Pace",
 	"routes.journeyPaceHint": "How fast the party travels this. An animated scene following it shows the trip; its scenery keeps its own speed.",

@@ -59,11 +59,19 @@ class JourneysManager {
         on('canvasTearDown', () => this._stopWatch());
         on(`${MODULE.ID}.routesChanged`, () => this._refreshButton());
         on('blacksmith.worldClockRateChanged', ({ rate } = {}) => this._recordClockRate(rate));
+        // A route clicked on the map: the one the party is to travel.
+        on(`${MODULE.ID}.routeClicked`, link => this.choose(link));
         this._startWatch();
         this._recordClockRate();
         // Closing the tab: note the time, so a trip pauses where it was left.
         globalThis.window?.addEventListener?.('pagehide', () => { if (this._moving().length) this._noteSeen(); });
-        void this._pauseOnLoad();
+        void this._loaded();
+    }
+
+    /** On the GM's client loading: journeys' old progress moved onto their routes, then trips paused. */
+    async _loaded() {
+        for (const scene of game.scenes?.contents ?? []) await routesManager.migrateJourneys(scene);
+        await this._pauseOnLoad();
     }
 
     // ==================================================================
@@ -119,11 +127,19 @@ class JourneysManager {
     // ===== WHO SHOWS A JOURNEY ========================================
     // ==================================================================
 
-    /** Whether a scene's parallax follows a route or journey. */
+    /**
+     * Whether a scene's parallax follows a route or journey: that one, or --
+     * a journey being followed being the route the party is on in it -- a
+     * journey on that route, or that route of a journey.
+     */
     static follows(scene, link) {
         const route = scene?.getFlag(MODULE.ID, 'parallax')?.travel?.route;
-        if (!route || route.sceneId !== link.sceneId) return false;
-        return link.journeyId ? route.journeyId === link.journeyId : (!route.journeyId && route.routeId === link.routeId);
+        if (!route || route.sceneId !== link?.sceneId) return false;
+        if (link.journeyId ? route.journeyId === link.journeyId : (!route.journeyId && route.routeId === link.routeId)) return true;
+        const current = each => (each.journeyId ? (routesManager.journeyView(each)?.followed ? routesManager.routeLinkOf(each) : null) : each);
+        const a = current(route);
+        const b = current(link);
+        return !!a && !!b && a.routeId === b.routeId;
     }
 
     /** The animated scenes following a route or journey. */
@@ -166,13 +182,18 @@ class JourneysManager {
      * none. Playing a journey makes it the one the map's Play button runs.
      */
     async play(link, pace = null) {
-        const progress = this.progress(link);
-        if (!progress) return;
+        if (!this.progress(link)) return;
         // Set down off every route, the party has nowhere to go until it is on one.
         if (routesManager.settings(game.scenes.get(link.sceneId)).offRoute) {
             notify(game.i18n.localize(`${MODULE.ID}.routes.partyOffRoute`), { type: 'warn' });
             return;
         }
+        // A journey not being followed is set out on from its start.
+        if (link.journeyId && !routesManager.journeyView(link)?.followed) await routesManager.enterJourney(link);
+        // Setting out again from the end starts from the beginning.
+        const ended = this.progress(link);
+        if (ended.travel.arrived && ended.effort >= ended.totalEffort - 1e-9) await routesManager.resetTrip(link);
+        const progress = this.progress(link);
         if (!this.linkedScenes(link).length && !(progress.travel.pace > 0) && !(pace > 0)) {
             notify(game.i18n.localize(`${MODULE.ID}.routes.needsPace`), { type: 'warn' });
             return;
@@ -186,8 +207,6 @@ class JourneysManager {
         if (!rate || rate !== Number(progress.travel.motion.masterSpeed)) path.masterSpeed = rate || 1;
         if (!(progress.travel.pace > 0) && pace > 0) path.pace = pace;
         if (!(progress.travel.motion.easeSeconds > 0)) path.easeSeconds = DEFAULT_EASE_SECONDS;
-        // Setting out again from the end starts from the beginning.
-        if (progress.travel.arrived && progress.effort >= progress.totalEffort - 1e-9) path.effort = 0;
         await this._drive(link, {
             scene: state => {
                 state.playing = true;
@@ -196,17 +215,43 @@ class JourneysManager {
             },
             path
         });
-        await routesManager.setSettings({ active: link.journeyId ? { journeyId: link.journeyId } : { routeId: link.routeId } }, link.sceneId);
+        await routesManager.claimActive(link);
     }
 
-    async _stopOthers(link) {
-        const scene = game.scenes.get(link.sceneId);
-        const same = other => (link.journeyId ? other.journeyId === link.journeyId : other.routeId === link.routeId);
-        const others = [
-            ...routesManager.journeys(scene).map(journey => ({ sceneId: link.sceneId, journeyId: journey.id })),
-            ...routesManager.routes(scene).map(route => ({ sceneId: link.sceneId, routeId: route.id }))
-        ].filter(other => !same(other) && routesManager.progress(other)?.travel.motion.playing);
+    /** Stop every route on the map moving but the one a link puts the party on (all of them, with none). */
+    async _stopOthers(link, scene = game.scenes.get(link?.sceneId)) {
+        const keep = link ? routesManager.routeLinkOf(link)?.routeId : null;
+        const others = routesManager.routes(scene)
+            .filter(route => route.id !== keep && route.travel?.motion?.playing)
+            .map(route => ({ sceneId: scene.id, routeId: route.id }));
         for (const other of others) await this.stop(other);
+    }
+
+    /**
+     * Choose the route the party is to travel, from the bar or by clicking it
+     * on the map: a route, a journey (from the route the party is on, if it
+     * is one of its routes; else from its start), or none (`link` null). A
+     * change of plan for the one party: whatever was moving stops.
+     */
+    async choose(link, scene = game.scenes.get(link?.sceneId) ?? canvas.scene) {
+        if (!game.user.isGM || !scene) return;
+        const shown = routesManager.shownPath(scene);
+        const same = !!link && !!shown && (link.journeyId ? shown.journeyId === link.journeyId : (!shown.journeyId && shown.routeId === link.routeId));
+        if (same) return;
+        await this._stopOthers(null, scene);
+        if (!link) {
+            await routesManager.setSettings({ active: null }, scene.id);
+        } else if (link.journeyId) {
+            const active = routesManager.settings(scene).active;
+            const journey = routesManager.getJourney(link.journeyId, scene);
+            if (!journey) return;
+            if (active?.routeId && journey.routeIds.includes(active.routeId)) {
+                await routesManager.setSettings({ active: { journeyId: journey.id, routeId: active.routeId } }, scene.id);
+            } else await routesManager.enterJourney({ sceneId: scene.id, journeyId: journey.id });
+        } else {
+            await routesManager.setSettings({ active: { routeId: link.routeId } }, scene.id);
+        }
+        this._refreshButton();
     }
 
     async stop(link) {
@@ -247,16 +292,22 @@ class JourneysManager {
     async setMapClock(scene, follow) {
         if (!game.user.isGM || !scene) return;
         await routesManager.setSettings({ followClock: !!follow }, scene.id);
-        const links = [
-            ...routesManager.journeys(scene).filter(j => j.travel).map(j => ({ sceneId: scene.id, journeyId: j.id })),
-            ...routesManager.routes(scene).filter(r => r.travel).map(r => ({ sceneId: scene.id, routeId: r.id }))
-        ];
+        const links = routesManager.routes(scene).filter(r => r.travel).map(r => ({ sceneId: scene.id, routeId: r.id }));
         for (const link of links) await this.setFollowClock(link, follow);
     }
 
-    /** Travel a route or journey as drawn, or the other way: from its end back to its start. */
+    /**
+     * Travel a route as drawn, or the other way: from its end back to its
+     * start. A journey is run back by turning round the route the party is on:
+     * against the way it joins the next, it heads for the one before.
+     */
     async setDirection(link, reversed) {
-        await this._drive(link, { path: { reversed: !!reversed } });
+        if (!link?.journeyId) return this._drive(link, { path: { reversed: !!reversed } });
+        if (!routesManager.journeyView(link)?.followed) await routesManager.enterJourney(link);
+        const view = routesManager.journeyView(link);
+        const part = view?.chain.parts.find(each => each.route.id === view.routeId);
+        if (!part) return;
+        await this._drive({ sceneId: link.sceneId, routeId: view.routeId }, { path: { reversed: reversed ? !part.reversed : !!part.reversed } });
     }
 
     /**
@@ -273,9 +324,9 @@ class JourneysManager {
         this._refreshButton();
     }
 
-    /** Back to the start of the way. */
+    /** Back to the start of the way: a route's, or a journey's first route, as it is being run. */
     async reset(link) {
-        await routesManager.setPathTravel(link, { effort: 0, arrived: false });
+        await routesManager.resetTrip(link);
         for (const scene of this.linkedScenes(link)) {
             await parallaxManager.commitScene(scene, state => {
                 state.travel.distance = 0;
@@ -288,10 +339,11 @@ class JourneysManager {
     // ===== THE SUB-MENUBAR'S PLAY BUTTON ==============================
     // ==================================================================
 
-    /** The route or journey the map on the canvas runs from its Play button: the last one played here. */
+    /** The route or journey the map on the canvas runs from its Play button: the one chosen there. */
     activeLink(scene = canvas.scene) {
         const active = routesManager.settings(scene).active;
-        return active && scene ? { sceneId: scene.id, ...active } : null;
+        if (!active || !scene) return null;
+        return active.journeyId ? { sceneId: scene.id, journeyId: active.journeyId } : { sceneId: scene.id, routeId: active.routeId };
     }
 
     _registerButton() {
@@ -335,15 +387,12 @@ class JourneysManager {
         this._watching = false;
     }
 
-    /** Every route and journey, on every map, that is moving: as links. */
+    /** Every route, on every map, that is moving: as links. Journeys move by their routes. */
     _moving() {
         const links = [];
         for (const scene of game.scenes.contents) {
             for (const route of routesManager.routes(scene)) {
                 if (route.travel?.motion?.playing) links.push({ sceneId: scene.id, routeId: route.id });
-            }
-            for (const journey of routesManager.journeys(scene)) {
-                if (journey.travel?.motion?.playing) links.push({ sceneId: scene.id, journeyId: journey.id });
             }
         }
         return links;
@@ -357,20 +406,29 @@ class JourneysManager {
         const moving = this._moving();
         if (moving.length && !(now - (this._lastSeen ?? -Infinity) < SEEN_MS)) this._noteSeen();
         for (const link of moving) {
+            const scene = game.scenes.get(link.sceneId);
             const progress = routesManager.progress(link);
             if (!progress) continue;
-            // A trip moving is the one its map shows, however it was set going --
+            // A route moving is the one its map shows, however it was set going --
             // so stopping it leaves the map on it, not on the last one played there.
-            const active = routesManager.settings(game.scenes.get(link.sceneId)).active;
-            const isActive = active && (link.journeyId ? active.journeyId === link.journeyId : (!active.journeyId && active.routeId === link.routeId));
-            if (!isActive && progress.travel.motion.playing) this._once(`claim-${link.sceneId}`, () => routesManager.claimActive(link));
-            const scenes = this.linkedScenes(link);
-            const onCanvas = scenes.some(scene => scene.id === canvas.scene?.id);
-            // The end of the way, when no animated scene on the canvas is watching for it.
-            const forward = (progress.travel.motion.masterSpeed ?? 1) >= 0;
-            if (!onCanvas && forward && !progress.travel.arrived && progress.effort >= progress.totalEffort - 1e-9) {
-                this._once(`arrive-${link.journeyId ?? link.routeId}`, () => this._arrive(link, progress));
+            const active = routesManager.settings(scene).active;
+            if (active?.routeId !== link.routeId) {
+                this._once(`claim-${link.sceneId}`, () => routesManager.claimActive(link));
+                continue;
             }
+            if (progress.travel.arrived || progress.effort < progress.totalEffort - 1e-9) continue;
+            // At the end of a route of the journey being followed: on to the next, at
+            // speed, with whatever way past the end the party has come carried over.
+            const trip = active.journeyId ? { sceneId: scene.id, journeyId: active.journeyId } : link;
+            const view = trip.journeyId ? routesManager.journeyView(trip, scene) : null;
+            if (view && view.index < view.order.length - 1) {
+                const over = Math.max(0, (progress.rawEffort ?? progress.effort) - progress.totalEffort);
+                this._once(`step-${trip.journeyId}`, () => routesManager.journeyStep(trip, view.index + 1, { effort: over, steady: true }));
+                continue;
+            }
+            // The end of the way, when no animated scene on the canvas is watching for it.
+            const onCanvas = this.linkedScenes(trip).some(each => each.id === canvas.scene?.id);
+            if (!onCanvas) this._once(`arrive-${trip.journeyId ?? trip.routeId}`, () => this._arrive(trip, routesManager.progress(trip)));
         }
     }
 

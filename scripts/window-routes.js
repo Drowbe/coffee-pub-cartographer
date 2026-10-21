@@ -85,7 +85,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         // Turn round: head for the other end, the party staying where it stands.
         'routes-direction': (_event, _target, app) => {
             const link = app._barPath();
-            if (link) return journeysManager.setDirection(link, !app.manager.progress(link)?.travel.reversed);
+            if (link) return journeysManager.setDirection(link, !app.manager.progress(link)?.path.reversed);
         },
         'toggle-settings': (_event, _target, app) => app.toggleSettings(),
         'route-draw': (_event, _target, app) => (app.manager.draft ? app.manager.finishDrawing() : app.manager.startDrawing()),
@@ -153,20 +153,11 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
     // ==================================================================
 
     /**
-     * The route or journey the bar runs: the map's active one (the last
-     * played here), or its first journey, or its first route. The bar is the
-     * scene-motion window's: Play/Stop, the speed centred on zero, which route
-     * or journey, and the gear for the settings.
+     * The route or journey the bar runs: the one chosen on the map, or none.
+     * Nothing is chosen for the GM; with none, the bar's controls wait for one.
      */
     _barPath(scene = canvas.scene) {
-        if (!scene) return null;
-        // What is moving, wherever it is driven from, else the last played here.
-        const shown = this.manager.shownPath(scene);
-        if (shown) return shown;
-        const journey = this.manager.journeys(scene)[0];
-        if (journey) return { sceneId: scene.id, journeyId: journey.id };
-        const route = this.manager.visibleRoutes(scene)[0];
-        return route ? { sceneId: scene.id, routeId: route.id } : null;
+        return scene ? this.manager.shownPath(scene) : null;
     }
 
     /** A route or journey named by an element's data-route-id or data-journey-id. */
@@ -192,6 +183,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         if (!game.user.isGM) return { left: '', right: gear };
         const link = this._barPath();
         const travel = link ? this.manager.progress(link)?.travel : null;
+        const progress = link ? this.manager.progress(link) : null;
         const playing = !!travel?.motion?.playing;
         const speed = Number(travel?.motion?.masterSpeed ?? 1) || 1;
         const disabled = !link;
@@ -227,7 +219,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             </div>`;
         }
         // Which end the party is heading for: one toggle, for the trip in progress.
-        const reversed = !!travel?.reversed;
+        const reversed = !!progress?.path.reversed;
         const turn = this._button({
             action: 'routes-direction',
             icon: 'fa-solid fa-right-left',
@@ -235,7 +227,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             className: reversed ? 'is-active' : '',
             disabled
         });
-        // Journeys and routes: either can be run.
+        // A route, a journey (a run of routes), or none: chosen on purpose, never assumed.
         const journeys = this.manager.journeys();
         const routes = this.manager.visibleRoutes();
         const group = (labelKey, items, prefix, selectedId) => items.length
@@ -244,7 +236,8 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             : '';
         const pick = journeys.length || routes.length
             ? `<select class="cartographer-parallax-set-select" data-field="barPath" aria-label="${esc(localize('whichJourney'))}" data-tooltip="${esc(localize('whichJourney'))}">`
-                + group('tabJourneys', journeys, 'j', link?.journeyId) + group('tabRoutes', routes, 'r', link?.routeId) + '</select>'
+                + `<option value=""${link ? '' : ' selected'}>${esc(localize('noRoute'))}</option>`
+                + group('tabJourneys', journeys, 'j', link?.journeyId) + group('tabRoutes', routes, 'r', link?.journeyId ? null : link?.routeId) + '</select>'
             : '';
         // Stop, beside Play: the trip ended, the party left where it is. Only with a trip on.
         const onTrip = !!this.manager.shownPath();
@@ -322,18 +315,12 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         };
     }
 
-    /**
-     * Choose what the bar runs. If something is moving, that is a change of
-     * plan for the one party: it stops, and the party is on the chosen route
-     * or journey, wherever it last was on it.
-     */
+    /** Choose what the bar runs: a route, a journey, or none (an empty value). See JourneysManager.choose. */
     async choosePath(value) {
-        const [kind, id] = String(value).split(':');
-        const chosen = { sceneId: canvas.scene?.id, ...(kind === 'j' ? { journeyId: id } : { routeId: id }) };
-        const moving = this.manager.shownPath();
-        const same = moving && (chosen.journeyId ? moving.journeyId === chosen.journeyId : (!moving.journeyId && moving.routeId === chosen.routeId));
-        if (moving && !same && journeysManager.isPlaying(moving)) await journeysManager.stop(moving);
-        await this.manager.setSettings({ active: kind === 'j' ? { journeyId: id } : { routeId: id } });
+        const [kind, id] = String(value ?? '').split(':');
+        const sceneId = canvas.scene?.id;
+        const chosen = !id ? null : kind === 'j' ? { sceneId, journeyId: id } : { sceneId, routeId: id };
+        await journeysManager.choose(chosen, canvas.scene);
     }
 
     /** Take the route or journey the bar runs back to the start, after asking: its progress goes. */
@@ -386,10 +373,11 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         await travelPinsManager.setShown(sceneId, !travelPinsManager.isShown(sceneId));
     }
 
-    /** How far along a route or journey the party is, once it has set out; empty before. */
+    /** How far along a route or journey the party is, once it has set out; empty before, and for a journey not being followed. */
     _progressText(link, units) {
         const progress = this.manager.progress(link);
         if (!progress || (progress.effort <= 0 && !progress.travel.motion.playing)) return '';
+        if (link.journeyId && !this.manager.journeyView(link)?.followed) return '';
         return game.i18n.format(`${MODULE.ID}.routes.${progress.travel.arrived ? 'progressArrived' : 'progress'}`, {
             traveled: formatDistance(progress.distance, units),
             length: formatDistance(progress.length, units),
@@ -596,7 +584,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             const link = this._barPath();
             const rate = TIME_RATES[Number(target.value)];
             if (link && rate) void journeysManager.setSpeed(link, rate);
-        } else if (field === 'barPath' && target.value) {
+        } else if (field === 'barPath') {
             void this.choosePath(target.value);
         } else if (field === 'pathPace' && target.value) {
             const pace = this._paces(canvas.scene?.grid?.units).find(p => p.id === target.value);

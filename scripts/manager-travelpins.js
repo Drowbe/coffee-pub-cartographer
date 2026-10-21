@@ -146,9 +146,10 @@ class TravelPinsManager {
     /**
      * Set the party down at a point on a map, GM only. Within `radius` scene
      * pixels of a route's line, it lands on the line: on that route, which
-     * becomes the map's -- the map draws routes, not journeys, so the line it
-     * was dropped by is the trip -- its progress is that point, and it is
-     * stopped. Off
+     * becomes the map's (still within the journey being followed, if it is
+     * one of its routes); its progress is that point, and it is stopped. Put
+     * down at the end it was heading for, it sets out from there: on to the
+     * journey's next route, or turned round. Off
      * every route, it stays where it was put, on no route, until it is put on
      * one. Whatever was moving there stops either way, and the trip it was
      * on, if it is put down anywhere but back on that trip, is cancelled:
@@ -164,19 +165,22 @@ class TravelPinsManager {
             if (hit && hit.distance <= radius && (!best || hit.distance < best.hit.distance)) best = { route, hit };
         }
         // Put down anywhere but back on the trip it was on, that trip is
-        // cancelled: stopped, and its odometer back to the start.
-        const same = (a, b) => !!a && !!b && (a.journeyId ? a.journeyId === b.journeyId : (!b.journeyId && a.routeId === b.routeId));
-        const cancel = async () => {
-            if (shown && routesManager.progress(shown)) await journeysManager.reset(shown);
+        // cancelled: stopped, and back to its start -- a journey to its first
+        // route. Put down on another route of the journey it follows, it keeps
+        // to the journey, and only the route it was on goes back to its start.
+        const was = shown ? routesManager.routeLinkOf(shown) : null;
+        const cancel = async trip => {
+            if (trip && routesManager.progress(trip)) await journeysManager.reset(trip);
         };
         if (!best) {
-            await cancel();
+            await cancel(shown);
             await routesManager.setSettings({ offRoute: true }, scene.id);
             return { onRoute: false };
         }
-        // On the route it was dropped by, even one of the journey the map shows.
         const link = { sceneId: scene.id, routeId: best.route.id };
-        if (!same(shown, link)) await cancel();
+        const journey = shown?.journeyId ? routesManager.getJourney(shown.journeyId, scene) : null;
+        const keep = journey?.routeIds.includes(link.routeId) ? journey.id : null;
+        if (was?.routeId !== link.routeId) await cancel(keep ? was : shown);
         const path = routesManager.path(link, scene);
         const along = nearestOnRoute(path.points, [point.x, point.y]);
         const before = legPixels(path.points.slice(0, along.index + 1)).reduce((sum, leg) => sum + leg, 0);
@@ -188,9 +192,21 @@ class TravelPinsManager {
         else if (total - pixels <= radius) pixels = total;
         const effort = effortForDistance(pathLegs(path.points, path.terrain, scene.grid), gridDistance(pixels, scene.grid));
         await routesManager.setPathTravel(link, { effort, playing: false, arrived: false });
-        await routesManager.setSettings({ active: link.journeyId ? { journeyId: link.journeyId } : { routeId: link.routeId }, offRoute: false }, scene.id);
-        await this.savePosition(link);
-        return { onRoute: true, link };
+        await routesManager.setSettings({ active: keep ? { journeyId: keep, routeId: link.routeId } : { routeId: link.routeId }, offRoute: false }, scene.id);
+        // Put down at the end it is heading for, the party is setting out from there:
+        // on to the next route of the journey it follows, else turned round, at
+        // the start of the way back.
+        let on = link;
+        if (pixels === total && total > 0) {
+            const trip = keep ? { sceneId: scene.id, journeyId: keep } : null;
+            const view = trip ? routesManager.journeyView(trip, scene) : null;
+            if (view && view.index < view.order.length - 1) {
+                await routesManager.journeyStep(trip, view.index + 1);
+                on = routesManager.routeLinkOf(trip) ?? link;
+            } else await routesManager.setPathTravel(link, { reversed: !routesManager.progress(link)?.path.reversed });
+        }
+        await this.savePosition(on);
+        return { onRoute: true, link: on };
     }
 
     /** The world's party, from Blacksmith: its primary party actor, or null when none is set. */
@@ -235,10 +251,9 @@ class TravelPinsManager {
         return `${MODULE.ID}-party-${sceneId}`;
     }
 
-    /** The route or journey a map's marker follows: the one its bar runs, once it has set out. */
+    /** The route or journey a map's marker follows: the one its bar runs. */
     static followed(scene) {
-        const link = scene ? routesManager.shownPath(scene) : null;
-        return link && routesManager._pathItem(link, scene)?.travel ? link : null;
+        return scene ? routesManager.shownPath(scene) : null;
     }
 
     _start() {

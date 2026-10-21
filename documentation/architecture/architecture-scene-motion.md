@@ -21,8 +21,8 @@ canvas, and how the window is put together.
 | `scripts/manager-travel.js` | The on-screen odometer, arrival, the world clock's rate, and a followed route's length. |
 | `scripts/utils-routes.js` | Route geometry: lengths, a point along a route, unit conversion. |
 | `scripts/manager-routes.js`, `scripts/window-routes.js`, `templates/window-routes.hbs` | Routes: saving, drawing on the canvas, the click-to-place tool, and the Routes window. |
-| `scripts/manager-travelpins.js` | The party's marker: a Blacksmith pin per route or journey that has set out, moved along it. |
-| `scripts/manager-journeys.js` | Running a journey from its map: Play/Stop, speed, pace, reset, and the GM's watch over journeys that are moving. |
+| `scripts/manager-travelpins.js` | The party's marker: one Blacksmith pin per map, on the route or journey chosen there, moved along it. |
+| `scripts/manager-journeys.js` | Running a route or journey from its map: choosing it, Play/Pause, Stop, speed, pace, direction, reset, and the GM's watch over routes that are moving -- going on to a journey's next route, and arriving. |
 | `scripts/window-parallax.js`, `templates/window-parallax.hbs`, `styles/tool-parallax.css` | The window. |
 
 ## Where state lives
@@ -32,7 +32,7 @@ canvas, and how the window is put together.
 | Scene flag | `parallax` | Layers, layer groups (stored as `sets`), which are on (`activeSets`), and the parallax motion. |
 | Scene flag | `tileMotion` | The tiles' motion, each managed tile's position at the anchor (`offsets`), tile groups, and which are on (`activeGroups`). |
 | Scene flag | `collections` | `{ list }` of `{ id, name, layerGroups, tileGroups }`. |
-| Scene flag | `routes` | `{ list, journeys }`. A route is `{ id, name, color, points, terrain, userId, hidden, travel? }`, points as `[[x, y], ...]` in scene pixels and terrain one id per leg; a journey is `{ id, name, routeIds, userId, travel? }`. `travel` is the progress along it (below). On map scenes. |
+| Scene flag | `routes` | `{ list, journeys }`. A route is `{ id, name, color, points, terrain, userId, hidden, travel? }`, points as `[[x, y], ...]` in scene pixels and terrain one id per leg; a journey is `{ id, name, routeIds, userId }`. `travel` is the progress along a route (below); journeys have none. On map scenes. |
 | Tile flag | `motion` | That tile's `visible`, `rotate` and `scroll` settings. A tile with this flag is managed. |
 | `localStorage` | `parallax.windowPrefs`, `parallax.windowOpen` | The window's mode, tabs, folded rows, height, and whether the GM wants it open. Per browser, never shared. |
 
@@ -108,8 +108,15 @@ speeds are multiplied by `clockFactor`, the rate capped at four. A rate of 0 sto
 path by `chainRoutes` (utils-routes.js), which runs each route whichever way meets the last and
 crosses any gap in a straight line.
 
-**Progress lives on the path**, as `travel = { effort, pace, arrived, motion }` on the route or
-journey record: a map outlasts any one animated scene, which is reused for many journeys. Progress
+**Progress lives on the route**, as `travel = { effort, pace, arrived, reversed, motion }` on the
+route record: a map outlasts any one animated scene, which is reused for many journeys. A journey
+is a bundle of routes with no travel of its own: `journeyView` lays its routes out in the order
+they are being run -- as listed, or back from the last when the route the party is on is turned
+against the way it joins the next -- and `progress()` of a journey link reads the route the party
+is on as a stretch of the whole (`before` plus the route's distance), adding `route` and
+`journey: { index, count, routeName }`. `setPathTravel` of a journey link writes the route the
+party is on (`routeLinkOf`). Journeys saved with progress of their own, before this, are moved onto
+their routes once by the GM's client (`migrateJourneys`). Progress
 is kept as **effort** -- distance as if it were all open ground, in the map's units -- which grows
 at the pace (map units an hour) times `motionTravel(motion)`, the same eased maths as the scenery,
 with the world clock's full rate as the motion's `clockFactor`. `distanceForEffort` walks the
@@ -152,9 +159,12 @@ stays where it stands.
 `parallaxManager.commitScene`, which rebases and writes a scene's parallax from its own flag and
 grid without it being on the canvas. The GM's client watches every moving trip on a ticker and
 stops one that reaches its end when no following scene is on the canvas to notice
-(manager-travel.js covers the one that is). The map's
-"active" journey -- the one the sub-menubar's Play runs -- is `settings.active` in the `routes`
-flag: the last one played there.
+(manager-travel.js covers the one that is). A route of the journey being followed that reaches
+its end hands the party on to the next (`journeyStep`, `steady` so it keeps its speed), the
+effort past the end carried over (`rawEffort`); only the journey's last route arrives. What the
+map runs is `settings.active` in the `routes` flag: `{ routeId }`, `{ journeyId, routeId }`
+when following a journey (the route it is on), or null -- chosen on purpose in the bar, by a click
+on a route (the `routeClicked` hook), or by dropping the party on one; never assumed.
 
 **Moving** is read, not stored: `progress().moving` is the timeline's rate at the world time for a path
 that follows the clock, and the motion's speed (easing included) otherwise, and false at the end it
@@ -164,8 +174,8 @@ a few times a second, since a scrub changes it without any write. There is one p
 route or journey on a map stops any other playing there.
 
 **The marker** is one Blacksmith pin per map, id `coffee-pub-cartographer-party-<sceneId>`, type
-`journey`, following the map's active route or journey (`settings.active`). The GM's client creates
-it once that has set out. Every client puts it at `progress().point` with Blacksmith's client-local
+`journey`, following the map's chosen route or journey (`settings.active`). The GM's client creates
+it once one is chosen. Every client puts it at `progress().point` with Blacksmith's client-local
 `pins.setLivePosition` wherever that differs from the saved pin -- moving, or moved by a scrub --
 which is never saved or sent and locks the pin against dragging; the GM's client saves the point
 with `pins.update` whenever the party is not moving, and each client clears its live position once

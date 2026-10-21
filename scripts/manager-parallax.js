@@ -598,9 +598,10 @@ class ParallaxManager {
         return this._commit(s => { s.travel.followClock = !!follow; });
     }
 
-    resetOdometer() {
+    async resetOdometer() {
         const link = this.state.travel?.route;
-        if (link) void routesManager.setPathTravel(link, { effort: 0, arrived: false });
+        // A journey goes back to its first route: several writes, done before the scene's own.
+        if (link) await routesManager.resetTrip(link);
         return this._commit(s => {
             s.travel.distance = 0;
             s.travel.arrived = false;
