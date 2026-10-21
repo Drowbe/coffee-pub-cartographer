@@ -731,8 +731,8 @@ console.log('\nroutes: who may change what');
         'its progress is where it landed, halfway along, and the marker sits on the line');
     await rm.setSettings({ active: { journeyId: go.journeyId } });
     const onJourney = await tp2.placeParty(scene, { x: 2100, y: 3 }, 24);
-    check(onJourney.link.journeyId === go.journeyId && Math.abs(rm.progress(go).distance - 75) < 1e-6,
-        'dropped on a route of the journey the map shows, it lands on the journey: 50 ft of the first route and 25 of the second');
+    check(!onJourney.link.journeyId && Math.abs(rm.progress(onJourney.link).distance - 25) < 1e-6 && rm.progress(go).distance === 0,
+        'dropped on a route of the journey the map shows, it lands on that route, 25 ft along, and the journey is cancelled');
     const offRoute = await tp2.placeParty(scene, { x: 5000, y: 5000 }, 24);
     check(!offRoute.onRoute && rm.settings().offRoute && rm.shownPath() === null, 'dropped off every route, the party is on none');
     check(rm.progress(go).distance === 0, 'and the trip it was on is cancelled: its odometer back to the start');

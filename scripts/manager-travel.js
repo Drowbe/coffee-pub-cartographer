@@ -231,7 +231,7 @@ class TravelManager {
                     <span class="cartographer-travel-hud-controls" data-travel-hud="controls" hidden>
                         <span class="cartographer-travel-hud-control" data-travel-control="toggle"></span>
                         <span class="cartographer-travel-hud-control" data-travel-control="end"><i class="fa-solid fa-stop"></i></span>
-                        <span class="cartographer-travel-hud-control" data-travel-control="reset"><i class="fa-solid fa-backward-fast"></i></span>
+                        <span class="cartographer-travel-hud-control" data-travel-control="turn"><i class="fa-solid fa-right-left"></i></span>
                     </span>
                 </div>
                 <div class="cartographer-travel-hud-bar"><div class="cartographer-travel-hud-fill" data-travel-hud="fill"></div></div>`;
@@ -311,9 +311,9 @@ class TravelManager {
 
     /**
      * The GM's controls, at the odometer's right: Play/Pause, saying what
-     * pressing it will do, and Back to the start. Players have none; the
-     * route icon at the left stays the odometer's own. Redrawn only when the
-     * play state changes.
+     * pressing it will do, Stop, and Turn round -- lit when heading back to
+     * the start, and only for a trip on a route or journey. Players have
+     * none; the route icon at the left stays the odometer's own.
      */
     _drawControls(hud, summary) {
         const controls = hud.querySelector('[data-travel-hud="controls"]');
@@ -328,13 +328,22 @@ class TravelManager {
             toggle.dataset.tooltip = game.i18n.localize(`${MODULE.ID}.routes.${summary.playing ? 'stop' : 'play'}`);
             toggle.innerHTML = `<i class="fa-solid ${summary.playing ? 'fa-pause' : 'fa-play'}"></i>`;
         }
-        const reset = controls.querySelector('[data-travel-control="reset"]');
-        reset.dataset.tooltip ??= game.i18n.localize(`${MODULE.ID}.routes.resetJourney`);
+        const turn = controls.querySelector('[data-travel-control="turn"]');
+        const link = this._tripLink(summary);
+        const reversed = !!(link && routesManager.progress(link)?.travel.reversed);
+        turn.hidden = !link;
+        turn.classList.toggle('is-active', reversed);
+        turn.dataset.tooltip = game.i18n.localize(`${MODULE.ID}.routes.${reversed ? 'headingReversed' : 'headingAsDrawn'}`);
         const end = controls.querySelector('[data-travel-control="end"]');
         end.dataset.tooltip ??= game.i18n.localize(`${MODULE.ID}.routes.endTrip`);
     }
 
-    /** A control on the odometer: Play/Pause or Back to the start, for the map's trip or this scene. */
+    /** The route or journey the odometer counts: the map's trip, or the one this animated scene follows. */
+    _tripLink(summary) {
+        return summary?.link ?? parallaxManager.state?.travel?.route ?? null;
+    }
+
+    /** A control on the odometer: Play/Pause, Stop or Turn round, for the map's trip or this scene. */
     async _control(which) {
         const summary = this._hudSummary;
         if (!game.user.isGM || !summary) return;
@@ -343,23 +352,26 @@ class TravelManager {
             else await parallaxManager.togglePlaying();
             return;
         }
-        // Stop and Back to the start both lose how far the party had come: ask first, as the bar does.
-        const ending = which === 'end';
+        if (which === 'turn') {
+            const link = this._tripLink(summary);
+            if (link) await journeysManager.setDirection(link, !routesManager.progress(link)?.travel.reversed);
+            return;
+        }
+        // Stop loses how far the party had come: ask first, as the bar does.
         const ok = await foundry.applications.api.DialogV2.confirm({
-            window: { title: game.i18n.localize(`${MODULE.ID}.routes.${ending ? 'endTrip' : 'resetJourney'}`) },
-            content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.routes.${ending ? 'endConfirm' : 'resetConfirm'}`, { name: summary.nameText || '' }))}</p>`,
+            window: { title: game.i18n.localize(`${MODULE.ID}.routes.endTrip`) },
+            content: `<p>${foundry.utils.escapeHTML(game.i18n.format(`${MODULE.ID}.routes.endConfirm`, { name: summary.nameText || '' }))}</p>`,
             rejectClose: false
         });
         if (!ok) return;
-        if (ending && summary.link) await journeysManager.end(summary.link);
-        else if (ending) {
+        if (summary.link) await journeysManager.end(summary.link);
+        else {
             // An animated scene: its trip, if it follows one, ends on its map; else its own odometer.
             const link = parallaxManager.state.travel?.route;
             await parallaxManager.stop();
             if (link) await journeysManager.end(link);
             else await parallaxManager.resetOdometer();
-        } else if (summary.link) await journeysManager.reset(summary.link);
-        else await parallaxManager.resetOdometer();
+        }
     }
 
     /** Drag anywhere on it but its controls; the spot is remembered for this viewer. */

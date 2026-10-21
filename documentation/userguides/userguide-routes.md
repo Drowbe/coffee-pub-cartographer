@@ -241,7 +241,7 @@ of their own.
 - **The GM can pick the party up and put it down.** Picking the marker up stops the party,
   whatever it was travelling. Dropped by a route's line, it snaps onto the line -- exactly where it was
   put, or at the route's start or end when dropped near one: the party is on that
-  route -- or on the journey the map is showing, if the route is part of it -- at that point,
+  route at that point -- the route, even one of a journey under way, which is then cancelled --
   stopped, and Play carries on from there. Put down anywhere but back on the trip it was on -- on
   another route, or off every route -- that trip is cancelled: stopped, and its odometer back to the
   start, along with any animated scene following it. Dropped off every route, the party is on none: Play says

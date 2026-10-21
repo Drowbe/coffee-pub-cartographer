@@ -776,6 +776,15 @@
     cursor: pointer;
 }
 
+.cartographer-travel-hud-control[hidden] {
+    display: none;
+}
+
+/* Turn round, lit while the party heads back to the start. */
+.cartographer-travel-hud-control.is-active {
+    background: rgba(255, 255, 255, 0.22);
+}
+
 .cartographer-travel-hud-control:hover {
     background: rgba(255, 255, 255, 0.15);
 }

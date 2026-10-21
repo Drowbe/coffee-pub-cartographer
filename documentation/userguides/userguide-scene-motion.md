@@ -82,8 +82,8 @@ feet.
   everyone. It starts at the top of the canvas, below any menubars. Anyone can drag it somewhere else
   on their own screen, and it stays there for them; a right-click puts it back. A double-click opens
   its window: this one on an animated scene (for the GM), the Routes window on a map. At its right,
-  the GM has **Play / Pause**, **Stop** and **Back to the start** (both ask first) for what it counts;
-  Stop ends a map's trip, leaving the party where it is, on no route;
+  the GM has **Play / Pause**, **Stop** (which asks first) and, on a route or journey, **Turn round**
+  for what it counts; Stop ends a map's trip, leaving the party where it is, on no route;
   players see only the figures.
 - **Ground layer** -- the layer the party is travelling over. By default, the nearest layer below
   the Tokens line.

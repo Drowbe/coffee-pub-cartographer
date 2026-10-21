@@ -145,9 +145,10 @@ class TravelPinsManager {
 
     /**
      * Set the party down at a point on a map, GM only. Within `radius` scene
-     * pixels of a route's line, it lands on the line: on the journey the map
-     * shows if the route is part of it, else on the route itself, which
-     * becomes the map's; its progress is that point, and it is stopped. Off
+     * pixels of a route's line, it lands on the line: on that route, which
+     * becomes the map's -- the map draws routes, not journeys, so the line it
+     * was dropped by is the trip -- its progress is that point, and it is
+     * stopped. Off
      * every route, it stays where it was put, on no route, until it is put on
      * one. Whatever was moving there stops either way, and the trip it was
      * on, if it is put down anywhere but back on that trip, is cancelled:
@@ -173,9 +174,8 @@ class TravelPinsManager {
             await routesManager.setSettings({ offRoute: true }, scene.id);
             return { onRoute: false };
         }
-        // On the journey the map shows, if this route is part of it; else on the route.
-        const journey = shown?.journeyId ? routesManager.getJourney(shown.journeyId, scene) : null;
-        const link = journey?.routeIds.includes(best.route.id) ? shown : { sceneId: scene.id, routeId: best.route.id };
+        // On the route it was dropped by, even one of the journey the map shows.
+        const link = { sceneId: scene.id, routeId: best.route.id };
         if (!same(shown, link)) await cancel();
         const path = routesManager.path(link, scene);
         const along = nearestOnRoute(path.points, [point.x, point.y]);
