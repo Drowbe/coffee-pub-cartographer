@@ -253,6 +253,18 @@ export const registerSettings = () => {
 	// Which of the Recorded Maps list's three tabs is in effect: by scene, by
 	// character, or the reader's own. Chosen from the list itself, so it is not
 	// offered in the settings form.
+	// When the GM's client last saw a trip under way (server time, ms), stamped
+	// while one is. A trip still playing when the GM next loads is paused where
+	// the party was then, not where the hours the world sat closed would put it.
+	game.settings.register(MODULE.ID, 'routes.tripsSeenAt', {
+		name: '',
+		hint: '',
+		scope: 'world',
+		config: false,
+		default: 0,
+		type: Number
+	});
+
 	game.settings.register(MODULE.ID, 'mapping.listGrouping', {
 		name: '',
 		hint: '',

@@ -83,7 +83,9 @@ export function displayDistance(value, sceneUnits) {
 }
 
 /**
- * An in-world span as its two largest units: "2 d 4 h", "5 h 20 m", "12 m".
+ * An in-world span as its two largest units: "2 d 04 h", "5 h 20 m", "09 m".
+ * The smaller unit always shows, padded to two digits, so a ticking ETA keeps
+ * its width and the odometer does not resize as it counts down.
  * Plain 24-hour days; when Blacksmith's calendar-aware span formatter lands,
  * this is the one place to hand over to it.
  */
@@ -92,9 +94,10 @@ export function formatSpan(seconds) {
     const days = Math.floor(total / 86400);
     const hours = Math.floor((total % 86400) / 3600);
     const minutes = Math.floor((total % 3600) / 60);
-    if (days) return hours ? `${days} d ${hours} h` : `${days} d`;
-    if (hours) return minutes ? `${hours} h ${minutes} m` : `${hours} h`;
-    return `${minutes} m`;
+    const pad = value => String(value).padStart(2, '0');
+    if (days) return `${days} d ${pad(hours)} h`;
+    if (hours) return `${hours} h ${pad(minutes)} m`;
+    return `${pad(minutes)} m`;
 }
 
 // ==================================================================

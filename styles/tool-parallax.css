@@ -701,6 +701,8 @@
     color: #f2eadb;
     font-family: "Signika", sans-serif;
     font-size: 14px;
+    /* Every digit the same width, so the figures tick over without the panel resizing. */
+    font-variant-numeric: tabular-nums;
     cursor: grab;
     user-select: none;
     touch-action: none;

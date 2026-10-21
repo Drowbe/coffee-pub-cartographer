@@ -147,7 +147,7 @@ console.log('\ntravel distances');
     }
     if (toSceneUnits(40, 'mi', 'ft') !== 211200 || toSceneUnits(300, 'ft', 'ft') !== 300) fail('a destination is not converted to scene units');
     else ok('a destination in miles is stored in the scene\'s feet');
-    const spans = [[formatSpan(90), '1 m'], [formatSpan(5 * 3600 + 20 * 60), '5 h 20 m'], [formatSpan(2 * 86400 + 4 * 3600 + 59), '2 d 4 h'], [formatSpan(3600), '1 h']];
+    const spans = [[formatSpan(90), '01 m'], [formatSpan(5 * 3600 + 20 * 60), '5 h 20 m'], [formatSpan(2 * 86400 + 4 * 3600 + 59), '2 d 04 h'], [formatSpan(3600), '1 h 00 m'], [formatSpan(5 * 3600 + 7 * 60), '5 h 07 m']];
     if (spans.some(([got, want]) => got !== want)) fail(`spans read wrongly: ${spans.map(([g]) => g).join(' | ')}`);
     else ok('an ETA reads as its two largest units');
     if (JSON.stringify(unitChoices('m')) !== '["m","km"]' || JSON.stringify(unitChoices('hexes')) !== '["hexes"]') fail('unit choices are wrong');

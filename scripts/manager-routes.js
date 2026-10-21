@@ -667,6 +667,8 @@ class RoutesManager {
                 for (const key of ['playing', 'masterSpeed', 'easeSeconds', 'clockFactor']) {
                     if (key in changes) travel.motion[key] = key === 'playing' ? !!changes[key] : Number(changes[key]) || 0;
                 }
+                // Halted: stopped on the spot, with no ease down -- the party stays where the effort puts it.
+                if (changes.halt) travel.motion.rampFrom = 0;
                 if ('effort' in changes) travel.effort = Math.min(total, Math.max(0, Number(changes.effort) || 0));
                 if ('pace' in changes) travel.pace = Math.max(0, Number(changes.pace) || 0);
                 if ('arrived' in changes) travel.arrived = !!changes.arrived;

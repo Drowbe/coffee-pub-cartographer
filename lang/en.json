@@ -412,6 +412,7 @@
 	"routes.barPlay": "Play or pause the trip this map shows",
 	"routes.noActiveJourney": "No journey has been played on this map yet. Play one from the Journeys tab.",
 	"routes.arrivedNotice": "The party has reached the end of {name}.",
+	"routes.pausedOnLoad": "Paused {name} where the party was. Press Play to carry on.",
 	"routes.partyMarkerLabel": "Party marker",
 	"routes.markerToPlayers": "Shown to players",
 	"routes.markerShownHint": "Whether players see the party's marker on this map. You always do.",

@@ -162,6 +162,11 @@ window's bar works as the Scene Motion window's does. From the left:
   map has no trip any more -- the odometer clears, on linked animated scenes too. The party marker
   stays where the party stopped, on no route, as if dropped off every route; choose a route in the
   bar, or drop the marker on one, to set out again.
+
+A trip still under way when the GM's client loads -- a new session, or a reload -- is paused, and
+the GM is told so; Play carries on. Paused after the world sat closed, the party is where it was
+when the GM last saw it, not hours further on; after a quick reload, where it is now. With another
+GM already on, trips go on.
 - **Back to the start** (the rewind button) -- takes the party back to the beginning of the route or
   journey, after asking, since how far they had come is lost.
 - **Turn round** (the two-way arrow) -- which end the party is heading for: the end the route or

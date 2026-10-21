@@ -15,6 +15,10 @@ const GROUP = 'Routes';
 const PLAY_ID = `${MODULE.ID}-routes-play`;
 /** How often the GM's client checks journeys for terrain and arrival, in ms. */
 const WATCH_MS = 250;
+/** How often the GM's client notes that a trip is under way, in ms. */
+const SEEN_MS = 30000;
+/** A reload shorter than this pauses a trip where it is now: the world was not closed. */
+const RELOAD_MS = 120000;
 
 /**
  * Running a journey from its map: Play and Stop, speed and pace, for the GM,
@@ -57,6 +61,58 @@ class JourneysManager {
         on('blacksmith.worldClockRateChanged', ({ rate } = {}) => this._recordClockRate(rate));
         this._startWatch();
         this._recordClockRate();
+        // Closing the tab: note the time, so a trip pauses where it was left.
+        globalThis.window?.addEventListener?.('pagehide', () => { if (this._moving().length) this._noteSeen(); });
+        void this._pauseOnLoad();
+    }
+
+    // ==================================================================
+    // ===== ON LOAD ====================================================
+    // ==================================================================
+
+    /** Note, for the next load, that a trip was under way now. */
+    _noteSeen() {
+        this._lastSeen = performance.now();
+        try { void game.settings.set(MODULE.ID, 'routes.tripsSeenAt', game.time.serverTime); } catch (_) { /* not registered */ }
+    }
+
+    _seenAt() {
+        try { return Number(game.settings.get(MODULE.ID, 'routes.tripsSeenAt')) || 0; } catch (_) { return 0; }
+    }
+
+    /**
+     * The GM's client loading -- a new session, or a reload -- pauses every
+     * trip still under way, so nothing sets off before the GM is ready. Off
+     * the world clock, a trip is paused where the party was when the GM's
+     * client last saw it, not where the hours the world sat closed would put
+     * it; a quick reload pauses it where it is now. (On the clock, the clock
+     * did not run while the world was closed.) With another GM already on,
+     * the trips are theirs and go on.
+     */
+    async _pauseOnLoad() {
+        if (!game.user.isGM || game.users?.some(user => user.isGM && user.active && user.id !== game.user.id)) return;
+        const moving = this._moving();
+        if (!moving.length) return;
+        const now = game.time.serverTime;
+        const seen = this._seenAt();
+        const at = seen > 0 && seen < now - RELOAD_MS ? seen : now;
+        const names = [];
+        for (const link of moving) {
+            const clock = !!routesManager.progress(link)?.travel.followClock;
+            const was = routesManager.progress(link, clock ? now : at);
+            if (!was) continue;
+            const arrived = was.effort >= was.totalEffort - 1e-9;
+            await routesManager.setPathTravel(link, { playing: false, halt: true, effort: was.effort, ...(arrived ? { arrived: true } : {}) });
+            for (const scene of this.linkedScenes(link)) {
+                await parallaxManager.commitScene(scene, state => {
+                    state.playing = false;
+                    if (arrived) state.travel.arrived = true;
+                });
+            }
+            names.push(was.path.name);
+        }
+        this._refreshButton();
+        if (names.length) notify(game.i18n.format(`${MODULE.ID}.routes.pausedOnLoad`, { name: names.join(', ') }));
     }
 
     // ==================================================================
@@ -298,7 +354,9 @@ class JourneysManager {
         if (now - this._lastWatch < WATCH_MS) return;
         this._lastWatch = now;
         if (!game.user.isGM) return;
-        for (const link of this._moving()) {
+        const moving = this._moving();
+        if (moving.length && !(now - (this._lastSeen ?? -Infinity) < SEEN_MS)) this._noteSeen();
+        for (const link of moving) {
             const progress = routesManager.progress(link);
             if (!progress) continue;
             // A trip moving is the one its map shows, however it was set going --

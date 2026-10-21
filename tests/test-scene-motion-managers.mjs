@@ -790,6 +790,42 @@ console.log('\nroutes: who may change what');
     check(placed.get('m-party-here').x === pinBefore.x && placed.get('m-party-here').y === pinBefore.y, 'the marker stays where the party stopped');
     await rm.setSettings({ active: { routeId: late.id } });
 
+    console.log('\nthe GM loading pauses a trip');
+    const savedUsers = game.users;
+    const savedSettings = game.settings;
+    let seenAt = 0;
+    const infos = [];
+    ui.notifications.info = m => infos.push(m);
+    game.settings = { get: () => seenAt, set: async (_m, _k, value) => { seenAt = value; } };
+    game.users = { ...savedUsers, some: () => false };
+    await rm.setPathTravel(lateLink, { easeSeconds: 0 });
+    await jm.play(lateLink, 3600);
+    now += 5000;
+    jm._noteSeen();
+    const left = rm.progress(lateLink).distance;
+    now += 6 * 3600 * 1000;
+    await jm._pauseOnLoad();
+    check(!jm.isPlaying(lateLink) && Math.abs(rm.progress(lateLink).distance - left) < 1e-6,
+        'after the world sat closed, the trip is paused where the party was when the GM last saw it');
+    now += 10000;
+    check(Math.abs(rm.progress(lateLink).distance - left) < 1e-6, 'and stays there, with no ease down');
+    check(infos.length === 1, 'the GM is told it was paused');
+    await jm.play(lateLink);
+    now += 2000;
+    jm._noteSeen();
+    now += 30000;
+    const quick = rm.progress(lateLink).distance;
+    await jm._pauseOnLoad();
+    check(!jm.isPlaying(lateLink) && Math.abs(rm.progress(lateLink).distance - quick) < 1e-6,
+        'a quick reload pauses it where it is now');
+    await jm.play(lateLink);
+    game.users = { ...savedUsers, some: () => true };
+    await jm._pauseOnLoad();
+    check(jm.isPlaying(lateLink), 'with another GM already on, trips go on');
+    await jm.stop(lateLink);
+    game.users = savedUsers;
+    game.settings = savedSettings;
+
     console.log('\nthe marker is the party\'s');
     placed.delete('m-party-here');
     await tp2._ensurePin(one);
