@@ -573,7 +573,8 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     _routeContext(travel, units) {
         const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
         const link = travel.route;
-        // Each map's journeys first -- the whole way -- then its routes.
+        // Each map's journeys, then its routes, each under their own heading: a
+        // dropdown cannot nest groups, so a map's name heads both.
         const option = (scene, ref, label) => {
             const linked = routesManager.linked({ sceneId: scene.id, ...ref }, units);
             const id = ref.journeyId ? `j:${ref.journeyId}` : ref.routeId;
@@ -584,14 +585,16 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                 selected: link?.sceneId === scene.id && (ref.journeyId ? link?.journeyId === ref.journeyId : link?.routeId === ref.routeId)
             };
         };
-        const routeGroups = routesManager.allRoutes().map(({ scene, routes, journeys }) => ({
-            label: scene.name,
-            routes: [
-                ...journeys.map(journey => option(scene, { journeyId: journey.id },
-                    length => game.i18n.format(`${MODULE.ID}.parallax.travelJourneyOption`, { name: journey.name, length }))),
-                ...routes.map(route => option(scene, { routeId: route.id }, length => `${route.name} (${length})`))
-            ]
-        }));
+        const routeGroups = routesManager.allRoutes().flatMap(({ scene, routes, journeys }) => [
+            {
+                label: game.i18n.format(`${MODULE.ID}.parallax.travelMapJourneys`, { map: scene.name }),
+                routes: journeys.map(journey => option(scene, { journeyId: journey.id }, length => `${journey.name} (${length})`))
+            },
+            {
+                label: game.i18n.format(`${MODULE.ID}.parallax.travelMapRoutes`, { map: scene.name }),
+                routes: routes.map(route => option(scene, { routeId: route.id }, length => `${route.name} (${length})`))
+            }
+        ].filter(group => group.routes.length));
         const linked = link ? routesManager.linked(link, units) : null;
         return {
             routeGroups,

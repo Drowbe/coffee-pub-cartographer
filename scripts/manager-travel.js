@@ -334,7 +334,12 @@ class TravelManager {
         };
         hud.addEventListener('pointerup', end);
         hud.addEventListener('pointercancel', end);
-        hud.addEventListener('dblclick', () => {
+        // A double-click opens the window that runs what the odometer shows: the
+        // Routes window on a map, the scene-motion window on an animated scene
+        // (the GM's). A right-click puts the display back where it started.
+        hud.addEventListener('dblclick', () => this.openTool());
+        hud.addEventListener('contextmenu', event => {
+            event.preventDefault();
             try {
                 localStorage.removeItem(POSITION_KEY);
             } catch {
@@ -342,6 +347,13 @@ class TravelManager {
             }
             this._placeHud(hud);
         });
+    }
+
+    /** Open the tool window for what the odometer is showing. */
+    openTool() {
+        if (this.mapSummary()) return routesManager.openWindow();
+        if (game.user.isGM) return parallaxManager.openWindow();
+        return null;
     }
 
     /** The live figures in the window's Movement tab, if it is showing. */
