@@ -851,6 +851,26 @@ console.log('\nroutes: who may change what');
     game.users = savedUsers;
     game.settings = savedSettings;
 
+    console.log('\ntaking the party off a route');
+    await jm.choose(lateLink, scene);
+    await tp2.placeParty(scene, { x: 700, y: 900 }, 24);
+    // A frame drawn part way through the drop, as the ticker would, while the map still shows the route.
+    const realSetPathTravel = rm.setPathTravel;
+    rm.setPathTravel = async (...args) => {
+        const result = await realSetPathTravel.apply(rm, args);
+        tp2._lastSave = -Infinity;
+        tp2._tick();
+        await settle();
+        return result;
+    };
+    placed.set('m-party-here', { ...placed.get('m-party-here'), x: 5000, y: 5000 });
+    tp2._dragging = true;
+    await tp2._onDragEnd({ pinId: 'm-party-here', pin: { x: 5000, y: 5000 } });
+    rm.setPathTravel = realSetPathTravel;
+    check(rm.settings().offRoute && placed.get('m-party-here').x === 5000 && placed.get('m-party-here').y === 5000,
+        'pulled off a route, the marker stays where it was put, not saved back on to the route it left');
+    await jm.choose(lateLink, scene);
+
     console.log('\na journey is a run of routes');
     const roadLink = { sceneId: 'here', routeId: m1.id };
     await jm.choose(null, scene);

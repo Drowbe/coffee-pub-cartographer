@@ -99,13 +99,22 @@ class TravelPinsManager {
         if (!game.user.isGM || !this._isPartyPin(event)) return;
         // Blacksmith fires dragEnd once the drop is saved: event.pin is where it landed.
         const pin = event.pin ?? TravelPinsManager.pins()?.get?.(event.pinId, { sceneId: canvas.scene.id });
-        this._dragging = false;
-        if (!pin) return;
+        if (!pin) {
+            this._dragging = false;
+            return;
+        }
         const scene = canvas.scene;
         // Where the party was: on a trip, or set down off every route.
         const was = routesManager.settings(scene).offRoute ? null : routesManager.shownPath(scene);
         const wasName = was ? routesManager.path(was, scene)?.name : null;
-        const result = await this.placeParty(scene, { x: pin.x, y: pin.y }, DROP_SNAP_PIXELS / (canvas.stage?.scale?.x || 1));
+        // Still the GM's until the drop is settled: part way through, the map still
+        // shows the trip it left, and the marker would be saved back on to it.
+        let result;
+        try {
+            result = await this.placeParty(scene, { x: pin.x, y: pin.y }, DROP_SNAP_PIXELS / (canvas.stage?.scale?.x || 1));
+        } finally {
+            this._dragging = false;
+        }
         const message = this.dropMessage(result, wasName, scene);
         if (message) notify(message);
     }
