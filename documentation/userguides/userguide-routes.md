@@ -192,10 +192,10 @@ window's bar works as the Scene Motion window's does. From the left:
 - **Play / Pause** -- the button says what pressing it will do. Pause eases the journey to a halt;
   Play eases it back up. Playing a journey that has arrived starts it again from the beginning.
   Paused, the trip is still the map's: Play carries on from where the party stopped.
-- **Stop** (the square) -- ends the trip, after asking: it halts, goes back to the start, and the
-  map has no trip any more -- the odometer clears, on linked animated scenes too. The party marker
-  stays where the party stopped, on no route, as if dropped off every route; choose a route in the
-  bar, or drop the marker on one, to set out again.
+- **Stop** (the square) -- stops the trip, after asking. The party marker stays exactly where it is;
+  no route is chosen any more, so the odometer goes, on linked animated scenes too. How far the party
+  had come on that route is cleared, so choosing it again starts it from its beginning. Choose a route
+  in the bar, click one, or drop the marker on one, to set out again.
 - **Back to the start** (the rewind button) -- takes the party back to the beginning of the route,
   or to the first route of the journey, after asking, since how far they had come is lost.
 - **Turn round** (the two-way arrow) -- which end the party is heading for: the end the route was
