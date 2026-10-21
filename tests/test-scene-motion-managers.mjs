@@ -679,6 +679,11 @@ console.log('\nroutes: who may change what');
     check(rm.shownPath()?.routeId === late.id, 'the map shows the route that is moving, over the journey last played there');
     await rm.setPathTravel(lateLink, { playing: false });
     check(rm.shownPath()?.journeyId === go.journeyId, 'with nothing moving, it shows the one last played there');
+    await rm.setSettings({ active: null });
+    const withProgress = rm.shownPath();
+    check(!!withProgress && rm.progress(withProgress).effort > 0,
+        'with none played there, it shows one the party has come some way along -- the odometer and the marker the same');
+    await rm.setSettings({ active: { journeyId: go.journeyId } });
 
     console.log('\nputting the party down');
     const placed = new Map();
@@ -734,6 +739,22 @@ console.log('\nroutes: who may change what');
     placed.delete('m-party-here');
     await tp2._ensurePin(one);
     check(placed.get('m-party-here')?.text === 'm.routes.partyMarker', 'with no party set in the world, it is simply "The party"');
+
+    console.log('\ndeleting the marker');
+    const styled = { ...placed.get('m-party-here'), image: 'wagon.webp', text: 'Caravan' };
+    placed.delete('m-party-here');
+    await tp2._onPinDeleted({ pinId: 'm-party-here', sceneId: 'here', pin: styled });
+    check(rm.settings().marker?.removed === true && rm.settings().marker.look.image === 'wagon.webp' && !('x' in rm.settings().marker.look),
+        'deleted by the GM, the marker is remembered as deleted, with its look but not its place');
+    tp2._tick();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    check(!placed.has('m-party-here'), 'and it is not put back on its own');
+    await tp2.addMarker('here');
+    const back = placed.get('m-party-here');
+    check(back?.image === 'wagon.webp' && back.text === 'Caravan' && back.type === 'journey' && !rm.settings().marker.removed,
+        'Add marker puts it back as it looked');
+    const party = rm.progress(rm.shownPath()).point;
+    check(back.x === party.x && back.y === party.y, 'and where the party is now');
     game.modules = { get: () => null };
 }
 

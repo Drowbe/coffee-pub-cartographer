@@ -249,7 +249,9 @@ class RoutesManager {
             active,
             followClock: !!stored.followClock,
             // The party has been set down off every route: nothing to travel until it is put on one.
-            offRoute: !!stored.offRoute
+            offRoute: !!stored.offRoute,
+            // { removed, look }: whether the GM deleted the party marker, and how it looked.
+            marker: stored.marker ?? null
         };
     }
 
@@ -281,8 +283,13 @@ class RoutesManager {
             ...this.journeys(scene).filter(j => j.travel).map(j => ({ sceneId: scene.id, journeyId: j.id })),
             ...this.routes(scene).filter(r => r.travel).map(r => ({ sceneId: scene.id, routeId: r.id }))
         ];
+        const moving = links.find(underWay);
+        if (moving) return moving;
         // Set down off every route, the party is on none until something moves it.
-        return links.find(underWay) ?? (this.settings(scene).offRoute ? null : activeLink);
+        if (this.settings(scene).offRoute) return null;
+        // At rest: the one last played here, else whichever the party has come
+        // some way along -- the one the odometer and the marker both show.
+        return activeLink ?? links.find(link => (this.progress(link)?.effort ?? 0) > 0) ?? null;
     }
 
     /**
@@ -601,6 +608,11 @@ class RoutesManager {
                 if ('followClock' in (data.changes ?? {})) settings.followClock = !!data.changes.followClock;
                 // The party set down somewhere on the map that is on no route.
                 if ('offRoute' in (data.changes ?? {})) settings.offRoute = !!data.changes.offRoute;
+                // The party marker deleted by the GM: not put back, and the look it had, for Add marker.
+                if ('marker' in (data.changes ?? {})) {
+                    const marker = data.changes.marker;
+                    settings.marker = marker ? { removed: !!marker.removed, look: marker.look && typeof marker.look === 'object' ? marker.look : null } : null;
+                }
                 // Choosing what the map runs puts the party back on it.
                 if ('active' in (data.changes ?? {}) && data.changes.active && !('offRoute' in data.changes)) settings.offRoute = false;
                 // The route or journey the map's bar and Play button run: the last one played here.
@@ -845,6 +857,7 @@ class RoutesManager {
             this._drawDraft();
             return;
         }
+        this._updateHover(this._scenePoint(event));
         if (!this.editing) return;
         const point = this._scenePoint(event);
         if (!point) return;
@@ -858,6 +871,35 @@ class RoutesManager {
         // A grab cursor over a waypoint says it can be dragged.
         const hit = nearestWaypoint(this.editing.points, point);
         canvas.app.view.style.cursor = hit && hit.distance <= this._hitRadius() ? 'grab' : '';
+    }
+
+    /**
+     * A route's name and length show only while the pointer is over its line
+     * (or while it is edited), so the map stays clear. Showing and hiding the
+     * labels is all this does; nothing is redrawn.
+     */
+    _updateHover(point) {
+        let hovered = null;
+        if (point && this.show) {
+            const radius = this._hitRadius();
+            let best = Infinity;
+            for (const route of this._drawnRoutes ?? []) {
+                const hit = nearestOnRoute(route.points, point);
+                if (hit && hit.distance <= radius && hit.distance < best) {
+                    best = hit.distance;
+                    hovered = route.id;
+                }
+            }
+        }
+        if (hovered === this._hovered) return;
+        this._hovered = hovered;
+        this._showLabels();
+    }
+
+    _showLabels() {
+        for (const [id, label] of this._labels ?? []) {
+            if (!label.destroyed) label.visible = id === this._hovered || id === this.editing?.id;
+        }
     }
 
     /** Right-clicking a waypoint removes it; that click is not Foundry's. */
@@ -1072,6 +1114,9 @@ class RoutesManager {
     draw() {
         if (!this._layer()) return;
         for (const child of this._routes.removeChildren()) child.destroy({ children: true });
+        // The routes drawn and their labels, for showing a label on hover.
+        this._drawnRoutes = [];
+        this._labels = new Map();
         // Turned off on this screen, routes are not drawn -- except one being edited.
         this._routes.visible = this.show || !!this.editing;
         const sizes = this._sizes();
@@ -1093,7 +1138,10 @@ class RoutesManager {
             const label = this._label(`${route.name} · ${formatDistance(distance, canvas.scene.grid.units)}`, middle, sizes);
             label.alpha = alpha;
             this._routes.addChild(label);
+            this._drawnRoutes.push({ id: route.id, points });
+            this._labels.set(route.id, label);
         }
+        this._showLabels();
         this._drawDraft();
     }
 

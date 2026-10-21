@@ -106,6 +106,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         'journey-drop': (_event, target, app) => app.dropJourneyRoute(target.dataset.journeyId, Number(target.dataset.index)),
         'marker-shown': (_event, _target, app) => app.toggleMarker(),
         'marker-configure': (_event, _target, _app) => travelPinsManager.configure(canvas.scene?.id),
+        'marker-add': (_event, _target, _app) => travelPinsManager.addMarker(canvas.scene?.id),
         'path-reset': (_event, target, app) => void journeysManager.reset(app._linkFrom(target.dataset)),
         'map-clock': (_event, _target, app) => journeysManager.setMapClock(canvas.scene, !app.manager.settings().followClock)
     };
@@ -303,8 +304,11 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const exists = !!travelPinsManager.pinFor(scene.id);
         return {
             exists,
+            // Deleted by the GM: offered back, as it was.
+            removed: !exists && !!this.manager.settings(scene).marker?.removed,
             shown: exists && travelPinsManager.isShown(scene.id),
-            canConfigure: !!journeysManager.activeLink(scene)
+            canConfigure: !!journeysManager.activeLink(scene),
+            canAdd: !!this.manager.shownPath(scene)
         };
     }
 

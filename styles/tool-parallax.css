@@ -713,6 +713,18 @@
     opacity: 0.75;
 }
 
+/* The trip the odometer counts, above its figures. */
+.cartographer-travel-hud-name {
+    margin-bottom: 2px;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.cartographer-travel-hud-name[hidden] {
+    display: none;
+}
+
 .cartographer-travel-hud-bar {
     height: 4px;
     margin-top: 5px;

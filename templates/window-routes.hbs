@@ -83,6 +83,11 @@
         {{#if marker}}
         <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.routes.partyMarkerLabel"}}</span>
         <div class="cartographer-parallax-measure cartographer-routes-marker">
+            {{#if marker.removed}}
+            <button type="button" class="cartographer-parallax-button is-labelled" data-action="marker-add" {{#unless marker.canAdd}}disabled{{/unless}}
+                data-tooltip="{{#if marker.canAdd}}{{localize "coffee-pub-cartographer.routes.markerAddHint"}}{{else}}{{localize "coffee-pub-cartographer.routes.markerNothingToFollow"}}{{/if}}"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.routes.markerAdd"}}</span></button>
+            <span>{{localize "coffee-pub-cartographer.routes.markerRemoved"}}</span>
+            {{else}}
             {{#if marker.exists}}
             <button type="button" class="cartographer-parallax-switch{{#if marker.shown}} is-on{{/if}}" role="switch" aria-checked="{{#if marker.shown}}true{{else}}false{{/if}}"
                 data-action="marker-shown" data-tooltip="{{localize "coffee-pub-cartographer.routes.markerShownHint"}}"><span class="cartographer-parallax-switch-knob"></span></button>
@@ -90,6 +95,7 @@
             {{/if}}
             <button type="button" class="cartographer-parallax-button is-labelled" data-action="marker-configure" {{#unless marker.canConfigure}}disabled{{/unless}}
                 data-tooltip="{{#if marker.canConfigure}}{{localize "coffee-pub-cartographer.routes.markerConfigureHint"}}{{else}}{{localize "coffee-pub-cartographer.routes.markerNothingToFollow"}}{{/if}}"><i class="fa-solid fa-palette"></i><span>{{localize "coffee-pub-cartographer.routes.markerConfigure"}}</span></button>
+            {{/if}}
         </div>
         {{/if}}
     </div>

@@ -188,10 +188,11 @@ replaces what had followed. An animated scene following a journey shows the map'
 keeps its own speed.
 
 While a route or journey is under way, the map shows only the routes it travels, and the same
-odometer as an animated scene's -- distance travelled, how far is left, the arrival time and a
+odometer as an animated scene's -- the trip's name, distance travelled, how far is left, the arrival time and a
 progress bar -- for everyone. It stays up while they are stopped or have arrived, and goes only
 when nothing on the map is in progress: never set out, or reset to the start. Waypoints are shown only while a
-route is drawn or edited; otherwise a route is its line and its label.
+route is drawn or edited; otherwise a route is just its line. Its name and length show when the
+pointer is over it (and while it is edited).
 
 The **Routes** section of the sub-menubar has a Play button too: it plays or stops what the bar runs
 on the map on screen.
@@ -232,6 +233,9 @@ of their own.
   marker stands. Choosing a route or journey in the bar also puts the party back on it. Players
   cannot move the marker.
 - When the party stops or arrives, the marker stays where they are.
+- **Deleting the marker** (from the pin's own menu) takes it off the map and it stays off: the trip and
+  its odometer carry on without it. The Setup tab's Party marker row then offers **Add marker**,
+  which puts it back where the party is, looking as it did.
 - Setting out on one route or journey stops any other moving on the same map: it is one party.
 
 With an older Blacksmith, the marker jumps to where the party is each time they stop, rather than

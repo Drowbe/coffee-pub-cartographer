@@ -72,6 +72,7 @@ class TravelPinsManager {
         if (pins && game.user.isGM) {
             pins.on('dragStart', event => this._onDragStart(event), { moduleId: MODULE.ID, dragEvents: true });
             pins.on('dragEnd', event => this._onDragEnd(event), { moduleId: MODULE.ID, dragEvents: true });
+            pins.on('deleted', event => this._onPinDeleted(event), { moduleId: MODULE.ID });
         }
     }
 
@@ -241,7 +242,8 @@ class TravelPinsManager {
         if (!link) return;
         const id = TravelPinsManager.pinId(scene.id);
         if (!pins.exists?.(id, { sceneId: scene.id })) {
-            if (game.user.isGM) this._once(`create-${id}`, () => this._ensurePin(link));
+            // Deleted by the GM, it stays deleted until they add it again.
+            if (game.user.isGM && !routesManager.settings(scene).marker?.removed) this._once(`create-${id}`, () => this._ensurePin(link));
             return;
         }
         const progress = routesManager.progress(link);
@@ -276,7 +278,12 @@ class TravelPinsManager {
     // ==================================================================
 
     /** Make the map's marker where the party is, if it has none. GM only. */
-    async _ensurePin(link) {
+    /**
+     * Make the map's marker where the party is, if it has none. GM only. In
+     * the look given -- the one it had when the GM deleted it -- or the
+     * default: a walking figure, labelled with the party's name.
+     */
+    async _ensurePin(link, look = null) {
         const pins = TravelPinsManager.pins();
         const id = TravelPinsManager.pinId(link.sceneId);
         if (!game.user.isGM || !pins || pins.exists?.(id)) return;
@@ -285,17 +292,43 @@ class TravelPinsManager {
         if (!progress?.point || !scene) return;
         const size = Math.max(40, Math.round((Number(scene.grid?.size) || 100) * 0.6));
         await pins.create({
-            id,
-            moduleId: MODULE.ID,
-            type: PIN_TYPE,
             text: TravelPinsManager.partyName(),
             image: '<i class="fa-solid fa-person-hiking"></i>',
             size: { w: size, h: size },
-            x: progress.point.x,
-            y: progress.point.y,
             ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.OBSERVER },
-            config: { blacksmithAccess: 'gm', blacksmithVisibility: 'visible' }
+            config: { blacksmithAccess: 'gm', blacksmithVisibility: 'visible' },
+            ...(look ?? {}),
+            // What makes it the party's marker, and where the party is, whatever the look.
+            id,
+            moduleId: MODULE.ID,
+            type: PIN_TYPE,
+            x: progress.point.x,
+            y: progress.point.y
         }, { sceneId: link.sceneId });
+    }
+
+    /**
+     * The GM deleted the party marker from the pin's own menu: it stays
+     * deleted -- the trip and its odometer carry on, with nothing on the map
+     * -- and its look is kept, for Add marker to put it back as it was.
+     */
+    async _onPinDeleted(event) {
+        if (!game.user.isGM || !event?.pinId?.startsWith(`${MODULE.ID}-party-`)) return;
+        const sceneId = event.sceneId ?? event.pinId.slice(`${MODULE.ID}-party-`.length);
+        const pin = event.pin ?? {};
+        const { id, x, y, sceneId: _scene, moduleId, type, ...look } = pin;
+        this._live.delete(event.pinId);
+        await routesManager.setSettings({ marker: { removed: true, look: Object.keys(look).length ? look : null } }, sceneId);
+    }
+
+    /** Put the party marker back on a map, where the party is, as it looked when deleted. GM only. */
+    async addMarker(sceneId) {
+        const scene = game.scenes.get(sceneId);
+        const link = scene ? routesManager.shownPath(scene) : null;
+        if (!game.user.isGM || !link) return;
+        const look = routesManager.settings(scene).marker?.look ?? null;
+        await routesManager.setSettings({ marker: { removed: false, look: null } }, sceneId);
+        await this._ensurePin(link, look);
     }
 
     /**

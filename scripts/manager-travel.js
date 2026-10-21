@@ -132,6 +132,8 @@ class TravelManager {
             // Within a hair of it: a converted journey length and a converted
             // distance can differ in the last decimal place.
             arrived: destination !== null && distance >= destination * (1 - 1e-9) - 1e-9,
+            // The trip's name, when this scene follows a route or journey on a map.
+            nameText: journey?.path.name ?? '',
             traveledText: formatDistance(distance, units),
             remainingText: remaining === null ? '' : formatDistance(remaining, units),
             destinationText: destination === null ? '' : formatDistance(destination, units),
@@ -152,9 +154,9 @@ class TravelManager {
     }
 
     /**
-     * The odometer for a map: the route or journey in progress on the scene
-     * on the canvas -- the map's active one (the one its bar runs), else any
-     * that is -- read from its progress, in the same shape as summary().
+     * The odometer for a map: the route or journey the map shows
+     * (routesManager.shownPath -- the same one its bar and party marker
+     * show), read from its progress, in the same shape as summary().
      *
      * In progress is having set out: moving, stopped along the way or
      * arrived, until it is reset to the start. The odometer stays up through
@@ -169,18 +171,10 @@ class TravelManager {
             return progress && (progress.moving || progress.effort > 0) ? progress : null;
         };
         // What is moving first, wherever it is driven from; then the last played here.
+        // The same trip the bar and the party marker show (routesManager.shownPath), so the
+        // odometer and the marker never disagree about where the party is.
         const shown = routesManager.shownPath(scene);
-        let progress = shown ? underWay(shown) : null;
-        if (!progress) {
-            const links = [
-                ...routesManager.journeys(scene).map(journey => ({ sceneId: scene.id, journeyId: journey.id })),
-                ...routesManager.routes(scene).map(route => ({ sceneId: scene.id, routeId: route.id }))
-            ];
-            for (const link of links) {
-                progress = underWay(link);
-                if (progress) break;
-            }
-        }
+        const progress = shown ? underWay(shown) : null;
         if (!progress) return null;
         const units = scene.grid?.units ?? '';
         const remaining = Math.max(0, progress.length - progress.distance);
@@ -198,6 +192,7 @@ class TravelManager {
             remaining,
             progress: progress.length > 0 ? Math.min(1, progress.distance / progress.length) : 0,
             arrived,
+            nameText: progress.path.name ?? '',
             traveledText: formatDistance(progress.distance, units),
             remainingText: formatDistance(remaining, units),
             destinationText: formatDistance(progress.length, units),
@@ -217,6 +212,7 @@ class TravelManager {
             hud.className = 'cartographer-travel-hud';
             hud.dataset.tooltip = game.i18n.localize(`${MODULE.ID}.parallax.travelHudDragHint`);
             hud.innerHTML = `
+                <div class="cartographer-travel-hud-name" data-travel-hud="name"></div>
                 <div class="cartographer-travel-hud-row">
                     <i class="fa-solid fa-route"></i>
                     <span data-travel-hud="traveled"></span>
@@ -229,6 +225,10 @@ class TravelManager {
         }
         const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
         hud.querySelector('[data-travel-hud="traveled"]').textContent = summary.traveledText;
+        // The trip it is counting: a route or journey's name, when there is one.
+        const name = hud.querySelector('[data-travel-hud="name"]');
+        name.textContent = summary.nameText ?? '';
+        name.hidden = !summary.nameText;
         const remaining = hud.querySelector('[data-travel-hud="remaining"]');
         const bar = hud.querySelector('.cartographer-travel-hud-bar');
         if (summary.destination === null) {
