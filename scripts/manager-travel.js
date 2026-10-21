@@ -257,6 +257,7 @@ class TravelManager {
         // The trip it is counting: a route or journey's name, when there is one.
         const name = hud.querySelector('[data-travel-hud="name"]');
         name.textContent = summary.nameText ?? '';
+        name.dataset.tooltip = summary.nameText ?? '';
         name.hidden = !summary.nameText;
         const remaining = hud.querySelector('[data-travel-hud="remaining"]');
         const bar = hud.querySelector('.cartographer-travel-hud-bar');

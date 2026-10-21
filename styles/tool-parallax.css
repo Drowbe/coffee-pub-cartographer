@@ -693,7 +693,8 @@
 .cartographer-travel-hud {
     position: fixed;
     z-index: 70;
-    min-width: 180px;
+    /* Wide enough for its figures and controls, so it holds its size as they change. */
+    min-width: 360px;
     padding: 6px 12px;
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 6px;
@@ -808,6 +809,11 @@
     font-weight: 600;
     text-align: center;
     white-space: nowrap;
+    /* The trip's name never widens the panel: a long one is cut short, whole in its tooltip. */
+    width: 0;
+    min-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .cartographer-travel-hud-name[hidden] {
