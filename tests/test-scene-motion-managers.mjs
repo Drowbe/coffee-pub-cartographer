@@ -437,9 +437,8 @@ console.log('\nroutes: who may change what');
     check(Math.abs(pm.travelDistance(now) - 62.5) < 1e-6, 'difficult terrain halves the pace: 15 s is 62.5 ft');
     const at = rm.progress(link, now);
     check(at.factor === 0.5 && at.terrain === 'forest' && Math.abs(at.point.x - 1750) < 1e-6, 'the journey knows the leg, its terrain and the point on the map');
-    await pm.setTerrainFactor(0.5);
     const { motionSpeed } = await import('../scripts/utils-motion.js');
-    check(Math.abs(motionSpeed(pm.state, now) - 0.5) < 1e-12, 'the scenery slows to the terrain\'s pace');
+    check(Math.abs(motionSpeed(pm.state, now) - 1) < 1e-12, 'the scenery keeps its own speed on difficult ground: only the trip slows');
     now += 30000;
     check(Math.abs(pm.travelDistance(now) - 100) < 1e-6, 'it stops counting at the journey\'s end');
     await pm.setTravel({ route: null });
@@ -549,8 +548,8 @@ console.log('\nroutes: who may change what');
     game.scenes = Object.assign([scene, anim], { get: id => [scene, anim].find(s => s.id === id) ?? null, contents: [scene, anim] });
     check(jm.linkedScenes(go).map(s => s.id).join() === 'anim', 'the map knows which animated scenes follow the journey');
     await jm.setPace(go, 9000);
-    check(animFlags.parallax.layers[0].speed === 70 && rm.progress(go).travel.pace === 9000,
-        'the map\'s pace sets the following scene\'s ground speed, and through it the journey\'s');
+    check(animFlags.parallax.layers[0].speed === 140 && rm.progress(go).travel.pace === 9000,
+        'the pace is the trip\'s, set on the map; the following scene keeps its scenery\'s speed');
     await jm.play(go);
     check(animFlags.parallax.playing === true && jm.isPlaying(go), 'Play on the map plays the scene that follows it, though it is not on the canvas');
     now += 25000;
@@ -558,7 +557,7 @@ console.log('\nroutes: who may change what');
     jm._lastWatch = -Infinity;
     jm._watch();
     await settle();
-    check(animFlags.parallax.terrainFactor === 0.5, 'reaching the forest slows that scene\'s scenery, from the map');
+    check((animFlags.parallax.terrainFactor ?? 1) === 1, 'reaching the forest slows the trip, not that scene\'s scenery');
     now += 60000;
     jm._lastWatch = -Infinity;
     jm._watch();
@@ -575,6 +574,7 @@ console.log('\nroutes: who may change what');
     console.log('\nrunning a single route, and what is drawn meanwhile');
     const lone = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Lone', points: [[0, 500], [1400, 500]] } }, gm);
     const one = { sceneId: 'here', routeId: lone.id };
+    now += 3000; // past the ease to a stop
     check(rm.travellingRouteIds() === null, 'with nothing moving, every route is drawn');
     await jm.play(one, 18000);
     check(jm.isPlaying(one) && jm.activeLink()?.routeId === lone.id, 'a single route can be run, and becomes the one the map\'s bar runs');
@@ -637,9 +637,10 @@ console.log('\nroutes: who may change what');
     await jm.stop(one);
     world = startWorld + 25;
     const scenery = pm._readState();
-    pm.applyTimeRate(scenery, 3600);
-    check(scenery.travel.timeRate === 3600 && scenery.masterSpeed === 4 && pm._journeyMotion(scenery).masterSpeed === 3600,
-        'an hour a second runs the journey at that rate, and its scenery no faster than four times its pace');
+    scenery.masterSpeed = 2;
+    pm.applyDirection(scenery, -3600);
+    check(scenery.masterSpeed === -2 && JSON.stringify(pm._journeyMotion(scenery)) === JSON.stringify({ playing: !!scenery.playing }),
+        'however fast the trip runs, a following scene\'s scenery keeps its own speed, turned the way the trip goes; it tells the trip only Play and Stop');
     const late = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Late', points: [[0, 900], [1400, 900]] } }, gm);
     await jm.play({ sceneId: 'here', routeId: late.id }, 3600);
     check(rm.progress({ sceneId: 'here', routeId: late.id }).travel.followClock === true, 'a route setting out later takes up the map\'s setting');
@@ -661,6 +662,79 @@ console.log('\nroutes: who may change what');
     await pm.play();
     check(pm.state.masterSpeed === 1 && pm.state.playing, 'and so does Play on an animated scene');
     await pm.stop();
+
+    console.log('\nan animated scene playing a journey: the map shows it');
+    await jm.play(lateLink, 3600);
+    check(rm.settings().active?.routeId === late.id && jm.isPlaying(lateLink), 'the map shows the route its bar played');
+    await pm.setTravel({ route: go });
+    await pm.play();
+    check(rm.settings().active?.journeyId === go.journeyId, 'played from an animated scene, the journey becomes the one its map shows: bar, odometer, marker');
+    check(!jm.isPlaying(lateLink) && jm.isPlaying(go), 'and the route that was moving there stops: one party');
+    await pm.stop();
+    await pm.setTravel({ route: null });
+    // A route set moving without its map hearing of it (before this was handled,
+    // or by a macro): the map still shows what is moving, not the stale choice.
+    await rm.setSettings({ active: { journeyId: go.journeyId } });
+    await rm.setPathTravel(lateLink, { playing: true, pace: 3600, masterSpeed: 1 });
+    check(rm.shownPath()?.routeId === late.id, 'the map shows the route that is moving, over the journey last played there');
+    await rm.setPathTravel(lateLink, { playing: false });
+    check(rm.shownPath()?.journeyId === go.journeyId, 'with nothing moving, it shows the one last played there');
+
+    console.log('\nputting the party down');
+    const placed = new Map();
+    let partyName = 'The Fellowship';
+    game.modules = { get: id => (id === 'coffee-pub-blacksmith' ? { api: { pins: {
+        isAvailable: () => true, registerPinType() {}, on() {},
+        exists: pid => placed.has(pid), get: pid => placed.get(pid) ?? null,
+        create: async data => { placed.set(data.id, { ...data }); },
+        update: async (pid, patch) => { placed.set(pid, { ...placed.get(pid), ...patch }); }
+    }, party: { actor: () => (partyName ? { name: partyName } : null) } } } : null) };
+    await load(`const MODULE={ID:'m',NAME:'M'}; const routesManager=globalThis.rm; const journeysManager=globalThis.jm;\n${shared}\n${strip('utils-routes.js')}\n`
+        + strip('manager-travelpins.js').replace('const travelPinsManager', 'globalThis.tp2').replace(/^export \{[^}]*\};?$/m, ''));
+    placed.set('m-party-here', { id: 'm-party-here', x: 0, y: 0 });
+    await rm.setSettings({ active: { routeId: late.id } });
+    await jm.play(lateLink, 3600);
+    const onRoute = await tp2.placeParty(scene, { x: 700, y: 905 }, 24);
+    check(onRoute.onRoute && onRoute.link.routeId === late.id && !jm.isPlaying(lateLink), 'dropped by a route, the party lands on it, stopped');
+    check(Math.abs(rm.progress(lateLink).distance - 25) < 1e-6 && placed.get('m-party-here').y === 900,
+        'its progress is where it landed, halfway along, and the marker sits on the line');
+    await rm.setSettings({ active: { journeyId: go.journeyId } });
+    const onJourney = await tp2.placeParty(scene, { x: 2100, y: 3 }, 24);
+    check(onJourney.link.journeyId === go.journeyId && Math.abs(rm.progress(go).distance - 75) < 1e-6,
+        'dropped on a route of the journey the map shows, it lands on the journey: 50 ft of the first route and 25 of the second');
+    const offRoute = await tp2.placeParty(scene, { x: 5000, y: 5000 }, 24);
+    check(!offRoute.onRoute && rm.settings().offRoute && rm.shownPath() === null, 'dropped off every route, the party is on none');
+    check(rm.progress(go).distance === 0, 'and the trip it was on is cancelled: its odometer back to the start');
+    const warnedBefore = warnings.length;
+    await jm.play(go);
+    check(!jm.isPlaying(go) && warnings.length === warnedBefore + 1, 'and Play says to put it on a route first');
+    await rm.setSettings({ active: { routeId: late.id } });
+    check(!rm.settings().offRoute, 'choosing a route in the bar puts the party back on one');
+    await tp2.placeParty(scene, { x: 700, y: 900 }, 24);
+    check(Math.abs(rm.progress(lateLink).distance - 25) < 1e-6, 'the party back on its route, 25 ft along');
+    await tp2.placeParty(scene, { x: 1050, y: 902 }, 24);
+    check(Math.abs(rm.progress(lateLink).distance - 37.5) < 1e-6, 'dropped further along the same route, it just moves along it');
+    const moved = await tp2.placeParty(scene, { x: 350, y: 498 }, 24);
+    check(moved.link.routeId === lone.id && Math.abs(rm.progress(one).distance - 12.5) < 1e-6 && rm.progress(lateLink).distance === 0,
+        'dropped on a different route, the last trip is cancelled and the party starts the new one where it landed');
+
+    console.log('\nthe marker is the party\'s');
+    placed.delete('m-party-here');
+    await tp2._ensurePin(one);
+    check(placed.get('m-party-here')?.text === 'The Fellowship', 'a new marker is labelled with the party\'s name, from Blacksmith');
+    tp2._partyName = 'The Fellowship';
+    partyName = 'The Company';
+    await tp2._renameMarker();
+    check(placed.get('m-party-here').text === 'The Company', 'renaming the party renames its marker');
+    placed.get('m-party-here').text = 'Wagon train';
+    partyName = 'The Band';
+    await tp2._renameMarker();
+    check(placed.get('m-party-here').text === 'Wagon train', 'but a label the GM chose stays');
+    partyName = null;
+    placed.delete('m-party-here');
+    await tp2._ensurePin(one);
+    check(placed.get('m-party-here')?.text === 'm.routes.partyMarker', 'with no party set in the world, it is simply "The party"');
+    game.modules = { get: () => null };
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nall checks passed');

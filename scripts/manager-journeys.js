@@ -7,7 +7,6 @@ import { cartographerToolbar } from './manager-toolbar.js';
 import { routesManager } from './manager-routes.js';
 import { parallaxManager } from './manager-parallax.js';
 import { travelManager } from './manager-travel.js';
-import { convertDistance } from './utils-routes.js';
 import { DEFAULT_EASE_SECONDS } from './utils-motion.js';
 
 /** The section of Cartographer's sub-menubar the Play button sits in; registered in manager-toolbar.js. */
@@ -84,14 +83,15 @@ class JourneysManager {
      * or to the journey itself when none does. \`scene\` changes the scenes'
      * parallax state; \`path\` is the journey's travel change.
      */
+    /**
+     * Make a change to a trip: to the trip itself, and -- for what the
+     * scenery shows (Play, Stop, which way) -- to the animated scenes
+     * following it, which need not be on the canvas.
+     */
     async _drive(link, { scene, path }) {
         if (!game.user.isGM) return;
-        const scenes = this.linkedScenes(link);
-        if (scenes.length) {
-            for (const each of scenes) await parallaxManager.commitScene(each, scene);
-        } else {
-            await routesManager.setPathTravel(link, path);
-        }
+        await routesManager.setPathTravel(link, path);
+        if (scene) for (const each of this.linkedScenes(link)) await parallaxManager.commitScene(each, scene);
         this._refreshButton();
     }
 
@@ -111,6 +111,11 @@ class JourneysManager {
     async play(link, pace = null) {
         const progress = this.progress(link);
         if (!progress) return;
+        // Set down off every route, the party has nowhere to go until it is on one.
+        if (routesManager.settings(game.scenes.get(link.sceneId)).offRoute) {
+            ui.notifications.warn(game.i18n.localize(`${MODULE.ID}.routes.partyOffRoute`));
+            return;
+        }
         if (!this.linkedScenes(link).length && !(progress.travel.pace > 0) && !(pace > 0)) {
             ui.notifications.warn(game.i18n.localize(`${MODULE.ID}.routes.needsPace`));
             return;
@@ -129,13 +134,11 @@ class JourneysManager {
             scene: state => {
                 state.playing = true;
                 state.travel.arrived = false;
-                if (!(Number(state.travel.timeRate ?? state.masterSpeed) || 0)) parallaxManager.applyTimeRate(state, 1);
+                parallaxManager.applyDirection(state, path.masterSpeed ?? progress.travel.motion.masterSpeed);
             },
             path
         });
-        // Followed, the scenes push only the motion; the journey's own marks are set here.
-        if (this.linkedScenes(link).length) await routesManager.setPathTravel(link, { arrived: false, ...(path.effort === 0 ? { effort: 0 } : {}) });
-        await routesManager.setSettings({ active: link.journeyId ? { journeyId: link.journeyId } : { routeId: link.routeId } });
+        await routesManager.setSettings({ active: link.journeyId ? { journeyId: link.journeyId } : { routeId: link.routeId } }, link.sceneId);
     }
 
     async _stopOthers(link) {
@@ -160,42 +163,21 @@ class JourneysManager {
     async setSpeed(link, speed) {
         const value = Number(speed);
         if (!Number.isFinite(value)) return;
-        await this._drive(link, { scene: state => parallaxManager.applyTimeRate(state, value), path: { masterSpeed: value } });
+        await this._drive(link, { scene: state => parallaxManager.applyDirection(state, value), path: { masterSpeed: value } });
     }
 
-    /**
-     * The pace, in the map's units an hour. Followed by animated scenes, it
-     * sets their ground layers' speed (in their own units), which is where a
-     * followed journey's pace comes from.
-     */
+    /** The pace, in the map's units an hour: the trip's. Scenes following it keep their own scenery speeds. */
     async setPace(link, perHour) {
-        const pace = Math.max(0, Number(perHour) || 0);
-        const mapUnits = game.scenes.get(link.sceneId)?.grid?.units;
-        await this._drive(link, {
-            scene: (state, scene) => {
-                const own = convertDistance(pace, mapUnits, scene.grid?.units);
-                if (own !== null) parallaxManager.applyGroundPace(state, own, scene);
-            },
-            path: { pace }
-        });
+        await this._drive(link, { path: { pace: Math.max(0, Number(perHour) || 0) } });
     }
 
     /**
      * Follow the world clock, or real time. Following it, where the party is
      * goes with the date and time: scrubbing time moves them along the way,
-     * forward or back. Followed by animated scenes, it is their switch too.
+     * forward or back. The trip's: scenes following it keep their scenery's own speeds.
      */
     async setFollowClock(link, follow) {
-        const rate = travelManager.constructor.clockApi()?.rate;
-        // The scenes are written whether or not the journey's travel changes,
-        // so their scenery keeps step with the clock setting.
-        await this._drive(link, {
-            scene: state => {
-                state.travel.followClock = !!follow;
-                if (rate !== undefined) state.travel.clockRate = Math.max(0, Number(rate) || 0);
-            },
-            path: { followClock: !!follow }
-        });
+        await this._drive(link, { path: { followClock: !!follow } });
     }
 
     /**
@@ -205,7 +187,7 @@ class JourneysManager {
      */
     async setMapClock(scene, follow) {
         if (!game.user.isGM || !scene) return;
-        await routesManager.setSettings({ followClock: !!follow });
+        await routesManager.setSettings({ followClock: !!follow }, scene.id);
         const links = [
             ...routesManager.journeys(scene).filter(j => j.travel).map(j => ({ sceneId: scene.id, journeyId: j.id })),
             ...routesManager.routes(scene).filter(r => r.travel).map(r => ({ sceneId: scene.id, routeId: r.id }))
@@ -242,11 +224,11 @@ class JourneysManager {
             order: 4,
             toggleable: true,
             active: () => {
-                const link = this.activeLink();
+                const link = routesManager.shownPath(canvas?.scene) ?? this.activeLink();
                 return !!link && this.isPlaying(link);
             },
             onClick: () => {
-                const link = this.activeLink();
+                const link = routesManager.shownPath(canvas?.scene) ?? this.activeLink();
                 if (link) return this.toggle(link);
                 ui.notifications.info(game.i18n.localize(`${MODULE.ID}.routes.noActiveJourney`));
                 return routesManager.openWindow();
@@ -256,7 +238,7 @@ class JourneysManager {
 
     _refreshButton() {
         const api = game.modules.get('coffee-pub-blacksmith')?.api;
-        const link = this.activeLink();
+        const link = routesManager.shownPath(canvas?.scene) ?? this.activeLink();
         api?.updateSecondaryBarItemActive?.(MODULE.ID, PLAY_ID, !!link && this.isPlaying(link));
     }
 
@@ -299,13 +281,6 @@ class JourneysManager {
             if (!progress) continue;
             const scenes = this.linkedScenes(link);
             const onCanvas = scenes.some(scene => scene.id === canvas.scene?.id);
-            // The scenery of animated scenes not on the canvas, slowed for the terrain.
-            for (const scene of scenes) {
-                if (scene.id === canvas.scene?.id) continue;
-                const state = scene.getFlag(MODULE.ID, 'parallax');
-                if ((state?.terrainFactor ?? 1) === progress.factor) continue;
-                this._once(`terrain-${scene.id}`, () => parallaxManager.commitScene(scene, s => { s.terrainFactor = progress.factor; }));
-            }
             // The end of the way, when no animated scene on the canvas is watching for it.
             const forward = (progress.travel.motion.masterSpeed ?? 1) >= 0;
             if (!onCanvas && forward && !progress.travel.arrived && progress.effort >= progress.totalEffort - 1e-9) {

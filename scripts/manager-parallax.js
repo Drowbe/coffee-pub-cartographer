@@ -415,28 +415,16 @@ class ParallaxManager {
 
     /**
      * Following a route or journey (`travel.route`), this scene is a view of
-     * it: the journey's progress is kept with it, on the map, and this
-     * scene's Play and Stop, master speed, ease, world clock and pace drive
-     * it. They are written to the journey whenever they change, anchored at
-     * the same moment as this scene's own motion, so the two run together.
-     * Terrain is the journey's: it slows the party, and the GM's client slows
-     * the scenery to match (see manager-travel.js).
+     * the trip, which lives on its map: its pace, time rate, world clock and
+     * terrain are the trip's, set there, and its odometer reads the trip.
+     * The scenery only says "we are travelling": it runs at the speeds set
+     * for its layers while the trip moves, eases to a halt when it stops, and
+     * runs the other way when the trip runs back -- never faster or slower
+     * with the clock or the ground. All this scene tells the trip is Play and
+     * Stop.
      */
-    _journeyMotion(state, scene = canvas.scene) {
-        const travel = state.travel;
-        const map = game.scenes.get(travel.route?.sceneId);
-        const pace = convertDistance(this.groundPace(state, scene), scene?.grid?.units, map?.grid?.units);
-        return {
-            playing: !!state.playing,
-            // The journey's time rate: set from the map, it can run faster than the scenery shows.
-            masterSpeed: Number(travel.timeRate ?? state.masterSpeed) || 0,
-            easeSeconds: Math.max(0, Number(state.easeSeconds) || 0),
-            // Whether the journey follows the clock is its map's setting, not this
-            // scene's (manager-journeys.js setMapClock); this scene's switch only
-            // speeds up its scenery with the clock.
-            clockFactor: 1,
-            pace: pace ?? 0
-        };
+    _journeyMotion(state) {
+        return { playing: !!state.playing };
     }
 
     async _pushJourney(before, state, scene = canvas.scene) {
@@ -451,24 +439,26 @@ class ParallaxManager {
             this._pushed.delete(scene?.id);
             return;
         }
-        const motion = this._journeyMotion(state, scene);
+        const motion = this._journeyMotion(state);
         const signature = key(link) + JSON.stringify(motion);
         if (signature === this._pushed.get(scene?.id)) return;
         this._pushed.set(scene?.id, signature);
+        // A trip that has no pace yet takes this scene's ground pace, once, to set out at.
+        const progress = routesManager.progress(link);
+        if (progress && !(progress.travel.pace > 0)) {
+            const map = game.scenes.get(link.sceneId);
+            const pace = convertDistance(this.groundPace(state, scene), scene?.grid?.units, map?.grid?.units);
+            if (pace > 0) motion.pace = pace;
+        }
         await routesManager.setPathTravel(link, motion, state.anchorAt);
+        // Set going from here, it becomes the one its map shows: bar, odometer and marker.
+        if (motion.playing) await routesManager.claimActive(link);
     }
 
     /** The followed journey's progress (see RoutesManager.progress), or null. */
     journeyProgress(now = game.time.serverTime, state = this.state) {
         const link = state.travel?.route;
         return link ? routesManager.progress(link, now) : null;
-    }
-
-    /** The scenery's speed for the terrain the party is crossing. The GM's client sets it as legs change. */
-    setTerrainFactor(factor) {
-        const value = Number(factor) > 0 ? Number(factor) : 1;
-        if ((this.state.terrainFactor ?? 1) === value) return;
-        return this._commit(s => { s.terrainFactor = value; });
     }
 
     /**
@@ -479,16 +469,16 @@ class ParallaxManager {
      */
     _syncClock(state) {
         const travel = state.travel;
-        const following = !!travel.followClock;
+        // Following a trip on a map, the clock is the trip's; the scenery keeps
+        // its own speeds, so only an unlinked scene speeds up with the clock.
+        const following = !!travel.followClock && !travel.route;
         const rate = following ? Math.max(0, Number(travel.clockRate) || 0) : 0;
         travel.clockMotion.playing = following && state.playing;
         travel.clockMotion.masterSpeed = rate * (Number(state.masterSpeed) || 0);
         state.clockFactor = following ? Math.min(rate, MAX_CLOCK_SCENERY) : 1;
-        // Terrain only slows the scenery while it follows a journey.
-        if (!travel.route) {
-            state.terrainFactor = 1;
-            delete travel.timeRate;
-        }
+        // From an earlier version, which slowed the scenery for terrain and kept the trip's rate here.
+        state.terrainFactor = 1;
+        delete travel.timeRate;
     }
 
     // ==================================================================
@@ -512,22 +502,16 @@ class ParallaxManager {
     setMasterSpeed(speed) {
         const value = Number(speed);
         if (!Number.isFinite(value)) return;
-        return this._commit(s => {
-            s.masterSpeed = value;
-            // Following a journey, this scene's speed is also the journey's time rate.
-            if (s.travel?.route) s.travel.timeRate = value;
-        });
+        return this._commit(s => { s.masterSpeed = value; });
     }
 
     /**
-     * A journey's time rate, set from its map, on a scene following it. The
-     * journey runs at it; the scenery runs with it but never faster than
-     * MAX_CLOCK_SCENERY times its pace, since an hour a second is a blur.
+     * A scene following a trip runs its scenery the way the trip goes: the
+     * same speed as set, turned round when the trip runs back.
      */
-    applyTimeRate(state, rate) {
-        const value = Number(rate) || 0;
-        state.travel.timeRate = value;
-        state.masterSpeed = Math.sign(value) * Math.min(Math.abs(value), MAX_CLOCK_SCENERY);
+    applyDirection(state, rate) {
+        const sign = Math.sign(Number(rate) || 0) || 1;
+        state.masterSpeed = sign * (Math.abs(Number(state.masterSpeed) || 0) || 1);
     }
 
     // ==================================================================

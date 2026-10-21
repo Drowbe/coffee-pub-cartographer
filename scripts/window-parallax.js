@@ -600,12 +600,30 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             routeGroups,
             hasRoutes: routeGroups.length > 0 || !!link,
             routeLinked: !!link,
-            mapClock: link ? routesManager.settings(game.scenes.get(link.sceneId)).followClock : false,
+            travellingText: linked && linked.converted !== null ? this._travellingText(link, linked.scene) : '',
             routeText: !link ? ''
                 : !linked ? localize('travelRouteMissing')
                 : linked.converted === null ? localize('travelRouteUnits')
                 : game.i18n.format(`${MODULE.ID}.parallax.travelRouteLength`, { length: formatDistance(linked.converted, units), name: linked.name, scene: linked.scene.name })
         };
+    }
+
+    /**
+     * What a followed trip runs at, from its map: "Riding horse (6 mph) ·
+     * world clock, set on Faerun". Its pace as a named pace where it is one.
+     */
+    _travellingText(link, map) {
+        const localize = key => game.i18n.localize(`${MODULE.ID}.parallax.${key}`);
+        const units = map.grid?.units;
+        const progress = routesManager.progress(link);
+        const pace = Number(progress?.travel.pace) || 0;
+        const named = this._paceChoices(units).find(p => pace > 0 && Math.abs(p.perHour - pace) <= p.perHour * 0.005);
+        const shown = sceneUnitsToPace(pace, units);
+        const paceText = !(pace > 0) ? localize('travellingNoPace')
+            : named ? named.label
+            : shown !== null ? `${Math.round(shown * 10) / 10} ${paceUnit(units)}` : `${formatDistance(pace, units)}/h`;
+        const clock = routesManager.settings(map).followClock ? localize('travellingClock') : localize('travellingRealTime');
+        return game.i18n.format(`${MODULE.ID}.parallax.travellingValue`, { pace: paceText, time: clock, map: map.name });
     }
 
     /** The paces to choose from on this scene; see paceChoices. */
@@ -1436,10 +1454,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const ref = id.startsWith('j:') ? { sceneId, journeyId: id.slice(2) } : { sceneId, routeId: id };
         const linked = routesManager.linked(ref, canvas.scene?.grid?.units);
         if (!linked || linked.converted === null) return;
-        // The map decides whether its journeys follow the clock; this scene's
-        // scenery speeds up with the clock to match.
-        const mapClock = routesManager.settings(game.scenes.get(sceneId)).followClock;
-        void this.manager.setTravel({ route: ref, destination: linked.converted, followClock: mapClock });
+        void this.manager.setTravel({ route: ref, destination: linked.converted });
     }
 
     /** A pace typed in mph or km/h sets the ground layer's speed. */

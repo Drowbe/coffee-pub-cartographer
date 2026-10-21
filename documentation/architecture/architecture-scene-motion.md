@@ -117,13 +117,9 @@ legs to turn it into distance, a difficult leg costing twice its length, so ever
 same place without anything streaming. `routesManager.progress(link)` gives the distance, the leg
 and its terrain, and the point on the map; `setPathTravel` (GM) folds the effort and re-anchors.
 
-The animated scene is a view. `_commit` in manager-parallax.js pushes its playing, master speed,
-ease, clock and pace (its ground pace converted to the map's units) to the linked path whenever
-they change, anchored at the same moment as the scene's own motion, and stops the path it stops
-showing. Its odometer reads the path. The scenery's speed is multiplied by `terrainFactor` in
-`targetSpeed` (utils-motion.js); the GM's client sets it as the party crosses into a leg of other
-terrain (`_checkTerrain` in manager-travel.js), so it eases like any change of speed. The
-distance never waits on that: it is exact from the effort; only the picture follows.
+The animated scene is a view (below). `_commit` in manager-parallax.js pushes its Play and Stop
+to the linked path when they change, and stops the path it stops showing. Its odometer reads the
+path. The distance is exact from the effort; the scenery only shows that the party is travelling.
 
 **Following the world clock**, a path's place is a function of the world time, not of real time:
 `travel.timeline` is a list of changes `{ w, effort, rate }` -- the world time each was made, the
@@ -135,21 +131,25 @@ handling of its own: the next frame reads the new time. `routesManager.worldTime
 time on at Blacksmith's clock rate between updates, for at most ten seconds, so the marker moves
 smoothly rather than stepping.
 
+**An animated scene following a trip is a view of it.** It tells the trip only Play and Stop
+(`_journeyMotion`); pace, time rate, the world clock and terrain are the trip's, set on the map.
+Its scenery runs at the speeds set for its layers while the trip moves, turned the way the trip goes
+(`applyDirection`), and never speeds up with the clock (`_syncClock` ignores the clock on a linked
+scene) or slows for terrain. A trip with no pace yet takes the scene's ground pace once, when the
+scene first pushes to it. The map's controls (`_drive` in manager-journeys.js) write the trip
+directly and start, stop or turn the following scenes' scenery with `commitScene`.
+
 **Pace is speed; the master speed is time.** A path's `pace` is the party's speed. Its
 `motion.masterSpeed` is how fast travel time runs: in real-time mode, in-world seconds per real
 second (the bar steps through `TIME_RATES`, 1 to 3600, either way); following the clock, only its
-sign counts, since the clock is the time. An animated scene following a path keeps the path's rate
-in `travel.timeRate` and runs its scenery at that rate capped at `MAX_CLOCK_SCENERY`
-(`applyTimeRate`), so an hour a second from the map does not blur its layers.
+sign counts, since the clock is the time.
 
-**Controls from the map** (manager-journeys.js). A journey followed by animated scenes is driven
-through them: the map's Play, speed and pace change each following scene with
+**Controls from the map** (manager-journeys.js). The map's controls write the trip with
+`setPathTravel`, and start, stop or turn the scenery of scenes following it with
 `parallaxManager.commitScene`, which rebases and writes a scene's parallax from its own flag and
-grid without it being on the canvas, and each pushes on to the journey as its own controls do. A
-journey nothing follows is changed directly with `setPathTravel`. The GM's client watches every
-moving journey on a ticker: it slows the scenery of following scenes that are not on the canvas
-for the terrain, keeps their world-clock rate, and stops a journey that reaches its end when no
-following scene is on the canvas to notice (manager-travel.js covers the one that is). The map's
+grid without it being on the canvas. The GM's client watches every moving trip on a ticker and
+stops one that reaches its end when no following scene is on the canvas to notice
+(manager-travel.js covers the one that is). The map's
 "active" journey -- the one the sub-menubar's Play runs -- is `settings.active` in the `routes`
 flag: the last one played there.
 

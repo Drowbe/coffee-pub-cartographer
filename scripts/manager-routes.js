@@ -244,13 +244,65 @@ class RoutesManager {
             : null;
         // Whether the map's routes and journeys follow the world clock: one setting for
         // the map, since there is one party and one clock.
-        return { hoursPerDay: hours > 0 && hours <= 24 ? hours : DEFAULT_HOURS_PER_DAY, active, followClock: !!stored.followClock };
+        return {
+            hoursPerDay: hours > 0 && hours <= 24 ? hours : DEFAULT_HOURS_PER_DAY,
+            active,
+            followClock: !!stored.followClock,
+            // The party has been set down off every route: nothing to travel until it is put on one.
+            offRoute: !!stored.offRoute
+        };
     }
 
     /** Change the map's travel plan. The GM's; it is the same plan for everyone. */
-    async setSettings(changes) {
+    /** Change a map's settings (default: the map on the canvas). GM only. */
+    async setSettings(changes, sceneId = canvas.scene?.id) {
         if (!game.user.isGM) return null;
-        return this._apply({ action: 'settings', sceneId: canvas.scene?.id, changes }, game.user);
+        return this._apply({ action: 'settings', sceneId, changes }, game.user);
+    }
+
+    /**
+     * The route or journey a map shows -- in its bar, its odometer and its
+     * party marker: whichever is moving, from the map or from an animated
+     * scene following it (the map's active one first, if it is); when
+     * nothing is, the active one, the last played there. Null if neither.
+     */
+    shownPath(scene = canvas.scene) {
+        if (!scene) return null;
+        const active = this.settings(scene).active;
+        const activeLink = active ? { sceneId: scene.id, ...active } : null;
+        // Under way: going, not easing to a stop after one. Following the clock,
+        // the timeline says; otherwise Play does.
+        const underWay = link => {
+            const progress = this.progress(link);
+            return !!progress?.moving && (progress.travel.followClock || progress.travel.motion.playing);
+        };
+        if (activeLink && underWay(activeLink)) return activeLink;
+        const links = [
+            ...this.journeys(scene).filter(j => j.travel).map(j => ({ sceneId: scene.id, journeyId: j.id })),
+            ...this.routes(scene).filter(r => r.travel).map(r => ({ sceneId: scene.id, routeId: r.id }))
+        ];
+        // Set down off every route, the party is on none until something moves it.
+        return links.find(underWay) ?? (this.settings(scene).offRoute ? null : activeLink);
+    }
+
+    /**
+     * Make a route or journey the one its map shows -- its bar, odometer and
+     * party marker -- and stop any other moving there: there is one party.
+     * For a route or journey set going from somewhere other than its map's
+     * own bar, such as an animated scene following it. GM only.
+     */
+    async claimActive(link) {
+        if (!game.user.isGM || !link?.sceneId) return;
+        const scene = game.scenes.get(link.sceneId);
+        if (!scene) return;
+        const same = other => (link.journeyId ? other.journeyId === link.journeyId : (!other.journeyId && other.routeId === link.routeId));
+        const active = this.settings(scene).active;
+        if (!active || !same(active)) await this.setSettings({ active: link.journeyId ? { journeyId: link.journeyId } : { routeId: link.routeId } }, scene.id);
+        const others = [
+            ...this.journeys(scene).filter(j => j.travel?.motion?.playing).map(j => ({ sceneId: scene.id, journeyId: j.id })),
+            ...this.routes(scene).filter(r => r.travel?.motion?.playing).map(r => ({ sceneId: scene.id, routeId: r.id }))
+        ].filter(other => !same(other));
+        for (const other of others) await this.setPathTravel(other, { playing: false });
     }
 
     /**
@@ -547,6 +599,10 @@ class RoutesManager {
                 const hours = Number(data.changes?.hoursPerDay);
                 const settings = { ...stored, ...(hours > 0 && hours <= 24 ? { hoursPerDay: Math.round(hours * 4) / 4 } : {}) };
                 if ('followClock' in (data.changes ?? {})) settings.followClock = !!data.changes.followClock;
+                // The party set down somewhere on the map that is on no route.
+                if ('offRoute' in (data.changes ?? {})) settings.offRoute = !!data.changes.offRoute;
+                // Choosing what the map runs puts the party back on it.
+                if ('active' in (data.changes ?? {}) && data.changes.active && !('offRoute' in data.changes)) settings.offRoute = false;
                 // The route or journey the map's bar and Play button run: the last one played here.
                 if ('active' in (data.changes ?? {})) {
                     const active = data.changes.active;
@@ -877,11 +933,12 @@ class RoutesManager {
     // ===== DRAWING A ROUTE ============================================
     // ==================================================================
 
-    startDrawing() {
+    /** Start drawing a route, from a point if given: where the party stands, say. */
+    startDrawing(from = null) {
         if (!canvas?.ready || this.draft || !canvas.scene?.grid?.distance) return;
         this.stopEditing();
         this._listen();
-        this.draft = { points: [], cursor: null };
+        this.draft = { points: from ? [[from.x, from.y]] : [], cursor: null };
         canvas.app.view.style.cursor = 'crosshair';
         ui.notifications.info(game.i18n.localize(`${MODULE.ID}.routes.drawHint`));
         this._refreshButtons();

@@ -461,6 +461,9 @@
                 </select>
             </label>
 
+            {{! Following a trip on a map, its pace and its time are the trip's, set on the map:
+                shown read-only under Route. Otherwise this scene's own. }}
+            {{#unless travel.routeLinked}}
             {{! The pace sets the ground layer's speed from the grid; the number is that speed, so
                 typing one is a custom pace. }}
             <div class="cartographer-parallax-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelPaceHint"}}">
@@ -485,19 +488,12 @@
                 {{/if}}
             </div>
 
-            {{#if travel.routeLinked}}
-            {{! Following a route or journey, the clock is its map's setting, made on the map. }}
-            <div class="cartographer-parallax-field cartographer-parallax-switch-row" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelClockFromMapHint"}}">
-                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelFollowClock"}}</span>
-                <span class="cartographer-parallax-hint">{{#if travel.mapClock}}{{localize "coffee-pub-cartographer.parallax.travelClockFromMapOn"}}{{else}}{{localize "coffee-pub-cartographer.parallax.travelClockFromMapOff"}}{{/if}}</span>
-            </div>
-            {{else}}
             {{> switchRow label=(localize "coffee-pub-cartographer.parallax.travelFollowClock") hint=(localize "coffee-pub-cartographer.parallax.travelFollowClockHint")
                 action="travel-clock" on=travel.followClock disabled=travel.clockUnavailable}}
-            {{/if}}
             {{#if travel.followClock}}
             <p class="cartographer-parallax-hint">{{travel.clockText}}</p>
             {{/if}}
+            {{/unless}}
 
             {{! A route drawn on a map: its length is the destination. }}
             {{#if travel.hasRoutes}}
@@ -512,6 +508,12 @@
                     {{/each}}
                 </select>
             </label>
+            {{/if}}
+            {{#if travel.travellingText}}
+            <div class="cartographer-parallax-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travellingHint"}}">
+                <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelling"}}</span>
+                <span class="cartographer-parallax-hint">{{travel.travellingText}}</span>
+            </div>
             {{/if}}
 
             <div class="cartographer-parallax-field" data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelDestinationHint"}}">

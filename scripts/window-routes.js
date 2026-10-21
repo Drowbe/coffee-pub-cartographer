@@ -23,7 +23,10 @@ function formatRate(value) {
     const n = Number(value) || 0;
     const sign = n < 0 ? '−' : '';
     const abs = Math.abs(n);
-    return abs < 60 ? `${sign}${abs}×` : `${sign}${formatSpan(abs)}/s`;
+    if (abs < 60) return `${sign}${abs}×`;
+    // "min" and "h", never "m": "4 m/s" reads as metres a second.
+    const per = abs < 3600 ? `${Math.round(abs / 60)} min/s` : `${Math.round((abs / 3600) * 10) / 10} h/s`;
+    return `${sign}×${abs} (${per})`;
 }
 /** The window's choices, per browser: the tab, the pace times are shown at, and which routes show their legs. */
 const PREFS_KEY = `${MODULE.ID}.routes.windowPrefs`;
@@ -84,6 +87,11 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         },
         'toggle-settings': (_event, _target, app) => app.toggleSettings(),
         'route-draw': (_event, _target, app) => (app.manager.draft ? app.manager.finishDrawing() : app.manager.startDrawing()),
+        // A new route starting where the party has been set down.
+        'route-draw-from-party': (_event, _target, app) => {
+            const pin = travelPinsManager.pinFor(canvas.scene?.id);
+            if (pin) app.manager.startDrawing({ x: pin.x, y: pin.y });
+        },
         'route-focus': (_event, target, app) => void app.manager.focus(target.dataset.routeId),
         'route-rename': (_event, target, app) => app.promptRename(target.dataset.routeId),
         'route-hide': (_event, target, app) => app.toggleHidden(target.dataset.routeId),
@@ -149,8 +157,9 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
      */
     _barPath(scene = canvas.scene) {
         if (!scene) return null;
-        const active = journeysManager.activeLink(scene);
-        if (active) return active;
+        // What is moving, wherever it is driven from, else the last played here.
+        const shown = this.manager.shownPath(scene);
+        if (shown) return shown;
         const journey = this.manager.journeys(scene)[0];
         if (journey) return { sceneId: scene.id, journeyId: journey.id };
         const route = this.manager.visibleRoutes(scene)[0];
@@ -297,6 +306,20 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             shown: exists && travelPinsManager.isShown(scene.id),
             canConfigure: !!journeysManager.activeLink(scene)
         };
+    }
+
+    /**
+     * Choose what the bar runs. If something is moving, that is a change of
+     * plan for the one party: it stops, and the party is on the chosen route
+     * or journey, wherever it last was on it.
+     */
+    async choosePath(value) {
+        const [kind, id] = String(value).split(':');
+        const chosen = { sceneId: canvas.scene?.id, ...(kind === 'j' ? { journeyId: id } : { routeId: id }) };
+        const moving = this.manager.shownPath();
+        const same = moving && (chosen.journeyId ? moving.journeyId === chosen.journeyId : (!moving.journeyId && moving.routeId === chosen.routeId));
+        if (moving && !same && journeysManager.isPlaying(moving)) await journeysManager.stop(moving);
+        await this.manager.setSettings({ active: kind === 'j' ? { journeyId: id } : { routeId: id } });
     }
 
     /** Take the route or journey the bar runs back to the start, after asking: its progress goes. */
@@ -460,6 +483,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
                 isRoutes: this.tab === 'routes',
                 isJourneys: this.tab === 'journeys',
                 isSetup: this.tab === 'setup',
+                partyOffRoute: game.user.isGM && this.manager.settings(scene).offRoute && !!travelPinsManager.pinFor(scene.id),
                 followClock,
                 routes,
                 journeys,
@@ -552,8 +576,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             const rate = TIME_RATES[Number(target.value)];
             if (link && rate) void journeysManager.setSpeed(link, rate);
         } else if (field === 'barPath' && target.value) {
-            const [kind, id] = target.value.split(':');
-            void this.manager.setSettings({ active: kind === 'j' ? { journeyId: id } : { routeId: id } });
+            void this.choosePath(target.value);
         } else if (field === 'pathPace' && target.value) {
             const pace = this._paces(canvas.scene?.grid?.units).find(p => p.id === target.value);
             if (pace) void journeysManager.setPace(this._linkFrom(target.dataset), pace.perHour);

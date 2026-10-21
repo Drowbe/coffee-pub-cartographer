@@ -4,6 +4,8 @@
 
 import { MODULE } from './const.js';
 import { routesManager } from './manager-routes.js';
+import { journeysManager } from './manager-journeys.js';
+import { nearestOnRoute, legPixels, gridDistance, pathLegs, effortForDistance } from './utils-routes.js';
 
 /** The pin type Cartographer's marker is, for Blacksmith's pins UI. */
 const PIN_TYPE = 'journey';
@@ -11,6 +13,8 @@ const PIN_TYPE = 'journey';
 const MOVE_EPSILON = 0.5;
 /** How often the GM's client may save the marker where a party at rest is, in ms. */
 const SAVE_EVERY_MS = 500;
+/** How near, in screen pixels, a dropped marker must be to a route's line to land on it. */
+const DROP_SNAP_PIXELS = 24;
 
 /**
  * The party's marker on a map: one Blacksmith pin per map, standing where
@@ -53,10 +57,130 @@ class TravelPinsManager {
             this._live.clear();
             this._start();
             void this._removeOldPins();
+            void this._renameMarker();
+        });
+        // The party renamed: its marker follows, unless the GM labelled it otherwise.
+        this._partyName = TravelPinsManager.partyName();
+        on('updateActor', (actor, changes) => {
+            if (!('name' in (changes ?? {})) || actor !== TravelPinsManager.partyActor()) return;
+            void this._renameMarker();
         });
         on('canvasTearDown', () => this._stop());
         this._start();
         void this._removeOldPins();
+        // The GM can pick the party up and put it down: on a route, or anywhere.
+        if (pins && game.user.isGM) {
+            pins.on('dragStart', event => this._onDragStart(event), { moduleId: MODULE.ID, dragEvents: true });
+            pins.on('dragEnd', event => this._onDragEnd(event), { moduleId: MODULE.ID, dragEvents: true });
+        }
+    }
+
+    // ==================================================================
+    // ===== PICKING THE PARTY UP =======================================
+    // ==================================================================
+
+    _isPartyPin(event) {
+        return !!canvas?.scene && event?.pinId === TravelPinsManager.pinId(canvas.scene.id);
+    }
+
+    /** Picked up: the party stops, wherever it was going. */
+    async _onDragStart(event) {
+        if (!game.user.isGM || !this._isPartyPin(event)) return;
+        this._dragging = true;
+        this._live.delete(event.pinId);
+        await this._stopAll(canvas.scene);
+    }
+
+    /** Put down: where it lands is where the party is. */
+    async _onDragEnd(event) {
+        if (!game.user.isGM || !this._isPartyPin(event)) return;
+        // Blacksmith fires dragEnd once the drop is saved: event.pin is where it landed.
+        const pin = event.pin ?? TravelPinsManager.pins()?.get?.(event.pinId, { sceneId: canvas.scene.id });
+        this._dragging = false;
+        if (!pin) return;
+        const result = await this.placeParty(canvas.scene, { x: pin.x, y: pin.y }, DROP_SNAP_PIXELS / (canvas.stage?.scale?.x || 1));
+        if (!result.onRoute) ui.notifications.info(game.i18n.localize(`${MODULE.ID}.routes.partyDroppedOffRoute`));
+    }
+
+    /** Stop every route and journey moving on a map: there is one party. */
+    async _stopAll(scene) {
+        const links = [
+            ...routesManager.journeys(scene).map(j => ({ sceneId: scene.id, journeyId: j.id })),
+            ...routesManager.routes(scene).map(r => ({ sceneId: scene.id, routeId: r.id }))
+        ].filter(link => routesManager.progress(link)?.travel.motion.playing);
+        for (const link of links) await journeysManager.stop(link);
+    }
+
+    /**
+     * Set the party down at a point on a map, GM only. Within `radius` scene
+     * pixels of a route's line, it lands on the line: on the journey the map
+     * shows if the route is part of it, else on the route itself, which
+     * becomes the map's; its progress is that point, and it is stopped. Off
+     * every route, it stays where it was put, on no route, until it is put on
+     * one. Whatever was moving there stops either way, and the trip it was
+     * on, if it is put down anywhere but back on that trip, is cancelled:
+     * reset to the start.
+     */
+    async placeParty(scene, point, radius) {
+        if (!game.user.isGM || !scene) return { onRoute: false };
+        const shown = routesManager.shownPath(scene);
+        await this._stopAll(scene);
+        let best = null;
+        for (const route of routesManager.visibleRoutes(scene)) {
+            const hit = nearestOnRoute(route.points, [point.x, point.y]);
+            if (hit && hit.distance <= radius && (!best || hit.distance < best.hit.distance)) best = { route, hit };
+        }
+        // Put down anywhere but back on the trip it was on, that trip is
+        // cancelled: stopped, and its odometer back to the start.
+        const same = (a, b) => !!a && !!b && (a.journeyId ? a.journeyId === b.journeyId : (!b.journeyId && a.routeId === b.routeId));
+        const cancel = async () => {
+            if (shown && routesManager.progress(shown)) await journeysManager.reset(shown);
+        };
+        if (!best) {
+            await cancel();
+            await routesManager.setSettings({ offRoute: true }, scene.id);
+            return { onRoute: false };
+        }
+        // On the journey the map shows, if this route is part of it; else on the route.
+        const journey = shown?.journeyId ? routesManager.getJourney(shown.journeyId, scene) : null;
+        const link = journey?.routeIds.includes(best.route.id) ? shown : { sceneId: scene.id, routeId: best.route.id };
+        if (!same(shown, link)) await cancel();
+        const path = routesManager.path(link, scene);
+        const along = nearestOnRoute(path.points, [point.x, point.y]);
+        const before = legPixels(path.points.slice(0, along.index + 1)).reduce((sum, leg) => sum + leg, 0);
+        const start = path.points[along.index];
+        const pixels = before + Math.hypot(along.point[0] - start[0], along.point[1] - start[1]);
+        const effort = effortForDistance(pathLegs(path.points, path.terrain, scene.grid), gridDistance(pixels, scene.grid));
+        await routesManager.setPathTravel(link, { effort, playing: false, arrived: false });
+        await routesManager.setSettings({ active: link.journeyId ? { journeyId: link.journeyId } : { routeId: link.routeId }, offRoute: false }, scene.id);
+        await this.savePosition(link);
+        return { onRoute: true, link };
+    }
+
+    /** The world's party, from Blacksmith: its primary party actor, or null when none is set. */
+    static partyActor() {
+        return game.modules.get('coffee-pub-blacksmith')?.api?.party?.actor?.() ?? null;
+    }
+
+    /** What the marker is called: the party's name, or "The party" when the world has none set. */
+    static partyName() {
+        return TravelPinsManager.partyActor()?.name || game.i18n.localize(`${MODULE.ID}.routes.partyMarker`);
+    }
+
+    /**
+     * Keep the marker's label the party's name, GM only. Only a label that is
+     * still one Cartographer gave it -- the generic name or the party's
+     * earlier one -- changes; one the GM typed in Configure Pin stays.
+     */
+    async _renameMarker() {
+        const pins = TravelPinsManager.pins();
+        const scene = canvas?.scene;
+        if (!game.user.isGM || !pins || !scene) return;
+        const name = TravelPinsManager.partyName();
+        const pin = this.pinFor(scene.id);
+        const ours = [game.i18n.localize(`${MODULE.ID}.routes.partyMarker`), this._partyName];
+        if (pin && pin.text !== name && ours.includes(pin.text)) await pins.update(pin.id, { text: name }, { sceneId: scene.id });
+        this._partyName = name;
     }
 
     /** Blacksmith's pins API, when it is there and ready. */
@@ -77,10 +201,8 @@ class TravelPinsManager {
 
     /** The route or journey a map's marker follows: the one its bar runs, once it has set out. */
     static followed(scene) {
-        const active = scene ? routesManager.settings(scene).active : null;
-        if (!active) return null;
-        const link = { sceneId: scene.id, ...active };
-        return routesManager._pathItem(link, scene)?.travel ? link : null;
+        const link = scene ? routesManager.shownPath(scene) : null;
+        return link && routesManager._pathItem(link, scene)?.travel ? link : null;
     }
 
     _start() {
@@ -125,6 +247,8 @@ class TravelPinsManager {
         const progress = routesManager.progress(link);
         const point = progress?.point;
         if (!point) return;
+        // While the GM carries it, the marker is theirs.
+        if (this._dragging) return;
         const near = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) <= MOVE_EPSILON;
         const stored = pins.get?.(id, { sceneId: scene.id });
         const settled = stored && near(stored, point);
@@ -142,7 +266,8 @@ class TravelPinsManager {
             return;
         }
         if (live && near(live, point)) return;
-        pins.setLivePosition(id, { x: point.x, y: point.y });
+        // The GM may still pick it up while it moves (where Blacksmith allows it).
+        pins.setLivePosition(id, { x: point.x, y: point.y }, { draggable: game.user.isGM });
         this._live.set(id, { x: point.x, y: point.y });
     }
 
@@ -163,7 +288,7 @@ class TravelPinsManager {
             id,
             moduleId: MODULE.ID,
             type: PIN_TYPE,
-            text: game.i18n.localize(`${MODULE.ID}.routes.partyMarker`),
+            text: TravelPinsManager.partyName(),
             image: '<i class="fa-solid fa-person-hiking"></i>',
             size: { w: size, h: size },
             x: progress.point.x,

@@ -122,15 +122,26 @@ then how far along the route the party has come.
 While the odometer follows a route or journey, its destination is its length and cannot be typed,
 and it keeps up as routes are reshaped. If it is deleted, the destination stays as it was.
 
-The journey keeps its own progress, on the map. The animated scene is a view of it: its Play and
-Stop, speed, ease, world clock and pace drive the journey, and its odometer reads how far the
-journey has come. So a road scene can be reused for one journey after another -- choose a
-different journey, and the first stops where it is and keeps its progress until you come back to
-it. **Reset odometer** resets the journey too.
+The trip -- the route or journey -- lives on the map: its pace, its time (real time or the world
+clock), its progress and how difficult terrain slows it. The animated scene is a view of it that
+says "we are travelling":
 
-Terrain slows the party: a leg of forest takes twice as long as a leg of road, and when the party
-reaches one, the scenery eases down to half speed until they are out of it. The arrival time counts
-the difficult terrain still ahead. The Routes window shows each route's and journey's progress,
+- Its scenery runs at the speeds set for its layers whenever the trip is moving, eases to a halt
+  when it stops, and runs the other way when the trip runs back. It does not speed up with the clock
+  or slow down on difficult ground; the trip does that, and the odometer shows it.
+- Its Play and Stop are the trip's.
+- Its odometer shows the trip's progress and arrival time.
+- Its Pace and Follow world clock rows give way to a read-only **Travelling** line: "Riding horse
+  (6 mph) · world clock, set on Faerun". They are changed on the map, in the Routes window.
+
+So a road scene can be reused for one journey after another -- choose a
+different journey, and the first stops where it is and keeps its progress until you come back to
+it. **Reset odometer** resets the journey too. Playing it from the animated scene makes it the one its
+map shows -- the Routes bar, the odometer on the map and the party marker -- and stops anything else
+moving on that map, since there is one party.
+
+Terrain slows the party: a leg of forest takes twice as long as a leg of road, and the arrival time
+counts the difficult terrain still ahead. The Routes window shows each route's and journey's progress,
 and the terrain the party is in, once it has set out. The link-slash button stops following the
 route and keeps its length as the destination.
 
@@ -173,8 +184,8 @@ out later. As the clock runs, they travel at the
 pace, slowed by terrain; stopped, they stay put however much time passes. Scrubbing time moves them:
 forward to where they will be, back to where they were then -- including back past a stop, to where
 they were still travelling. Play, Stop or a change of speed or pace made after scrubbing back
-replaces what had followed. An animated scene following a journey takes the map's setting; its scenery
-speeds up with the clock to match.
+replaces what had followed. An animated scene following a journey shows the map's setting; its scenery
+keeps its own speed.
 
 While a route or journey is under way, the map shows only the routes it travels, and the same
 odometer as an animated scene's -- distance travelled, how far is left, the arrival time and a
@@ -185,10 +196,11 @@ route is drawn or edited; otherwise a route is its line and its label.
 The **Routes** section of the sub-menubar has a Play button too: it plays or stops what the bar runs
 on the map on screen.
 
-If an animated scene follows the journey, it moves with these controls even though it is not the
-scene on screen: Play on the map starts its scenery, the pace sets its ground speed, and its scenery
-still slows in difficult terrain. The journey card names the scenes that follow it. Its own controls
-work too; both drive the same journey.
+If an animated scene follows the journey, Play and Stop on the map start and stop its scenery too,
+even though it is not the scene on screen; the journey card names the scenes that follow it. Its own
+Play and Stop work too; both run the same journey. Choosing another route or journey in the bar
+while one is moving is a change of plan: the moving one stops, and the party is on the one chosen,
+wherever it last was on it.
 
 At the end of the way the journey stops, for everyone, and is marked arrived.
 
@@ -201,13 +213,25 @@ another route or journey in the bar and the marker moves to where the party is o
 Coffee Pub Blacksmith pin, so the GM styles it from the pin's own menu (Configure Pin): an icon, a
 portrait, a wagon, its label and size.
 
+It is labelled with the party's name -- the world's primary party, as Blacksmith knows it -- or "The
+party" when none is set. Renaming the party renames the marker, unless the GM has given it a label
+of their own.
+
 - **Party marker**, on the Routes window's Setup tab, is the GM's: **Shown to players**
   switches it on and off for them (the GM always sees it), and **Change look** opens Blacksmith's
   Configure Pin window for it -- image or icon, shape, size, label, colours, animations. Before the
   party has set out there is no marker yet; Change look makes one at the start of the way, so it can
   be styled in advance.
-- While the party is moving, the marker cannot be dragged. When they stop or arrive, it stays where
-  they are.
+- **The GM can pick the party up and put it down.** Picking the marker up stops the party,
+  whatever it was travelling. Dropped by a route's line, it snaps onto the line: the party is on that
+  route -- or on the journey the map is showing, if the route is part of it -- at that point,
+  stopped, and Play carries on from there. Put down anywhere but back on the trip it was on -- on
+  another route, or off every route -- that trip is cancelled: stopped, and its odometer back to the
+  start, along with any animated scene following it. Dropped off every route, the party is on none: Play says
+  to put it on one, and the Routes tab offers **Draw from the party**, a new route starting where the
+  marker stands. Choosing a route or journey in the bar also puts the party back on it. Players
+  cannot move the marker.
+- When the party stops or arrives, the marker stays where they are.
 - Setting out on one route or journey stops any other moving on the same map: it is one party.
 
 With an older Blacksmith, the marker jumps to where the party is each time they stop, rather than

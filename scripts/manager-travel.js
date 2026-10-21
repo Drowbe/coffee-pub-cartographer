@@ -149,7 +149,6 @@ class TravelManager {
         this._drawHud(this.mapSummary() ?? summary);
         this._drawReadouts(summary);
         this._checkArrival(summary);
-        this._checkTerrain();
     }
 
     /**
@@ -169,8 +168,9 @@ class TravelManager {
             const progress = routesManager.progress(link, now);
             return progress && (progress.moving || progress.effort > 0) ? progress : null;
         };
-        const active = routesManager.settings(scene).active;
-        let progress = active ? underWay({ sceneId: scene.id, ...active }) : null;
+        // What is moving first, wherever it is driven from; then the last played here.
+        const shown = routesManager.shownPath(scene);
+        let progress = shown ? underWay(shown) : null;
         if (!progress) {
             const links = [
                 ...routesManager.journeys(scene).map(journey => ({ sceneId: scene.id, journeyId: journey.id })),
@@ -203,22 +203,6 @@ class TravelManager {
             destinationText: formatDistance(progress.length, units),
             etaText: etaSeconds === null || remaining === 0 ? '' : formatSpan(etaSeconds)
         };
-    }
-
-    /**
-     * Following a journey, the scenery runs at the speed the ground allows:
-     * the GM's client watches for the party crossing into a leg of other
-     * terrain and eases the scenery to it. The distance itself never waits
-     * on this; it is worked out from the journey's effort on every client.
-     */
-    _checkTerrain() {
-        if (!game.user.isGM || this._terrainBusy) return;
-        const state = parallaxManager.state;
-        if (!state.travel?.route || !state.playing) return;
-        const factor = parallaxManager.journeyProgress()?.factor ?? 1;
-        if ((state.terrainFactor ?? 1) === factor) return;
-        this._terrainBusy = true;
-        Promise.resolve(parallaxManager.setTerrainFactor(factor)).finally(() => { this._terrainBusy = false; });
     }
 
     _drawHud(summary) {

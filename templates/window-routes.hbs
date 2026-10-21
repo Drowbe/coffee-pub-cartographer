@@ -97,7 +97,14 @@
     {{/if}}
 
     {{#if isRoutes}}
+    {{#if partyOffRoute}}
+    <p class="cartographer-parallax-hint cartographer-routes-warning"><i class="fa-solid fa-location-dot"></i> {{localize "coffee-pub-cartographer.routes.partyOffRouteHint"}}</p>
+    {{/if}}
     <div class="cartographer-parallax-panel-actions">
+        {{#if partyOffRoute}}
+        <button type="button" class="cartographer-parallax-button is-labelled" data-action="route-draw-from-party"
+            data-tooltip="{{localize "coffee-pub-cartographer.routes.drawFromPartyHint"}}"><i class="fa-solid fa-person-walking-arrow-right"></i><span>{{localize "coffee-pub-cartographer.routes.drawFromParty"}}</span></button>
+        {{/if}}
         <button type="button" class="cartographer-parallax-button is-labelled{{#if drawing}} is-active{{/if}}" data-action="route-draw"
             data-tooltip="{{localize "coffee-pub-cartographer.routes.drawHint"}}"><i class="fa-solid {{#if drawing}}fa-check{{else}}fa-route{{/if}}"></i><span>{{#if drawing}}{{localize "coffee-pub-cartographer.routes.finishDrawing"}}{{else}}{{localize "coffee-pub-cartographer.routes.draw"}}{{/if}}</span></button>
     </div>
