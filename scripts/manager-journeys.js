@@ -3,6 +3,7 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
+import { notify } from './utils-toast.js';
 import { cartographerToolbar } from './manager-toolbar.js';
 import { routesManager } from './manager-routes.js';
 import { parallaxManager } from './manager-parallax.js';
@@ -113,19 +114,20 @@ class JourneysManager {
         if (!progress) return;
         // Set down off every route, the party has nowhere to go until it is on one.
         if (routesManager.settings(game.scenes.get(link.sceneId)).offRoute) {
-            ui.notifications.warn(game.i18n.localize(`${MODULE.ID}.routes.partyOffRoute`));
+            notify(game.i18n.localize(`${MODULE.ID}.routes.partyOffRoute`), { type: 'warn' });
             return;
         }
         if (!this.linkedScenes(link).length && !(progress.travel.pace > 0) && !(pace > 0)) {
-            ui.notifications.warn(game.i18n.localize(`${MODULE.ID}.routes.needsPace`));
+            notify(game.i18n.localize(`${MODULE.ID}.routes.needsPace`), { type: 'warn' });
             return;
         }
         // One party: setting out on one route or journey stops any other moving on this map.
         await this._stopOthers(link);
         const path = { playing: true, arrived: false };
         // At 0x the party would stand still while playing; Play means going, so it goes at 1x.
-        const stillSpeed = !(Number(progress.travel.motion.masterSpeed) || 0);
-        if (stillSpeed) path.masterSpeed = 1;
+        // Onward only: a negative rate from an earlier version runs onward at its size.
+        const rate = Math.abs(Number(progress.travel.motion.masterSpeed) || 0);
+        if (!rate || rate !== Number(progress.travel.motion.masterSpeed)) path.masterSpeed = rate || 1;
         if (!(progress.travel.pace > 0) && pace > 0) path.pace = pace;
         if (!(progress.travel.motion.easeSeconds > 0)) path.easeSeconds = DEFAULT_EASE_SECONDS;
         // Setting out again from the end starts from the beginning.
@@ -134,7 +136,7 @@ class JourneysManager {
             scene: state => {
                 state.playing = true;
                 state.travel.arrived = false;
-                parallaxManager.applyDirection(state, path.masterSpeed ?? progress.travel.motion.masterSpeed);
+                if (!(Number(state.masterSpeed) || 0)) state.masterSpeed = 1;
             },
             path
         });
@@ -160,10 +162,11 @@ class JourneysManager {
     }
 
     /** The master speed: a multiple of the pace; negative runs back along the way. */
+    /** How fast travel time runs, always onward; which way is the trip's direction. */
     async setSpeed(link, speed) {
-        const value = Number(speed);
+        const value = Math.abs(Number(speed));
         if (!Number.isFinite(value)) return;
-        await this._drive(link, { scene: state => parallaxManager.applyDirection(state, value), path: { masterSpeed: value } });
+        await this._drive(link, { path: { masterSpeed: value } });
     }
 
     /** The pace, in the map's units an hour: the trip's. Scenes following it keep their own scenery speeds. */
@@ -235,7 +238,7 @@ class JourneysManager {
             onClick: () => {
                 const link = routesManager.shownPath(canvas?.scene) ?? this.activeLink();
                 if (link) return this.toggle(link);
-                ui.notifications.info(game.i18n.localize(`${MODULE.ID}.routes.noActiveJourney`));
+                notify(game.i18n.localize(`${MODULE.ID}.routes.noActiveJourney`));
                 return routesManager.openWindow();
             }
         });
@@ -307,7 +310,7 @@ class JourneysManager {
     }
 
     async _arrive(link, progress) {
-        ui.notifications.info(game.i18n.format(`${MODULE.ID}.routes.arrivedNotice`, { name: progress.path.name }));
+        notify(game.i18n.format(`${MODULE.ID}.routes.arrivedNotice`, { name: progress.path.name }));
         await this.stop(link);
         await routesManager.setPathTravel(link, { arrived: true });
         for (const scene of this.linkedScenes(link)) {

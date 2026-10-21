@@ -159,12 +159,16 @@ window's bar works as the Scene Motion window's does. From the left:
   Play eases it back up. Playing a journey that has arrived starts it again from the beginning.
 - **Back to the start** (the rewind button) -- takes the party back to the beginning of the route or
   journey, after asking, since how far they had come is lost.
+- **Turn round** (the two-way arrow) -- which end the party is heading for: the end the route or
+  journey was drawn to, or, lit, back to its start. The distance to go and the arrival time count
+  towards that end, and turning round keeps the party where it stands. Small arrows along the line
+  on the map show the way they are going.
 - **Time** -- the party always travels at its **pace**; the bar sets time, not speed.
   - Without the world clock, a slider sets how fast travel time runs: 1× is real time, then 10×,
-    a minute a second, ten minutes a second, an hour a second. Left of centre runs back along the
-    way. At an hour a second, a 6 mph horse covers 6 miles each real second.
-  - Following the world clock (the map's Setup tab), the clock is the time: the bar chooses only
-    onward or back, and shows the clock's rate. How fast time runs is set on Blacksmith's clock.
+    a minute a second, ten minutes a second, an hour a second. At an hour a second, a 6 mph horse
+    covers 6 miles each real second.
+  - Following the world clock (the map's Setup tab), the clock is the time, and the bar shows its
+    rate. How fast time runs is set on Blacksmith's clock.
 - **Which** -- the route or journey the bar runs, from the map's journeys and routes. It is outlined
   in the window.
 - **The gear** -- shows and hides the settings. Hidden, the window is just the bar.
@@ -172,9 +176,7 @@ window's bar works as the Scene Motion window's does. From the left:
 Each journey's and route's card, opened, holds its
 **Pace**, how fast the party travels it, and **Reset** (the rewind button), back to the start. One
 no animated scene shows needs a pace before it can set out; Play uses the pace chosen under **Times
-at** if it has none. **Direction** is **As drawn** (start to end) or **Reversed** (from the end back
-to the start): the distance to go and the arrival time count towards whichever end it is heading
-for, and turning it round keeps the party where it stands.
+at** if it has none.
 
 The odometer's arrival time is hours on the road at the party's pace, slowed by terrain ahead --
 travel time, whichever way time is run.
@@ -191,7 +193,7 @@ keeps its own speed.
 
 While a route or journey is under way, the map shows only the routes it travels, and the same
 odometer as an animated scene's -- the trip's name, distance travelled, how far is left, the arrival time and a
-progress bar -- for everyone; while the party is on the move, its icon steps and a light runs along the
+progress bar -- for everyone; while the party is on the move, a light runs along the
 bar. It stays up while they are stopped or have arrived, and goes only
 when nothing on the map is in progress: never set out, or reset to the start. Waypoints are shown only while a
 route is drawn or edited; otherwise a route is just its line. Its name and length show when the

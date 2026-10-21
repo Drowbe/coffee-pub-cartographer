@@ -199,21 +199,19 @@ export function removeWaypoint(points, terrain, index) {
 
 /**
  * How fast travel time runs when a map does not follow the world clock: in-world
- * seconds per real second, the choices the bar's slider steps through, back
- * along the way (negative) or onward. 1 is real time; 3600 is an hour a second.
- * The party's own speed is its pace, which these never change.
+ * seconds per real second, the choices the bar's slider steps through. 1 is real
+ * time; 3600 is an hour a second. Always onward: which way the party goes is the
+ * trip's direction (`travel.reversed`), not a negative time. The party's own
+ * speed is its pace, which these never change.
  */
-export const TIME_RATES = [-3600, -600, -60, -10, -1, 1, 10, 60, 600, 3600];
+export const TIME_RATES = [1, 10, 60, 600, 3600];
 
-/** The step of TIME_RATES nearest a rate, for the slider's position. */
+/** The step of TIME_RATES nearest a rate (its size; a sign from an earlier version is ignored). */
 export function timeRateIndex(rate) {
-    const value = Number(rate) || 1;
+    const value = Math.abs(Number(rate) || 1) || 1;
     let best = 0;
     TIME_RATES.forEach((step, i) => {
-        if (Math.sign(step) !== Math.sign(value)) return;
-        const off = Math.abs(Math.log(Math.abs(step)) - Math.log(Math.abs(value)));
-        const was = Math.abs(Math.log(Math.abs(TIME_RATES[best])) - Math.log(Math.abs(value)));
-        if (Math.sign(TIME_RATES[best]) !== Math.sign(value) || off < was) best = i;
+        if (Math.abs(Math.log(step) - Math.log(value)) < Math.abs(Math.log(TIME_RATES[best]) - Math.log(value))) best = i;
     });
     return best;
 }

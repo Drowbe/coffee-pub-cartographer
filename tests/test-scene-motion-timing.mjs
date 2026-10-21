@@ -317,10 +317,10 @@ console.log('\nthe world-time timeline');
 console.log('\ntime rates');
 {
     const at = rate => TIME_RATES[timeRateIndex(rate)];
-    const cases = [[1, 1], [60, 60], [-10, -10], [3600, 3600], [2, 1], [45, 60], [-700, -600], [0, 1]];
+    const cases = [[1, 1], [60, 60], [-10, 10], [3600, 3600], [2, 1], [45, 60], [-700, 600], [0, 1]];
     const wrong = cases.filter(([rate, want]) => at(rate) !== want);
     if (wrong.length) fail(`time rates snap wrongly: ${wrong.map(c => `${c[0]} -> ${at(c[0])}`).join(', ')}`);
-    else ok('a time rate finds its nearest step, on the side it runs');
+    else ok('a time rate finds its nearest step; one from before, run backwards, runs onward at its size');
     if (TIME_RATES.includes(0)) fail('the time rates include standing still');
     else ok('every step moves: stopping is Stop\'s job');
 }

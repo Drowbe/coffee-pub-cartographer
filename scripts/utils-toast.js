@@ -24,7 +24,8 @@ import { MODULE } from './const.js';
 // Severity presets. Colors must be strict hex (#rgb / #rrggbb) - the API
 // ignores anything else and renders the default look.
 const TOAST_STYLES = {
-    info:  { color: '#214D10', icon: 'fa-solid fa-map' },                    // Cartographer green
+    // No accent for ordinary toasts: Blacksmith's own look reads on its dark box.
+    info:  { color: null, icon: 'fa-solid fa-map' },
     warn:  { color: '#DB820C', icon: 'fa-solid fa-triangle-exclamation' },
     error: { color: '#BA3C31', icon: 'fa-solid fa-circle-exclamation' }
 };
@@ -57,9 +58,33 @@ export function notify(title, { subtitle, type = 'info', icon, duration, stackKe
         title,
         subtitle,
         icon: icon ?? style.icon,
-        color: style.color,
+        ...(style.color ? { color: style.color } : {}),
         duration,
         stackKey,
         moduleId: MODULE.ID // lets Blacksmith clear our toasts as a group
     });
+}
+
+// ==================================================================
+// ===== CONSOLE LOGGING ============================================
+// ==================================================================
+
+/**
+ * Log through Blacksmith's postConsoleAndNotification, so Cartographer's
+ * console lines look and filter like the rest of Coffee Pub's. `debug` lines
+ * show only with Blacksmith's debug setting on. Falls back to the console.
+ * @param {string} message
+ * @param {*} [result] - Extra detail logged with the message
+ * @param {object} [options]
+ * @param {boolean} [options.debug=false] - Only when Blacksmith's debugging is on
+ * @param {'log'|'warn'|'error'} [options.level='log'] - The console level, without Blacksmith
+ */
+export function log(message, result = '', { debug = false, level = 'log' } = {}) {
+    const utils = game.modules.get('coffee-pub-blacksmith')?.api?.utils;
+    if (typeof utils?.postConsoleAndNotification === 'function') {
+        utils.postConsoleAndNotification(MODULE.NAME, message, result, debug, false);
+        return;
+    }
+    if (debug) return;
+    console[level]?.(`${MODULE.NAME}: ${message}`, result);
 }

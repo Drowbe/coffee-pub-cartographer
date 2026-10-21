@@ -141,8 +141,11 @@ directly and start, stop or turn the following scenes' scenery with `commitScene
 
 **Pace is speed; the master speed is time.** A path's `pace` is the party's speed. Its
 `motion.masterSpeed` is how fast travel time runs: in real-time mode, in-world seconds per real
-second (the bar steps through `TIME_RATES`, 1 to 3600, either way); following the clock, only its
-sign counts, since the clock is the time.
+second (the bar steps through `TIME_RATES`, 1 to 3600, always onward); following the clock, it is
+ignored, since the clock is the time. Which way the party goes is `travel.reversed`: `path()`
+returns the points end to start, so everything that reads the path counts towards that end, and
+turning round (`setPathTravel` with `reversed`) re-counts the effort from the other end so the party
+stays where it stands.
 
 **Controls from the map** (manager-journeys.js). The map's controls write the trip with
 `setPathTravel`, and start, stop or turn the scenery of scenes following it with

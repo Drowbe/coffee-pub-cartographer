@@ -81,9 +81,10 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         'routes-play': (_event, _target, app) => app.togglePlay(app._barPath()),
         'routes-reset': (_event, _target, app) => app.confirmReset(app._barPath()),
         // Onward or back along the way, when the world clock is the time.
-        'routes-direction': (_event, target, app) => {
+        // Turn round: head for the other end, the party staying where it stands.
+        'routes-direction': (_event, _target, app) => {
             const link = app._barPath();
-            if (link) return journeysManager.setSpeed(link, Number(target.dataset.dir) || 1);
+            if (link) return journeysManager.setDirection(link, !app.manager.progress(link)?.travel.reversed);
         },
         'toggle-settings': (_event, _target, app) => app.toggleSettings(),
         'route-draw': (_event, _target, app) => (app.manager.draft ? app.manager.finishDrawing() : app.manager.startDrawing()),
@@ -108,7 +109,6 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         'marker-configure': (_event, _target, _app) => travelPinsManager.configure(canvas.scene?.id),
         'marker-add': (_event, _target, _app) => travelPinsManager.addMarker(canvas.scene?.id),
         'path-reset': (_event, target, app) => void journeysManager.reset(app._linkFrom(target.dataset)),
-        'path-direction': (_event, target, app) => journeysManager.setDirection(app._linkFrom(target.dataset), target.dataset.reversed === 'true'),
         'map-clock': (_event, _target, app) => journeysManager.setMapClock(canvas.scene, !app.manager.settings().followClock)
     };
 
@@ -214,26 +214,26 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             const clockText = clock?.running && rate > 0
                 ? game.i18n.format(`${MODULE.ID}.routes.clockRate`, { rate: formatRate(rate) })
                 : localize('clockStopped');
-            const direction = (dir, icon, key) => this._button({
-                action: 'routes-direction',
-                icon,
-                label: localize(key),
-                className: `cartographer-parallax-segment${Math.sign(speed) === dir ? ' is-active' : ''}`,
-                dataset: { dir },
-                disabled
-            });
-            slider = `<div class="cartographer-parallax-segmented" role="radiogroup">${direction(-1, 'fa-solid fa-backward', 'speedBack')}${direction(1, 'fa-solid fa-forward', 'speedForward')}</div>`
-                + `<span class="cartographer-parallax-value cartographer-routes-clock" data-tooltip="${esc(localize('clockRateHint'))}">${esc(clockText)}</span>`;
+            slider = `<span class="cartographer-parallax-value cartographer-routes-clock" data-tooltip="${esc(localize('clockRateHint'))}">${esc(clockText)}</span>`;
         } else {
             const label = esc(localize('timeRateHint'));
             slider = `<div class="cartographer-parallax-field cartographer-parallax-bar-speed${disabled ? ' is-disabled' : ''}">
-                <i class="fa-solid fa-backward cartographer-parallax-arrow" data-tooltip="${esc(localize('speedBack'))}"></i>
+                <i class="fa-solid fa-clock cartographer-parallax-arrow" data-tooltip="${esc(localize('timeRateSlow'))}"></i>
                 <input type="range" data-field="journeyRate" value="${timeRateIndex(speed)}" min="0" max="${TIME_RATES.length - 1}" step="1"
                     aria-label="${label}" data-tooltip="${label}"${off}>
-                <i class="fa-solid fa-forward cartographer-parallax-arrow" data-tooltip="${esc(localize('speedForward'))}"></i>
-                <span class="cartographer-parallax-value">${esc(formatRate(speed))}</span>
+                <i class="fa-solid fa-forward-fast cartographer-parallax-arrow" data-tooltip="${esc(localize('timeRateFast'))}"></i>
+                <span class="cartographer-parallax-value">${esc(formatRate(Math.abs(speed)))}</span>
             </div>`;
         }
+        // Which end the party is heading for: one toggle, for the trip in progress.
+        const reversed = !!travel?.reversed;
+        const turn = this._button({
+            action: 'routes-direction',
+            icon: 'fa-solid fa-right-left',
+            label: disabled ? localize('noJourneyToPlay') : localize(reversed ? 'headingReversed' : 'headingAsDrawn'),
+            className: reversed ? 'is-active' : '',
+            disabled
+        });
         // Journeys and routes: either can be run.
         const journeys = this.manager.journeys();
         const routes = this.manager.visibleRoutes();
@@ -252,7 +252,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
             label: disabled ? localize('noJourneyToPlay') : localize('resetJourney'),
             disabled
         });
-        return { left: play + reset + slider, right: pick + gear };
+        return { left: play + reset + turn + slider, right: pick + gear };
     }
 
     /**
@@ -356,7 +356,6 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         return {
             playing: !!travel?.motion?.playing,
             followClock: !!travel?.followClock,
-            reversed: !!travel?.reversed,
             paces: [
                 ...(pace > 0 && !chosen ? [{ id: '', label: game.i18n.format(`${MODULE.ID}.routes.customPace`, { pace: formatDistance(pace, units) }), selected: true }] : []),
                 ...(!(pace > 0) ? [{ id: '', label: game.i18n.localize(`${MODULE.ID}.routes.noPace`), selected: true }] : []),

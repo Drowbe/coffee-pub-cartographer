@@ -3,6 +3,7 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
+import { notify } from './utils-toast.js';
 import { routesManager } from './manager-routes.js';
 import { formatDistance } from './utils-travel.js';
 import { journeysManager } from './manager-journeys.js';
@@ -106,7 +107,7 @@ class TravelPinsManager {
         const wasName = was ? routesManager.path(was, scene)?.name : null;
         const result = await this.placeParty(scene, { x: pin.x, y: pin.y }, DROP_SNAP_PIXELS / (canvas.stage?.scale?.x || 1));
         const message = this.dropMessage(result, wasName, scene);
-        if (message) ui.notifications.info(message);
+        if (message) notify(message);
     }
 
     /**
@@ -126,12 +127,19 @@ class TravelPinsManager {
         return format('partyMovedOn', { party, name: progress.path.name, where });
     }
 
-    /** Stop every route and journey moving on a map: there is one party. */
+    /**
+     * Stop every route and journey moving on a map: there is one party. Moving
+     * at all -- playing, or carried along by the clock's timeline -- not only
+     * playing, so nothing goes on showing as the party's trip.
+     */
     async _stopAll(scene) {
         const links = [
             ...routesManager.journeys(scene).map(j => ({ sceneId: scene.id, journeyId: j.id })),
             ...routesManager.routes(scene).map(r => ({ sceneId: scene.id, routeId: r.id }))
-        ].filter(link => routesManager.progress(link)?.travel.motion.playing);
+        ].filter(link => {
+            const progress = routesManager.progress(link);
+            return !!progress && (progress.travel.motion.playing || progress.moving);
+        });
         for (const link of links) await journeysManager.stop(link);
     }
 

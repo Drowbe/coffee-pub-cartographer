@@ -22,6 +22,8 @@ const strip = file => fs.readFileSync(`scripts/${file}`, 'utf8')
     .replace(/^import[\s\S]*?from '[^']+';\r?$/gm, '')
     .replace(/^export (const|function|class) /gm, '$1 ');
 const shared = `${strip('utils-motion.js')}\n${strip('utils-groups.js')}\n${strip('utils-travel.js')}\n`;
+// Blacksmith's toasts and logging (utils-toast.js), as the core notifications the tests watch.
+const toastStubs = 'const notify = (m, o = {}) => globalThis.ui?.notifications?.[o.type ?? "info"]?.(m); const log = () => {};\n';
 const load = async (source) => import('data:text/javascript,' + encodeURIComponent(source));
 
 // --- Foundry, stubbed ------------------------------------------------------
@@ -71,14 +73,14 @@ globalThis.fakeWindowModule = { ParallaxWindow: { open: async manager => ({
     async close() { this.rendered = false; manager.onWindowClosed(this); }
 }) } };
 
-await load(`const MODULE={ID:'m',NAME:'M'}; const repeatingTexture=t=>t;\n${shared}`
+await load(`const MODULE={ID:'m',NAME:'M'}; const repeatingTexture=t=>t;\n${toastStubs}${shared}`
     + strip('manager-tilemotion.js').replace('const tileMotionManager', 'globalThis.tm'));
 // The routes manager is loaded later; parallax reaches it when it gets there.
 const lateRoutes = `const routesManager = new Proxy({}, { get: (_, key) => (...args) => globalThis.rm?.[key]?.(...args) ?? null });\n`;
-await load(`const MODULE={ID:'m',NAME:'M'}; const tileMotionManager=globalThis.tm; const releaseRepeatingTextures=()=>{}; const repeatingTexture=t=>t;\n${shared}\n${strip('utils-routes.js')}\n${lateRoutes}`
+await load(`const MODULE={ID:'m',NAME:'M'}; const tileMotionManager=globalThis.tm; const releaseRepeatingTextures=()=>{}; const repeatingTexture=t=>t;\n${toastStubs}${shared}\n${strip('utils-routes.js')}\n${lateRoutes}`
     + strip('manager-parallax.js').replace('const parallaxManager', 'globalThis.pm')
         .replace("await import('./window-parallax.js')", 'globalThis.fakeWindowModule'));
-await load(`const MODULE={ID:'m',NAME:'M'}; const parallaxManager=globalThis.pm; const tileMotionManager=globalThis.tm;\n${shared}`
+await load(`const MODULE={ID:'m',NAME:'M'}; const parallaxManager=globalThis.pm; const tileMotionManager=globalThis.tm;\n${toastStubs}${shared}`
     + strip('manager-collections.js').replace('const collectionsManager', 'globalThis.cm'));
 const pm = globalThis.pm;
 const tm = globalThis.tm;
@@ -350,7 +352,7 @@ console.log('\nroutes: who may change what');
     game.scenes = Object.assign([], { get: id => (id === scene.id ? scene : null), contents: [scene] });
     await load(`const MODULE={ID:'m',NAME:'M'}; const cartographerToolbar={registerTool(){}};`
         + `const socketManager={registerToolHandlers(){}, broadcast: async (...args) => globalThis.routesSent.push(args)};\n`
-        + `${shared}\n${strip('utils-routes.js')}\n`
+        + `${toastStubs}${shared}\n${strip('utils-routes.js')}\n`
         + strip('manager-routes.js').replace('const routesManager', 'globalThis.rm'));
     globalThis.routesSent = sent;
     const line = [[0, 0], [140, 0], [140, 280]];
@@ -514,7 +516,7 @@ console.log('\nroutes: who may change what');
     const warnings = [];
     ui.notifications.warn = m => warnings.push(m);
     await load(`const MODULE={ID:'m',NAME:'M'}; const cartographerToolbar={registerTool(){}}; const routesManager=globalThis.rm; const parallaxManager=globalThis.pm;`
-        + `const travelManager={ constructor: { clockApi: () => null } };\n${shared}\n${strip('utils-routes.js')}\n`
+        + `const travelManager={ constructor: { clockApi: () => null } };\n${toastStubs}${shared}\n${strip('utils-routes.js')}\n`
         + strip('manager-journeys.js').replace('const journeysManager', 'globalThis.jm').replace(/^export \{[^}]*\};?$/m, ''));
     // The map: 50 ft of road and 50 ft of forest, as before.
     flags.routes = { list: [], journeys: [] };
@@ -566,8 +568,11 @@ console.log('\nroutes: who may change what');
         'at the end, the GM\'s client stops the journey and the scene, and marks them arrived');
     await jm.play(go);
     check(jm.isPlaying(go) && rm.progress(go).distance === 0, 'playing an arrived journey sets out again from the start');
-    await jm.setSpeed(go, -1);
-    check(animFlags.parallax.masterSpeed === -1 && rm.progress(go).travel.motion.masterSpeed === -1, 'the speed reaches both');
+    await jm.setSpeed(go, 600);
+    check(rm.progress(go).travel.motion.masterSpeed === 600 && animFlags.parallax.masterSpeed === 1,
+        'the time rate is the trip\'s; the following scene\'s scenery keeps its own speed');
+    await jm.setSpeed(go, -10);
+    check(rm.progress(go).travel.motion.masterSpeed === 10, 'time only runs onward: which way is the trip\'s direction');
     await jm.stop(go);
     game.scenes = Object.assign([scene], { get: id => (id === scene.id ? scene : null), contents: [scene] });
 
@@ -630,21 +635,32 @@ console.log('\nroutes: who may change what');
     await jm.play(one);
     const startWorld = world;
     world += 20;
-    check(Math.abs(rm.progress(one).distance - 20) < 1e-6, 'with the clock, the party goes at its pace: the bar\'s speed sets only the direction');
-    await jm.setSpeed(one, -10);
+    check(Math.abs(rm.progress(one).distance - 20) < 1e-6, 'with the clock, the party goes at its pace, whatever the rate set');
+    await jm.setDirection(one, true);
     world += 5;
-    check(Math.abs(rm.progress(one).distance - 15) < 1e-6, 'back along the way, at the same pace');
+    // Turned round 20 ft along a 50 ft route: 30 ft from the far end, then 5 more back.
+    check(Math.abs(rm.progress(one).distance - 35) < 1e-6 && Math.abs(rm.progress(one).point.x - 15 * 28) < 1e-6,
+        'turned round, back along the way at the same pace');
+    await jm.setDirection(one, false);
     await jm.stop(one);
     world = startWorld + 25;
     const scenery = pm._readState();
-    scenery.masterSpeed = 2;
-    pm.applyDirection(scenery, -3600);
-    check(scenery.masterSpeed === -2 && JSON.stringify(pm._journeyMotion(scenery)) === JSON.stringify({ playing: !!scenery.playing }),
-        'however fast the trip runs, a following scene\'s scenery keeps its own speed, turned the way the trip goes; it tells the trip only Play and Stop');
+    check(JSON.stringify(pm._journeyMotion(scenery)) === JSON.stringify({ playing: !!scenery.playing }),
+        'a following scene tells the trip only Play and Stop');
     const late = await rm._apply({ action: 'create', sceneId: 'here', route: { name: 'Late', points: [[0, 900], [1400, 900]] } }, gm);
     await jm.play({ sceneId: 'here', routeId: late.id }, 3600);
     check(rm.progress({ sceneId: 'here', routeId: late.id }).travel.followClock === true, 'a route setting out later takes up the map\'s setting');
     await jm.stop({ sceneId: 'here', routeId: late.id });
+    // The clock at x240, its last update a second ago: the estimate runs 240 s ahead of it.
+    const lateHere = { sceneId: 'here', routeId: late.id };
+    const modulesBefore = game.modules;
+    game.modules = { get: id => (id === 'coffee-pub-blacksmith' ? { api: { worldClock: { running: true, rate: 240 } } } : null) };
+    rm._worldSeenAt = performance.now() - 1000;
+    await rm.setPathTravel(lateHere, { effort: 30 });
+    check(Math.abs(rm.progress(lateHere, now, world).distance - 30) < 1e-6,
+        'a change is stamped with the clock\'s own time, so when the clock catches up the party is still where it was put');
+    game.modules = modulesBefore;
+    rm._worldSeenAt = undefined;
     await jm.setMapClock(scene, false);
     check(!rm.settings().followClock && !rm.progress(one).travel.followClock, 'turned off, every route runs in real time again');
     await rm._apply({ action: 'update', sceneId: 'here', id: late.id, changes: { color: '#3A7BD5' } }, gm);
@@ -704,7 +720,7 @@ console.log('\nroutes: who may change what');
         create: async data => { placed.set(data.id, { ...data }); },
         update: async (pid, patch) => { placed.set(pid, { ...placed.get(pid), ...patch }); }
     }, party: { actor: () => (partyName ? { name: partyName } : null) } } } : null) };
-    await load(`const MODULE={ID:'m',NAME:'M'}; const routesManager=globalThis.rm; const journeysManager=globalThis.jm;\n${shared}\n${strip('utils-routes.js')}\n`
+    await load(`const MODULE={ID:'m',NAME:'M'}; const routesManager=globalThis.rm; const journeysManager=globalThis.jm;\n${toastStubs}${shared}\n${strip('utils-routes.js')}\n`
         + strip('manager-travelpins.js').replace('const travelPinsManager', 'globalThis.tp2').replace(/^export \{[^}]*\};?$/m, ''));
     placed.set('m-party-here', { id: 'm-party-here', x: 0, y: 0 });
     await rm.setSettings({ active: { routeId: late.id } });
@@ -732,6 +748,17 @@ console.log('\nroutes: who may change what');
     const moved = await tp2.placeParty(scene, { x: 350, y: 498 }, 24);
     check(moved.link.routeId === lone.id && Math.abs(rm.progress(one).distance - 12.5) < 1e-6 && rm.progress(lateLink).distance === 0,
         'dropped on a different route, the last trip is cancelled and the party starts the new one where it landed');
+
+    // A route still carried along by the clock's timeline though its Play flag is off
+    // (left so by an earlier version): a drop elsewhere must stop it too, or the map
+    // would go on showing it, and the marker would sit on it.
+    await rm.setPathTravel(lateLink, { followClock: true, playing: true, pace: 3600 });
+    flags.routes.list.find(r => r.id === late.id).travel.motion.playing = false;
+    check(rm.progress(lateLink).moving, '(a route moving on the timeline with Play off)');
+    const elsewhere = await tp2.placeParty(scene, { x: 700, y: 500 }, 24);
+    check(elsewhere.link.routeId === lone.id && !rm.progress(lateLink).moving && rm.shownPath()?.routeId === lone.id,
+        'dropped on another route, that one stops too, and the map shows where the party was put');
+    await rm.setPathTravel(lateLink, { followClock: false });
 
     console.log('\nends and directions');
     await tp2.placeParty(scene, { x: 1390, y: 903 }, 24);

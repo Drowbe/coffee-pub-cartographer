@@ -3,6 +3,7 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
+import { notify } from './utils-toast.js';
 import { PARALLAX_DIRECTIONS } from './manager-parallax.js';
 import { defaultTileMotion, tileMotionManager } from './manager-tilemotion.js';
 import { collectionsManager } from './manager-collections.js';
@@ -675,7 +676,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         const esc = text => foundry.utils.escapeHTML(String(text ?? ''));
         const scenes = this.manager.scenesWithParallax();
         if (!scenes.length) {
-            ui.notifications.info(localize('copyNoScenes'));
+            notify(localize('copyNoScenes'));
             return;
         }
         const options = scenes.map(scene => {
@@ -722,7 +723,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
             const data = JSON.parse(await foundry.utils.readTextFromFile(result.file));
             await this.manager.importData(data, result.mode);
         } catch (error) {
-            ui.notifications.error(`${localize('importFailed')} ${error.message}`);
+            notify(localize('importFailed'), { subtitle: error.message, type: 'error' });
         }
     }
 

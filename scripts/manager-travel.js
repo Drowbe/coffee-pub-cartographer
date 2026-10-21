@@ -3,6 +3,7 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
+import { notify } from './utils-toast.js';
 import { parallaxManager } from './manager-parallax.js';
 import { routesManager } from './manager-routes.js';
 import { formatDistance, formatSpan } from './utils-travel.js';
@@ -366,7 +367,7 @@ class TravelManager {
         const travel = parallaxManager.state.travel;
         if (travel.arrived || !parallaxManager.state.playing) return;
         this._arriving = true;
-        ui.notifications.info(game.i18n.format(`${MODULE.ID}.parallax.travelArrivedNotice`, { distance: summary.destinationText }));
+        notify(game.i18n.format(`${MODULE.ID}.parallax.travelArrivedNotice`, { distance: summary.destinationText }));
         Promise.resolve(parallaxManager.arrive()).finally(() => { this._arriving = false; });
     }
 }

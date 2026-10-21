@@ -3,6 +3,7 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
+import { log } from './utils-toast.js';
 import { tileMotionManager } from './manager-tilemotion.js';
 import { releaseRepeatingTextures, repeatingTexture } from './utils-textures.js';
 import { NONE_GROUP, normalizeActive, shownByGroups, toggledActive } from './utils-groups.js';
@@ -220,7 +221,7 @@ class ParallaxManager {
         this._registerHooks();
         this._exposeApi();
         await this.refresh({ sceneLoaded: true });
-        console.log(`${MODULE.NAME}: Parallax tool initialized`);
+        log('Parallax tool initialized', '', { debug: true });
     }
 
     cleanup() {
@@ -505,14 +506,7 @@ class ParallaxManager {
         return this._commit(s => { s.masterSpeed = value; });
     }
 
-    /**
-     * A scene following a trip runs its scenery the way the trip goes: the
-     * same speed as set, turned round when the trip runs back.
-     */
-    applyDirection(state, rate) {
-        const sign = Math.sign(Number(rate) || 0) || 1;
-        state.masterSpeed = sign * (Math.abs(Number(state.masterSpeed) || 0) || 1);
-    }
+
 
     // ==================================================================
     // ===== TRAVEL =====================================================
@@ -1126,7 +1120,7 @@ class ParallaxManager {
         layers.forEach((layer, index) => {
             const texture = textures[index];
             if (!texture) {
-                console.warn(`${MODULE.NAME}: Parallax layer image could not be loaded: ${layer.src}`);
+                log('Parallax layer image could not be loaded', layer.src, { level: 'warn' });
                 return;
             }
             // A mipmap-free twin of the image: see utils-textures.js for the seam it prevents.

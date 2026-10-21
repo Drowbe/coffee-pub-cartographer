@@ -3,6 +3,7 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
+import { notify } from './utils-toast.js';
 import { cartographerToolbar } from './manager-toolbar.js';
 import { socketManager } from './manager-sockets.js';
 import {
@@ -501,7 +502,7 @@ class RoutesManager {
      */
     async setPathTravel(link, changes, now = game.time.serverTime) {
         if (!game.user.isGM || !link?.sceneId) return null;
-        return this._apply({ action: 'travel', sceneId: link.sceneId, link, changes, now, world: this.worldTime() }, game.user);
+        return this._apply({ action: 'travel', sceneId: link.sceneId, link, changes, now, world: Number(game.time?.worldTime) || 0 }, game.user);
     }
 
     /** Where a distance in the scene's units along a route or journey reaches: { x, y, angle } in pixels. */
@@ -557,7 +558,7 @@ class RoutesManager {
         const data = { ...change, sceneId: canvas.scene?.id, userId: game.user.id };
         if (game.user.isGM) return this._apply(data, game.user);
         if (!game.users.activeGM) {
-            ui.notifications.warn(game.i18n.localize(`${MODULE.ID}.routes.needsGM`));
+            notify(game.i18n.localize(`${MODULE.ID}.routes.needsGM`), { type: 'warn' });
             return null;
         }
         await socketManager.broadcast('routes', 'request', data);
@@ -641,7 +642,10 @@ class RoutesManager {
                 // A path setting out for the first time follows the clock if its map does.
                 if (!item.travel) travel.followClock = !!settings?.followClock;
                 const now = Number(data.now) || game.time.serverTime;
-                const world = Number.isFinite(Number(data.world)) ? Number(data.world) : this.worldTime();
+                // The clock's actual time, never the estimate carried on between its updates:
+                // a change stamped ahead of the clock would read as still to come, and the
+                // party would show where it was before.
+                const world = Number.isFinite(Number(data.world)) ? Number(data.world) : Number(game.time?.worldTime) || 0;
                 const path = this.path(data.link, scene);
                 const total = path ? totalEffort(pathLegs(path.points, path.terrain, scene.grid)) : 0;
                 travel.effort = Math.min(total, Math.max(0, travelEffort(travel, now, world)));
@@ -1000,7 +1004,7 @@ class RoutesManager {
         this._listen();
         this.draft = { points: from ? [[from.x, from.y]] : [], cursor: null };
         canvas.app.view.style.cursor = 'crosshair';
-        ui.notifications.info(game.i18n.localize(`${MODULE.ID}.routes.drawHint`));
+        notify(game.i18n.localize(`${MODULE.ID}.routes.drawHint`));
         this._refreshButtons();
         this.draw();
     }
@@ -1063,7 +1067,7 @@ class RoutesManager {
             selected: null
         };
         if (!this._editHinted) {
-            ui.notifications.info(game.i18n.localize(`${MODULE.ID}.routes.editHint`));
+            notify(game.i18n.localize(`${MODULE.ID}.routes.editHint`));
             this._editHinted = true;
         }
         this._refreshButtons();
@@ -1159,8 +1163,41 @@ class RoutesManager {
             this._drawnRoutes.push({ id: route.id, points });
             this._labels.set(route.id, label);
         }
+        if (!this.editing && !this.draft) this._drawDirection(sizes);
         this._showLabels();
         this._drawDraft();
+    }
+
+    /**
+     * Small arrows along the trip the map shows, pointing the way the party
+     * is heading -- to the end it was drawn to, or back, when turned round.
+     */
+    _drawDirection(sizes) {
+        const link = this.shownPath();
+        const path = link ? this.path(link) : null;
+        if (!path || path.points.length < 2) return;
+        const length = routePixels(path.points);
+        const spacing = Math.max(60, (Number(canvas.scene?.grid?.size) || 100) * 1.5);
+        const size = sizes.line * 1.6;
+        const graphics = new PIXI.Graphics();
+        for (let along = spacing / 2; along < length; along += spacing) {
+            const at = pointAlong(path.points, along);
+            if (!at) continue;
+            const cos = Math.cos(at.angle);
+            const sin = Math.sin(at.angle);
+            // A chevron pointing along the way: two strokes meeting at its tip.
+            const turn = (x, y) => [at.x + x * cos - y * sin, at.y + x * sin + y * cos];
+            const [tx, ty] = turn(size * 0.6, 0);
+            const [ax, ay] = turn(-size * 0.6, -size);
+            const [bx, by] = turn(-size * 0.6, size);
+            for (const [width, color, alpha] of [[sizes.line * 0.9, 0x111111, 0.6], [sizes.line * 0.5, 0xffffff, 0.95]]) {
+                graphics.lineStyle({ width, color, alpha, cap: 'round', join: 'round' });
+                graphics.moveTo(ax, ay);
+                graphics.lineTo(tx, ty);
+                graphics.lineTo(bx, by);
+            }
+        }
+        this._routes.addChild(graphics);
     }
 
     /** A dashed segment, for a leg across difficult terrain. */

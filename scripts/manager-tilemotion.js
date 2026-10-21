@@ -3,6 +3,7 @@
 // ==================================================================
 
 import { MODULE } from './const.js';
+import { log } from './utils-toast.js';
 import {
     angleVector,
     defaultMotion,
@@ -90,7 +91,7 @@ class TileMotionManager {
         this._registerHooks();
         this._exposeApi();
         this.refresh();
-        console.log(`${MODULE.NAME}: Tile motion initialized`);
+        log('Tile motion initialized', '', { debug: true });
     }
 
     _registerHooks() {
