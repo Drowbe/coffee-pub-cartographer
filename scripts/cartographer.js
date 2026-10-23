@@ -16,6 +16,7 @@ import { travelManager } from './manager-travel.js';
 import { routesManager } from './manager-routes.js';
 import { travelPinsManager } from './manager-travelpins.js';
 import { journeysManager } from './manager-journeys.js';
+import { autoWallManager } from './manager-autowall.js';
 
 // ================================================================== 
 // ===== BLACKSMITH API INTEGRATION =================================
@@ -174,6 +175,7 @@ Hooks.once('canvasReady', async () => {
             routesManager.initialize();
             travelPinsManager.initialize();
             journeysManager.initialize();
+            autoWallManager.initialize();
         } catch (error) {
             console.error(`❌ ${MODULE.NAME}: Failed to initialize tile motion:`, error);
         }

@@ -439,37 +439,78 @@ export function snapSegments(segments, { grid = 0, snapDistance = 0, angleSnap =
 /**
  * From a click to segments, in the image's own pixels.
  *
+ * extraSeeds ([[x, y], ...]) are more clicks on the same wall -- a wall that
+ * changes material along its length is mapped by clicking each part. Each is
+ * flooded on its own colour and the masks are joined before thinning.
+ *
  * maxThickness (pixels) is the widest a wall may be. A mask with a part wider
  * than that comes back with tooThick set and no segments.
  *
- * @returns {{ segments: number[][][], mask: Uint8Array, skeleton: Uint8Array,
+ * Everything after the flood runs on the box around the mask, so the cost
+ * follows the wall and not the map.
+ *
+ * @returns {{ segments: number[][][], mask: Uint8Array,
+ *             bounds: { x: number, y: number, width: number, height: number },
  *             count: number, capped: boolean, tooThick: boolean }}
  */
 export function mapWall(pixels, seedX, seedY, options = {}) {
     const { width, height } = pixels;
-    const flood = floodMask(pixels, seedX, seedY, options);
-    const tidy = tidyMask(flood.mask, width, height, options);
+    const lab = options.lab ?? labBuffer(pixels);
+    const joined = new Uint8Array(width * height);
+    let count = 0;
+    let capped = false;
+    for (const [x, y] of [[seedX, seedY], ...(options.extraSeeds ?? [])]) {
+        const flood = floodMask(pixels, x, y, { ...options, lab });
+        capped ||= flood.capped;
+        for (let i = 0; i < joined.length; i++) if (flood.mask[i]) joined[i] = 1;
+    }
+    let x0 = width, y0 = height, x1 = -1, y1 = -1;
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            if (!joined[y * width + x]) continue;
+            count++;
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+        }
+    }
+    if (!count) {
+        return { segments: [], mask: new Uint8Array(0), bounds: { x: 0, y: 0, width: 0, height: 0 }, count, capped, tooThick: false };
+    }
+
+    // The box, with room for closing and for the thickness test to see past the edge.
+    const margin = (options.closeRadius ?? 2) + Math.ceil((options.maxThickness ?? 0) / 2) + 2;
+    x0 = Math.max(0, x0 - margin);
+    y0 = Math.max(0, y0 - margin);
+    x1 = Math.min(width - 1, x1 + margin);
+    y1 = Math.min(height - 1, y1 + margin);
+    const w = x1 - x0 + 1;
+    const h = y1 - y0 + 1;
+    const crop = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) crop[y * w + x] = joined[(y + y0) * width + x + x0];
+    }
+    const bounds = { x: x0, y: y0, width: w, height: h };
+
+    const tidy = tidyMask(crop, w, h, options);
     // A wall is thin. Anything with a fat part is a flood that got out into a
     // room or a courtyard, and its centreline would be nonsense: refuse it.
     // Fat walls are for a later pass; they must not be guessed at here.
     const tooThick = options.maxThickness > 0
-        && morph(tidy, width, height, Math.ceil(options.maxThickness / 2), false).some(Boolean);
-    if (tooThick) {
-        return { segments: [], mask: tidy, skeleton: new Uint8Array(width * height), count: flood.count, capped: flood.capped, tooThick };
-    }
-    const skeleton = thin(tidy, width, height);
-    const paths = tracePaths(skeleton, width, height, options);
+        && morph(tidy, w, h, Math.ceil(options.maxThickness / 2), false).some(Boolean);
+    if (tooThick) return { segments: [], mask: tidy, bounds, count, capped, tooThick };
+
+    const paths = tracePaths(thin(tidy, w, h), w, h, options);
     const segments = [];
     for (const path of paths) {
         const simple = simplify(path, options.epsilon ?? 3);
         for (let i = 0; i < simple.length - 1; i++) segments.push([simple[i], simple[i + 1]]);
     }
-    return {
-        segments: snapSegments(weld(segments, options.weldDistance ?? 4), options),
-        mask: tidy,
-        skeleton,
-        count: flood.count,
-        capped: flood.capped,
-        tooThick
-    };
+    // Back into the image's own pixels, and a pixel's centre rather than its corner.
+    const placed = weld(segments, options.weldDistance ?? 4)
+        .map(([a, b]) => [[a[0] + x0 + 0.5, a[1] + y0 + 0.5], [b[0] + x0 + 0.5, b[1] + y0 + 0.5]]);
+    // Straightening turns each segment about its middle, which parts ends that
+    // met by a hair; one more weld, much tighter, closes them again.
+    return { segments: weld(snapSegments(placed, options), 1), mask: tidy, bounds, count, capped, tooThick };
 }

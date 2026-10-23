@@ -13,3 +13,6 @@
 
 /* --- Parallax Tool ---------------------- */
 @import "tool-parallax.css";
+
+/* --- Auto-wall Tool ---------------------- */
+@import "tool-autowall.css";

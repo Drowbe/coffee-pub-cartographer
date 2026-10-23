@@ -1,0 +1,126 @@
+
+/* ------------------------------------ */
+/* --- AUTO-WALL TOOL ----------------- */
+/* ------------------------------------ */
+
+/* The panel that floats over the map while a wall is being mapped. It is a
+   plain element, not a window, so it takes the Blacksmith tool colours with a
+   fallback for the case that they are not defined where it sits. */
+.cartographer-autowall-panel {
+    position: fixed;
+    left: 50%;
+    bottom: 150px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 340px;
+    max-width: calc(100vw - 24px);
+    padding: 10px 12px 12px;
+    transform: translateX(-50%);
+    border: 1px solid var(--blacksmith-tool-divider, rgba(255, 255, 255, 0.25));
+    border-radius: 6px;
+    background: var(--blacksmith-tool-background, rgba(20, 20, 24, 0.92));
+    color: var(--blacksmith-tool-text, #e8e6e1);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+    font-size: 13px;
+    pointer-events: auto;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-title {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-status {
+    min-height: 2.6em;
+    line-height: 1.3;
+    opacity: 0.85;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-status[data-tone="ok"] {
+    color: #6fd08c;
+    opacity: 1;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-status[data-tone="warn"] {
+    color: #f0b35a;
+    opacity: 1;
+}
+
+/* Label, slider and value sit side by side; the labels share a column so the
+   sliders start at the same place, but nothing is pushed to the far edge. */
+.cartographer-autowall-panel .cartographer-autowall-thumb {
+    display: block;
+    width: 100%;
+    height: 150px;
+    border: 1px solid var(--blacksmith-tool-divider, rgba(255, 255, 255, 0.25));
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.cartographer-autowall-panel .cartographer-autowall-row {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr) 40px;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-row input[type="range"] {
+    width: 100%;
+    margin: 0;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-value {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.8;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-check input {
+    margin: 0;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-buttons button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 26px;
+    margin: 0;
+    padding: 0 12px;
+    border: 1px solid var(--blacksmith-tool-divider, rgba(255, 255, 255, 0.25));
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-buttons button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.cartographer-autowall-panel .cartographer-autowall-buttons button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}

@@ -112,6 +112,11 @@ class CartographerToolbar {
                     'Routes': {
                         mode: 'default',
                         order: 30
+                    },
+                    // Mapping a wall on the scene image into real walls: see manager-autowall.js.
+                    'Walls': {
+                        mode: 'default',
+                        order: 35
                     }
                     // 'default' group is automatically created for items without a group
                 },
