@@ -26,13 +26,13 @@ const MAX_WORK_SIZE = 2400;
 const CLICK_PIXELS = 4;
 /** How long, in ms, the controls settle before the walls are worked out again. */
 const SETTLE_MS = 160;
-const STORE_KEY = `${MODULE.ID}.autowall.options`;
+const STORE_KEY = `${MODULE.ID}.autowall.options.v2`;
 
 /** What the controls start at, and the limits they move between. */
-const DEFAULTS = { match: 20, smoothing: 0.06, widest: 1, snap: false };
+const DEFAULTS = { match: 20, smoothing: 0.3, widest: 1, snap: false };
 const LIMITS = {
     match: { min: 8, max: 36, step: 1 },
-    smoothing: { min: 0.02, max: 0.3, step: 0.01 },
+    smoothing: { min: 0.05, max: 1, step: 0.05 },
     widest: { min: 0.25, max: 3, step: 0.05 }
 };
 
@@ -249,6 +249,7 @@ class AutoWallManager {
             maxPixels: 600000,
             maxThickness: Math.max(4, options.widest * square),
             epsilon: Math.max(1.5, options.smoothing * square),
+            pruneLength: options.smoothing * square * 3,
             closeRadius: Math.max(1, Math.min(4, Math.round(square * 0.03))),
             minBranch: Math.max(4, Math.round(square * 0.12)),
             weldDistance: Math.max(2, square * 0.06),

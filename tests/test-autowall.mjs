@@ -4,7 +4,7 @@
 // junction, that a wall stops where its material does, that a flood which leaks
 // says so. It says nothing about how a real painted map behaves; that is tried
 // on the map.
-import { mapWall, floodMask, simplify, snapSegments, labBuffer } from '../scripts/utils-autowall.js';
+import { mapWall, floodMask, simplify, snapSegments, labBuffer, mergeStraight } from '../scripts/utils-autowall.js';
 
 let failures = 0;
 const check = (label, ok, detail = '') => {
@@ -108,6 +108,66 @@ console.log('\na flood that leaks says so instead of tracing the map');
 }
 
 // ------------------------------------------------------------------
+console.log('\na flood into a room is refused, a wall is not');
+{
+    // A wall joined to a room of the same stone: the flood fills both.
+    const picture = paint(160, 140, [[20, 20, 140, 30], [20, 30, 140, 130]], { noise: 3 });
+    const room = mapWall(picture, 60, 25, { tolerance: 20, stepTolerance: 6, lightnessWeight: 0.5, maxThickness: 24 });
+    check('it says the mask is too thick', room.tooThick === true);
+    check('and draws nothing', room.segments.length === 0);
+    const wall = paint(160, 60, [[10, 25, 150, 35]]);
+    const ok = mapWall(wall, 80, 30, { tolerance: 20, stepTolerance: 6, lightnessWeight: 0.5, maxThickness: 24 });
+    check('a wall within the limit is mapped', !ok.tooThick && ok.segments.length === 1);
+}
+
+// ------------------------------------------------------------------
+console.log('\nmore than one click maps a wall that changes material');
+{
+    const GATE = [70, 90, 140];
+    const picture = paint(300, 80, [[20, 35, 120, 45], [180, 35, 280, 45]]);
+    for (let y = 35; y < 45; y++) {
+        for (let x = 120; x < 180; x++) {
+            const i = (y * 300 + x) * 4;
+            picture.data[i] = GATE[0]; picture.data[i + 1] = GATE[1]; picture.data[i + 2] = GATE[2];
+        }
+    }
+    const result = mapWall(picture, 60, 40, { tolerance: 20, stepTolerance: 6, lightnessWeight: 0.5, extraSeeds: [[150, 40], [230, 40]] });
+    check('one centreline runs through all three parts', covers(result.segments, 40, 39.5) && covers(result.segments, 150, 39.5) && covers(result.segments, 260, 39.5));
+    check('and it is one segment', result.segments.length === 1, `got ${result.segments.length}`);
+    check('bounds are the box around the wall, inside the image',
+        result.bounds.x >= 0 && result.bounds.y >= 0 && result.bounds.x + result.bounds.width <= 300 && result.bounds.height < 40,
+        JSON.stringify(result.bounds));
+}
+
+// ------------------------------------------------------------------
+console.log('\na chipped wall is a plain line, not a string of points');
+{
+    // 14px thick, with both edges ragged by a few pixels along the whole run,
+    // and a lump of stone on one side -- the shape a painted wall has.
+    const width = 400;
+    const height = 80;
+    const picture = paint(width, height, [], { noise: 4 });
+    for (let x = 20; x < 380; x++) {
+        const top = 33 + Math.round(grain(5));
+        const bottom = 47 + Math.round(grain(5));
+        const lump = x >= 200 && x < 215 ? 7 : 0;
+        for (let y = top - lump; y < bottom; y++) {
+            const i = (y * width + x) * 4;
+            picture.data[i] = STONE[0]; picture.data[i + 1] = STONE[1]; picture.data[i + 2] = STONE[2];
+        }
+    }
+    const rough = { tolerance: 20, stepTolerance: 6, lightnessWeight: 0.5, epsilon: 1.5 };
+    const plain = mapWall(picture, 100, 40, { ...rough, pruneLength: 30 });
+    check('it is not capped or refused', !plain.capped && !plain.tooThick);
+    check('one segment, however ragged, once stubs are pruned', plain.segments.length === 1, `got ${plain.segments.length}`);
+    const [a, b] = plain.segments[0] ?? [[0, 0], [0, 0]];
+    check('and it runs the length of the wall, to within a thickness of each end, down its middle',
+        Math.min(a[0], b[0]) <= 40 && Math.max(a[0], b[0]) >= 360 && Math.abs(a[1] - 40) <= 2 && Math.abs(b[1] - 40) <= 2, JSON.stringify(plain.segments));
+    const stubby = mapWall(picture, 100, 40, rough);
+    check('a short stub off the wall is kept when pruning is not asked for', stubby.segments.length === 2, `got ${stubby.segments.length}`);
+}
+
+// ------------------------------------------------------------------
 console.log('\nlight across a wall is not an edge, a hard edge is');
 {
     // A wall that darkens steadily along its length, as a shadow falls across.
@@ -136,6 +196,13 @@ console.log('\nsimplify and snap');
 
     const shared = snapSegments([[[0, 0], [101, 2]], [[101, 2], [99, 100]]], { grid: 100, snapDistance: 10 });
     check('segments that met still meet', shared[0][1][0] === shared[1][0][0] && shared[0][1][1] === shared[1][0][1]);
+
+    const line = mergeStraight([[[0, 0], [50, 1]], [[50, 1], [100, 0]]]);
+    check('two segments meeting on a straight line are one', line.length === 1 && line[0][0][0] === 0 && line[0][1][0] === 100, JSON.stringify(line));
+    const bend = mergeStraight([[[0, 0], [50, 0]], [[50, 0], [100, 50]]]);
+    check('a real corner keeps its point', bend.length === 2);
+    const tee = mergeStraight([[[0, 0], [50, 0]], [[50, 0], [100, 0]], [[50, 0], [50, 40]]]);
+    check('a third wall arriving keeps the point', tee.length === 3);
 
     const slight = snapSegments([[[0, 0], [100, 4]]], { angleSnap: 5 });
     check('a few degrees off horizontal is made horizontal',

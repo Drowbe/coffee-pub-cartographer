@@ -12,8 +12,10 @@
 //   2. tidyMask       close texture pinholes so they do not become loops
 //   3. thin           reduce the mask to a one-pixel centreline
 //   4. tracePaths     walk the centreline into polylines, dropping stubs
+//      joinPaths      and join the pieces a staircase step cut apart
 //   5. simplify       straight segments within a tolerance
-//   6. weld           merge the ends thinning left bunched at a junction
+//   6. weld           merge the ends thinning left bunched at a junction,
+//      mergeStraight  and the points left on a line that does not turn
 //   7. snapSegments   to the grid, and to 45 degrees
 //
 // A pixel buffer is { data, width, height } with data as RGBA bytes, which is
@@ -326,6 +328,81 @@ export function tracePaths(skeleton, width, height, { minBranch = 6 } = {}) {
     return paths;
 }
 
+/**
+ * Thinning leaves a little staircase wherever the wall's edge steps, and a
+ * step looks like a junction to the walk, so a straight wall comes back cut in
+ * pieces. A real junction has three or more lines meeting; where exactly two
+ * do, it is one line, and they are joined.
+ */
+export function joinPaths(paths) {
+    const key = ([x, y]) => `${x},${y}`;
+    const live = paths.map(path => path.slice());
+    let joined = true;
+    while (joined) {
+        joined = false;
+        const ends = new Map();
+        live.forEach((path, index) => {
+            if (!path) return;
+            for (const end of [path[0], path.at(-1)]) {
+                const list = ends.get(key(end)) ?? [];
+                list.push(index);
+                ends.set(key(end), list);
+            }
+        });
+        for (const [, list] of ends) {
+            if (list.length !== 2 || list[0] === list[1]) continue;
+            const [a, b] = list.map(index => live[index]);
+            const meet = key(a.at(-1)) === key(b[0]) ? 'ab'
+                : key(a[0]) === key(b[0]) ? 'a-b'
+                : key(a.at(-1)) === key(b.at(-1)) ? 'ab-'
+                : 'ba';
+            const first = meet === 'ab' || meet === 'ab-' ? a : meet === 'a-b' ? a.slice().reverse() : b;
+            const second = meet === 'ab' ? b : meet === 'ab-' ? b.slice().reverse() : meet === 'a-b' ? b : a;
+            live[list[0]] = first.concat(second.slice(1));
+            live[list[1]] = null;
+            joined = true;
+            break;
+        }
+    }
+    return live.filter(Boolean);
+}
+
+/**
+ * The centreline of a bar curls toward a corner at a free end -- the thinning's
+ * way of reaching the corner pixel -- and one point off to the side tilts the
+ * whole line fitted to it. Cut the curl from each free end, and carry the line
+ * on straight, along the wall, for as far as was cut.
+ *
+ * A free end is one no other line ends at; a junction is left as it is.
+ */
+export function straightenEnds(paths, curl) {
+    if (!(curl >= 1)) return paths;
+    const key = ([x, y]) => `${x},${y}`;
+    const ends = new Map();
+    for (const path of paths) {
+        for (const end of [path[0], path.at(-1)]) ends.set(key(end), (ends.get(key(end)) ?? 0) + 1);
+    }
+    const cut = Math.ceil(curl);
+    const along = Math.ceil(curl * 2);
+    const trim = path => {
+        // Only a free end of a path long enough to have a wall behind the curl.
+        if (path.length < cut + along + 2 || ends.get(key(path[0])) !== 1) return path;
+        const kept = path.slice(cut);
+        const [x, y] = kept[0];
+        const [bx, by] = kept[Math.min(kept.length - 1, along)];
+        const length = Math.hypot(x - bx, y - by);
+        if (!length) return path;
+        return [[x + (x - bx) / length * cut, y + (y - by) / length * cut], ...kept];
+    };
+    return paths.map(path => {
+        // The same, from the far end, by turning the path round.
+        const front = trim(path);
+        const turned = front.slice().reverse();
+        const reversed = ends.get(key(path.at(-1))) === 1 ? trim(turned) : turned;
+        return reversed.reverse();
+    });
+}
+
 // ------------------------------------------------------------------
 // 5. Simplify
 // ------------------------------------------------------------------
@@ -382,6 +459,45 @@ export function weld(segments, distance = 4) {
     return segments
         .map((_, k) => [point(k * 2), point(k * 2 + 1)])
         .filter(([a, b]) => a[0] !== b[0] || a[1] !== b[1]);
+}
+
+/**
+ * Where exactly two segments meet and the line hardly turns, they are one wall
+ * with a point in the middle of it. A real corner, or a third wall arriving,
+ * keeps its point.
+ */
+export function mergeStraight(segments, degrees = 12) {
+    const key = ([x, y]) => `${Math.round(x * 100)},${Math.round(y * 100)}`;
+    const live = segments.map(([a, b]) => [a, b]);
+    let merged = true;
+    while (merged) {
+        merged = false;
+        const at = new Map();
+        live.forEach((segment, index) => {
+            if (!segment) return;
+            for (const end of [0, 1]) {
+                const list = at.get(key(segment[end])) ?? [];
+                list.push({ index, end });
+                at.set(key(segment[end]), list);
+            }
+        });
+        for (const [, list] of at) {
+            if (list.length !== 2 || list[0].index === list[1].index) continue;
+            // Each segment as pointing away from the shared point.
+            const [first, second] = list.map(({ index, end }) => {
+                const segment = live[index];
+                return { index, near: segment[end], far: segment[1 - end] };
+            });
+            const turn = Math.abs(((Math.atan2(second.far[1] - first.near[1], second.far[0] - first.near[0])
+                - Math.atan2(first.near[1] - first.far[1], first.near[0] - first.far[0])) * 180 / Math.PI + 540) % 360 - 180);
+            if (turn > degrees) continue;
+            live[first.index] = [first.far, second.far];
+            live[second.index] = null;
+            merged = true;
+            break;
+        }
+    }
+    return live.filter(Boolean);
 }
 
 // ------------------------------------------------------------------
@@ -446,6 +562,10 @@ export function snapSegments(segments, { grid = 0, snapDistance = 0, angleSnap =
  * maxThickness (pixels) is the widest a wall may be. A mask with a part wider
  * than that comes back with tooThick set and no segments.
  *
+ * epsilon and pruneLength (pixels) are floors: the line is simplified to at
+ * least the wall's own thickness, and a stub shorter than pruneLength that
+ * ends at another wall is dropped.
+ *
  * Everything after the flood runs on the box around the mask, so the cost
  * follows the wall and not the map.
  *
@@ -501,14 +621,31 @@ export function mapWall(pixels, seedX, seedY, options = {}) {
         && morph(tidy, w, h, Math.ceil(options.maxThickness / 2), false).some(Boolean);
     if (tooThick) return { segments: [], mask: tidy, bounds, count, capped, tooThick };
 
-    const paths = tracePaths(thin(tidy, w, h), w, h, options);
+    const skeleton = thin(tidy, w, h);
+
+    // A painted wall's edge is chipped and uneven, and the centreline follows
+    // every chip. How far it wanders is about the wall's thickness, so nothing
+    // finer than that is worth a point: the wall's average thickness is its area
+    // over its length. What the caller asks for is a floor under that.
+    let area = 0;
+    let length = 0;
+    for (let i = 0; i < tidy.length; i++) {
+        area += tidy[i];
+        length += skeleton[i];
+    }
+    const thickness = length ? area / length : 0;
+    const epsilon = Math.max(options.epsilon ?? 3, thickness * 0.6);
+    const weldDistance = Math.max(options.weldDistance ?? 4, thickness * 0.75);
+    const minBranch = Math.max(options.minBranch ?? 6, options.pruneLength ?? 0);
+
+    const paths = straightenEnds(joinPaths(tracePaths(skeleton, w, h, { ...options, minBranch })), thickness * 0.75);
     const segments = [];
     for (const path of paths) {
-        const simple = simplify(path, options.epsilon ?? 3);
+        const simple = simplify(path, epsilon);
         for (let i = 0; i < simple.length - 1; i++) segments.push([simple[i], simple[i + 1]]);
     }
     // Back into the image's own pixels, and a pixel's centre rather than its corner.
-    const placed = weld(segments, options.weldDistance ?? 4)
+    const placed = mergeStraight(weld(segments, weldDistance))
         .map(([a, b]) => [[a[0] + x0 + 0.5, a[1] + y0 + 0.5], [b[0] + x0 + 0.5, b[1] + y0 + 0.5]]);
     // Straightening turns each segment about its middle, which parts ends that
     // met by a hair; one more weld, much tighter, closes them again.

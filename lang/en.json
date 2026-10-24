@@ -617,7 +617,7 @@
 		"autowall.match": "Match",
 		"autowall.matchHint": "How alike the wall's colour must be to where you clicked. Higher takes in more; too high and it spills onto the floor.",
 		"autowall.smoothing": "Smoothing",
-		"autowall.smoothingHint": "How far, in grid squares, the walls may drift from the painted wall to stay straight. Higher gives fewer, straighter walls.",
+		"autowall.smoothingHint": "How plain the walls are, in grid squares. Higher gives fewer, straighter walls and drops short stubs; lower follows the painted wall more closely.",
 		"autowall.widest": "Widest wall",
 		"autowall.widestHint": "The widest a wall may be, in grid squares. Anything wider is taken to be a room, not a wall, and is refused.",
 		"autowall.snap": "Snap to grid corners",
