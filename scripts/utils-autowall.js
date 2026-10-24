@@ -651,3 +651,105 @@ export function mapWall(pixels, seedX, seedY, options = {}) {
     // met by a hair; one more weld, much tighter, closes them again.
     return { segments: weld(snapSegments(placed, options), 1), mask: tidy, bounds, count, capped, tooThick };
 }
+
+/**
+ * A door or window: the clicked art, taken as one piece, and the line down its
+ * length. The line is the long axis of the pixels -- found from how they are
+ * spread, so a door drawn at any angle works -- and its ends are where the art
+ * ends along that axis. Where it is to be fitted between wall ends is for the
+ * caller, who knows the walls; this knows only the picture.
+ *
+ * extraSeeds join more clicks on the same piece, as in mapWall.
+ *
+ * @returns {{ segment: number[][]|null, length: number, thickness: number, mask: Uint8Array,
+ *             bounds: { x: number, y: number, width: number, height: number },
+ *             count: number, capped: boolean }}
+ */
+export function mapOpening(pixels, seedX, seedY, options = {}) {
+    const { width, height } = pixels;
+    const lab = options.lab ?? labBuffer(pixels);
+    const joined = new Uint8Array(width * height);
+    let capped = false;
+    for (const [x, y] of [[seedX, seedY], ...(options.extraSeeds ?? [])]) {
+        const flood = floodMask(pixels, x, y, { ...options, lab });
+        capped ||= flood.capped;
+        for (let i = 0; i < joined.length; i++) if (flood.mask[i]) joined[i] = 1;
+    }
+    let x0 = width, y0 = height, x1 = -1, y1 = -1, count = 0;
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            if (!joined[y * width + x]) continue;
+            count++;
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+        }
+    }
+    const empty = { segment: null, length: 0, thickness: 0, mask: new Uint8Array(0), bounds: { x: 0, y: 0, width: 0, height: 0 }, count, capped };
+    if (!count) return empty;
+
+    const w = x1 - x0 + 1;
+    const h = y1 - y0 + 1;
+    const mask = new Uint8Array(w * h);
+    let mx = 0, my = 0;
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (!joined[(y + y0) * width + x + x0]) continue;
+            mask[y * w + x] = 1;
+            mx += x;
+            my += y;
+        }
+    }
+    mx /= count;
+    my /= count;
+
+    // The spread of the pixels about their centre: its long axis is the opening's.
+    let sxx = 0, syy = 0, sxy = 0;
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (!mask[y * w + x]) continue;
+            const dx = x - mx;
+            const dy = y - my;
+            sxx += dx * dx;
+            syy += dy * dy;
+            sxy += dx * dy;
+        }
+    }
+    const angle = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    const ux = Math.cos(angle);
+    const uy = Math.sin(angle);
+
+    // Where it ends along that axis, and how thick it is across it. A stray pixel
+    // at either end must not stretch it, so each end is the 0.5th percentile.
+    const along = new Float32Array(count);
+    const across = new Float32Array(count);
+    let n = 0;
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (!mask[y * w + x]) continue;
+            along[n] = (x - mx) * ux + (y - my) * uy;
+            across[n] = -(x - mx) * uy + (y - my) * ux;
+            n++;
+        }
+    }
+    along.sort();
+    across.sort();
+    const low = Math.floor((count - 1) * 0.005);
+    const high = Math.ceil((count - 1) * 0.995);
+    const start = along[low];
+    const end = along[high];
+    // Pixels are squares: the far edge of the last one is a whole pixel on.
+    const length = end - start + 1;
+    const thickness = across[high] - across[low] + 1;
+    const place = t => [x0 + mx + 0.5 + ux * t, y0 + my + 0.5 + uy * t];
+    return {
+        segment: [place(start + 0.5), place(end + 0.5)],
+        length,
+        thickness,
+        mask,
+        bounds: { x: x0, y: y0, width: w, height: h },
+        count,
+        capped
+    };
+}

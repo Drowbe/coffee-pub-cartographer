@@ -43,6 +43,11 @@
     opacity: 1;
 }
 
+.cartographer-autowall-panel .cartographer-autowall-status[data-tone="note"] {
+    color: #f0b35a;
+    opacity: 1;
+}
+
 .cartographer-autowall-panel .cartographer-autowall-status[data-tone="warn"] {
     color: #f0b35a;
     opacity: 1;
@@ -50,6 +55,46 @@
 
 /* Label, slider and value sit side by side; the labels share a column so the
    sliders start at the same place, but nothing is pushed to the far edge. */
+.cartographer-autowall-panel .cartographer-autowall-modes {
+    display: flex;
+    gap: 6px;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-mode {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 1 1 0;
+    height: 26px;
+    margin: 0;
+    padding: 0 8px;
+    border: 1px solid var(--blacksmith-tool-divider, rgba(255, 255, 255, 0.25));
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.cartographer-autowall-panel .cartographer-autowall-mode:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.cartographer-autowall-panel .cartographer-autowall-mode.is-active {
+    border-color: #f0b35a;
+    background: rgba(240, 179, 90, 0.18);
+}
+
+/* A choice sits beside its label like a slider does, taking the slider's and value's room. */
+.cartographer-autowall-panel .cartographer-autowall-select {
+    grid-column: 2 / 4;
+    width: 100%;
+    min-width: 0;
+    height: 24px;
+    margin: 0;
+}
+
 .cartographer-autowall-panel .cartographer-autowall-thumb {
     display: block;
     width: 100%;

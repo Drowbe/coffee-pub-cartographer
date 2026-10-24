@@ -16,12 +16,11 @@ const ok = message => console.log(`  ok    ${message}`);
 
 console.log('every string the tool asks for exists, and every one it has is used');
 {
-    // Every quoted word inside a localize call, so a ternary between two keys counts for both.
-    const used = new Set([
-        ...[...manager.matchAll(/_?localize\(([^)]*)\)/g)].flatMap(call => [...call[1].matchAll(/'([A-Za-z]+)'/g)].map(m => m[1])),
-        ...[...manager.matchAll(/slider\('[a-z]+', localize\('([A-Za-z]+)'\), localize\('([A-Za-z]+)'\)\)/g)].flatMap(m => [m[1], m[2]])
-    ]);
+    // Every string a call asks for must exist; every string there is must be asked for somewhere,
+    // by a call or by being named in the source (a key chosen from a table is still named).
     const have = Object.keys(lang).filter(key => key.startsWith('autowall.')).map(key => key.slice('autowall.'.length));
+    const asked = [...manager.matchAll(/_?localize\(\s*'([A-Za-z]+)'/g)].map(m => m[1]);
+    const used = new Set([...asked, ...have.filter(key => manager.includes(`'${key}'`))]);
     for (const key of used) if (!have.includes(key)) fail(`missing string autowall.${key}`);
     for (const key of have) if (!used.has(key)) fail(`autowall.${key} is never used`);
     if (!failures) ok(`${used.size} strings, all present and all used`);
@@ -49,7 +48,7 @@ console.log('\nthe bar knows the group, and the tool is started');
 
 console.log('\nthe controls and their limits agree');
 {
-    const limits = [...manager.matchAll(/^    (match|smoothing|widest): \{ min/gm)].map(m => m[1]);
+    const limits = [...manager.matchAll(/^    (\w+): \{ min/gm)].map(m => m[1]);
     const defaults = manager.match(/const DEFAULTS = \{([^}]+)\}/)?.[1] ?? '';
     for (const name of limits) if (!new RegExp(`\\b${name}:`).test(defaults)) fail(`${name} has limits but no default`);
     for (const name of limits) {

@@ -4,7 +4,7 @@
 // junction, that a wall stops where its material does, that a flood which leaks
 // says so. It says nothing about how a real painted map behaves; that is tried
 // on the map.
-import { mapWall, floodMask, simplify, snapSegments, labBuffer, mergeStraight } from '../scripts/utils-autowall.js';
+import { mapWall, mapOpening, floodMask, simplify, snapSegments, labBuffer, mergeStraight } from '../scripts/utils-autowall.js';
 
 let failures = 0;
 const check = (label, ok, detail = '') => {
@@ -165,6 +165,50 @@ console.log('\na chipped wall is a plain line, not a string of points');
         Math.min(a[0], b[0]) <= 40 && Math.max(a[0], b[0]) >= 360 && Math.abs(a[1] - 40) <= 2 && Math.abs(b[1] - 40) <= 2, JSON.stringify(plain.segments));
     const stubby = mapWall(picture, 100, 40, rough);
     check('a short stub off the wall is kept when pruning is not asked for', stubby.segments.length === 2, `got ${stubby.segments.length}`);
+}
+
+// ------------------------------------------------------------------
+console.log('\na door: the line down its length');
+{
+    const DOOR = [120, 70, 40];
+    const paintDoor = (picture, cx, cy, length, thick, degrees) => {
+        const a = degrees * Math.PI / 180;
+        const ux = Math.cos(a), uy = Math.sin(a);
+        for (let y = 0; y < picture.height; y++) {
+            for (let x = 0; x < picture.width; x++) {
+                const along = (x - cx) * ux + (y - cy) * uy;
+                const across = -(x - cx) * uy + (y - cy) * ux;
+                if (Math.abs(along) <= length / 2 && Math.abs(across) <= thick / 2) {
+                    const i = (y * picture.width + x) * 4;
+                    picture.data[i] = DOOR[0]; picture.data[i + 1] = DOOR[1]; picture.data[i + 2] = DOOR[2];
+                }
+            }
+        }
+    };
+    const opts = { tolerance: 20, stepTolerance: 6, lightnessWeight: 0.5 };
+
+    // A door in a gap of the wall, level.
+    const level = paint(200, 80, [[10, 35, 70, 45], [130, 35, 190, 45]]);
+    paintDoor(level, 100, 40, 60, 10, 0);
+    const flat = mapOpening(level, 100, 40, opts);
+    check('it runs the length of the door', Math.abs(flat.length - 61) <= 3, `length ${flat.length}`);
+    const [a, b] = flat.segment[0][0] < flat.segment[1][0] ? flat.segment : [flat.segment[1], flat.segment[0]];
+    check('from one end to the other', near(a, 70, 40, 2.5) && near(b, 130, 40, 2.5), JSON.stringify(flat.segment));
+    check('and is as thick as the door', Math.abs(flat.thickness - 10) <= 2, `thickness ${flat.thickness}`);
+
+    // The same at a slant: the axis follows the door, not the picture.
+    const slant = paint(200, 200, []);
+    paintDoor(slant, 100, 100, 80, 10, 30);
+    const tilted = mapOpening(slant, 100, 100, opts);
+    const dx = tilted.segment[1][0] - tilted.segment[0][0];
+    const dy = tilted.segment[1][1] - tilted.segment[0][1];
+    const degrees = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+    check('a slanted door is found at its own angle', Math.abs(degrees - 30) <= 2 || Math.abs(degrees - 150) <= 2, `angle ${degrees}`);
+    check('and at its own length', Math.abs(tilted.length - 81) <= 4, `length ${tilted.length}`);
+
+    // Nothing there.
+    const none = mapOpening(level, -5, -5, opts);
+    check('a click outside the picture finds nothing', none.segment === null && none.count === 0);
 }
 
 // ------------------------------------------------------------------
