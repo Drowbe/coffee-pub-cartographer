@@ -24,6 +24,8 @@ const FLAG = 'autoWall';
 const MAX_WORK_SIZE = 2400;
 /** How far, in screen pixels, a click may move and still be a click, not a drag. */
 const CLICK_PIXELS = 4;
+/** How near, in screen pixels, the pointer must be to the end of a wall to take hold of it. */
+const HANDLE_PIXELS = 12;
 /** How long, in ms, the controls settle before the walls are worked out again. */
 const SETTLE_MS = 160;
 const STORE_KEY = `${MODULE.ID}.autowall.options.v2`;
@@ -55,12 +57,15 @@ function writeOptions(options) {
 class AutoWallManager {
     constructor() {
         this._hooks = [];
-        /** The run in progress: { seeds, options, image, result, token }, or null. */
+        /** The run in progress: { seeds, options, image, result, segments }, or null. segments are the walls in scene pixels, which the GM may drag. */
         this.session = null;
         this._container = null;
         this._timer = null;
         this._onPointerDown = this._onPointerDown.bind(this);
         this._onPointerUp = this._onPointerUp.bind(this);
+        this._onPointerMove = this._onPointerMove.bind(this);
+        this._onDragMove = this._onDragMove.bind(this);
+        this._onDragEnd = this._onDragEnd.bind(this);
         this._onKeyDown = this._onKeyDown.bind(this);
     }
 
@@ -106,7 +111,7 @@ class AutoWallManager {
 
     async start() {
         if (!game.user.isGM || !canvas?.ready || this.session) return;
-        const session = { seeds: [], options: readOptions(), image: null, result: null, token: 0, working: false };
+        const session = { seeds: [], options: readOptions(), image: null, result: null, segments: [] };
         this.session = session;
         this._refreshButtons();
         this._buildPanel();
@@ -273,6 +278,7 @@ class AutoWallManager {
         const [first, ...rest] = session.seeds.map(seed => this._toImage(image, seed));
         if (first[0] < 0 || first[1] < 0 || first[0] >= image.pixels.width || first[1] >= image.pixels.height) {
             session.result = null;
+            session.segments = [];
             this._clearPreview();
             this._drawThumb(session);
             this._setStatus(this._localize('outside'), 'warn');
@@ -281,10 +287,11 @@ class AutoWallManager {
         const started = performance.now();
         const result = mapWall(image.pixels, first[0], first[1], { ...this._tracerOptions(session), extraSeeds: rest });
         session.result = result;
+        session.segments = this._sceneSegments(session);
         console.info(`${MODULE.NAME}: auto-wall run`, {
             ms: Math.round(performance.now() - started), seeds: session.seeds.map(seed => seed.map(Math.round)),
             seedsInImage: [first, ...rest].map(seed => seed.map(Math.round)), options: { ...this._tracerOptions(session), lab: undefined },
-            count: result.count, capped: result.capped, tooThick: result.tooThick, segments: result.segments.length
+            count: result.count, capped: result.capped, tooThick: result.tooThick, segments: result.segments.length, sceneSegments: session.segments.length, snap: session.options.snap
         });
         this._drawPreview(session);
         this._drawThumb(session);
@@ -363,8 +370,9 @@ class AutoWallManager {
         const { result } = session;
         if (result.capped) return this._setStatus(this._localize('capped'), 'warn');
         if (result.tooThick) return this._setStatus(this._localize('tooThick'), 'warn');
-        const count = this._sceneSegments(session).length;
-        if (!count) return this._setStatus(this._localize('nothing'), 'warn');
+        const count = session.segments.length;
+        // Found, and then lost: to snapping, or to being too short to be a wall.
+        if (!count) return this._setStatus(this._localize(result.segments.length ? 'collapsed' : 'nothing'), 'warn');
         this._setStatus(this._localize(count === 1 ? 'resultOne' : 'result', { count }), 'ok');
         this._panel?.querySelector('[data-action="add"]')?.removeAttribute('disabled');
     }
@@ -385,6 +393,7 @@ class AutoWallManager {
     }
 
     _clearPreview() {
+        this._graphics = null;
         if (!this._container || this._container.destroyed) return;
         for (const child of this._container.removeChildren()) child.destroy({ children: true, texture: true, baseTexture: true });
     }
@@ -393,8 +402,6 @@ class AutoWallManager {
         if (!this._layer()) return;
         this._clearPreview();
         const { image, result } = session;
-        const grid = Number(canvas.scene.grid.size) || 100;
-        const line = Math.max(3, grid * 0.06);
 
         // What the click was taken to be wall: the mask, tinted.
         if (result.mask.length && result.bounds.width && !result.capped) {
@@ -417,13 +424,20 @@ class AutoWallManager {
             this._container.addChild(sprite);
         }
 
+        this._drawSegments(session);
+    }
+
+    /** The walls, their end handles and the clicks. Redrawn alone while an end is dragged. */
+    _drawSegments(session) {
+        if (!this._layer()) return;
+        if (this._graphics && !this._graphics.destroyed) this._graphics.destroy();
+        const line = Math.max(3, (Number(canvas.scene.grid.size) || 100) * 0.06);
         const graphics = new PIXI.Graphics();
-        const segments = this._sceneSegments(session);
         graphics.lineStyle({ width: line, color: 0xe03a2e, alpha: 0.95, cap: 'round', join: 'round' });
-        for (const [a, b] of segments) graphics.moveTo(a[0], a[1]).lineTo(b[0], b[1]);
+        for (const [a, b] of session.segments) graphics.moveTo(a[0], a[1]).lineTo(b[0], b[1]);
         graphics.lineStyle(0);
         graphics.beginFill(0xffd23f, 1);
-        for (const [a, b] of segments) {
+        for (const [a, b] of session.segments) {
             graphics.drawCircle(a[0], a[1], line * 0.9);
             graphics.drawCircle(b[0], b[1], line * 0.9);
         }
@@ -431,7 +445,7 @@ class AutoWallManager {
         graphics.beginFill(0x3fd16a, 1);
         for (const seed of session.seeds) graphics.drawCircle(seed[0], seed[1], line * 1.1);
         graphics.endFill();
-        this._container.addChild(graphics);
+        this._graphics = this._container.addChild(graphics);
     }
 
     // ==================================================================
@@ -493,7 +507,8 @@ class AutoWallManager {
         writeOptions(session.options);
         this._showValue(input.name);
         if (input.name === 'snap' && session.result) {
-            this._drawPreview(session);
+            session.segments = this._sceneSegments(session);
+            this._drawSegments(session);
             this._reportResult(session);
         } else this._schedule();
     }
@@ -516,6 +531,7 @@ class AutoWallManager {
         this._unlisten();
         view.addEventListener('pointerdown', this._onPointerDown, true);
         view.addEventListener('pointerup', this._onPointerUp, true);
+        view.addEventListener('pointermove', this._onPointerMove, true);
         document.addEventListener('keydown', this._onKeyDown, true);
         this._listening = view;
     }
@@ -525,7 +541,11 @@ class AutoWallManager {
         if (view) {
             view.removeEventListener('pointerdown', this._onPointerDown, true);
             view.removeEventListener('pointerup', this._onPointerUp, true);
+            view.removeEventListener('pointermove', this._onPointerMove, true);
         }
+        document.removeEventListener('pointermove', this._onDragMove, true);
+        document.removeEventListener('pointerup', this._onDragEnd, true);
+        this._drag = null;
         document.removeEventListener('keydown', this._onKeyDown, true);
         this._listening = null;
     }
@@ -542,11 +562,78 @@ class AutoWallManager {
         event.stopImmediatePropagation();
     }
 
+    /** The end of a wall within reach of the pointer, as a copy of its point, or null. */
+    _handleAt(point) {
+        const segments = this.session?.segments;
+        if (!segments?.length || !point) return null;
+        const radius = HANDLE_PIXELS / (canvas.stage?.scale?.x || 1);
+        let best = null;
+        for (const [a, b] of segments) {
+            for (const end of [a, b]) {
+                const distance = Math.hypot(end[0] - point[0], end[1] - point[1]);
+                if (distance <= radius && (!best || distance < best.distance)) best = { point: end, distance };
+            }
+        }
+        return best ? [...best.point] : null;
+    }
+
     /** Only the left button picks; the others still pan and open menus. */
     _onPointerDown(event) {
         if (event.button !== 0) return;
         this._swallow(event);
+        const handle = this._handleAt(this._scenePoint(event));
+        if (handle) {
+            // An end is taken hold of: it and every end that met it move together.
+            this._press = null;
+            this._drag = { at: handle };
+            document.addEventListener('pointermove', this._onDragMove, true);
+            document.addEventListener('pointerup', this._onDragEnd, true);
+            return;
+        }
         this._press = { x: event.clientX, y: event.clientY };
+    }
+
+    /** Over an end, the cursor says it can be moved. */
+    _onPointerMove(event) {
+        if (this._drag || !this.session?.image) return;
+        canvas.app.view.style.cursor = this._handleAt(this._scenePoint(event)) ? 'move' : 'crosshair';
+    }
+
+    _onDragMove(event) {
+        const drag = this._drag;
+        const session = this.session;
+        if (!drag || !session) return;
+        this._swallow(event);
+        let point = this._scenePoint(event);
+        if (!point) return;
+        if (session.options.snap) {
+            const target = canvas.grid.getSnappedPoint({ x: point[0], y: point[1] }, { mode: CONST.GRID_SNAPPING_MODES.VERTEX });
+            point = [target.x, target.y];
+        }
+        point = point.map(Math.round);
+        for (const segment of session.segments) {
+            for (const end of segment) {
+                if (Math.hypot(end[0] - drag.at[0], end[1] - drag.at[1]) <= 1.5) {
+                    end[0] = point[0];
+                    end[1] = point[1];
+                }
+            }
+        }
+        drag.at = point;
+        this._drawSegments(session);
+    }
+
+    _onDragEnd(event) {
+        this._swallow(event);
+        document.removeEventListener('pointermove', this._onDragMove, true);
+        document.removeEventListener('pointerup', this._onDragEnd, true);
+        this._drag = null;
+        const session = this.session;
+        if (!session) return;
+        // An end dragged onto the other end of its wall leaves nothing to keep.
+        session.segments = session.segments.filter(([a, b]) => a[0] !== b[0] || a[1] !== b[1]);
+        this._drawSegments(session);
+        this._reportResult(session);
     }
 
     _onPointerUp(event) {
@@ -571,7 +658,7 @@ class AutoWallManager {
             event.preventDefault();
             event.stopPropagation();
             this.cancel();
-        } else if (event.key === 'Enter' && this.session.result?.segments.length) {
+        } else if (event.key === 'Enter' && this.session.segments?.length) {
             event.preventDefault();
             event.stopPropagation();
             void this.accept();
@@ -585,8 +672,8 @@ class AutoWallManager {
     async accept() {
         const session = this.session;
         if (!session?.result || session.result.capped || session.result.tooThick) return;
-        const segments = this._sceneSegments(session);
-        if (!segments.length) return;
+        const segments = session.segments;
+        if (!segments?.length) return;
         const run = Date.now();
         const data = segments.map(([a, b]) => ({ c: [a[0], a[1], b[0], b[1]], flags: { [MODULE.ID]: { [FLAG]: { run } } } }));
         try {
@@ -600,6 +687,7 @@ class AutoWallManager {
         // Ready for the next wall: the walls are real now, so the preview and the clicks go.
         session.seeds = [];
         session.result = null;
+        session.segments = [];
         this._clearPreview();
         this._setStatus(this._localize('hint'));
     }

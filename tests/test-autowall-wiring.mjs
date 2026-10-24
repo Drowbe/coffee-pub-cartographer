@@ -16,10 +16,10 @@ const ok = message => console.log(`  ok    ${message}`);
 
 console.log('every string the tool asks for exists, and every one it has is used');
 {
+    // Every quoted word inside a localize call, so a ternary between two keys counts for both.
     const used = new Set([
-        ...[...manager.matchAll(/(?:_localize|localize)\('([A-Za-z]+)'/g)].map(m => m[1]),
-        ...[...manager.matchAll(/slider\('[a-z]+', localize\('([A-Za-z]+)'\), localize\('([A-Za-z]+)'\)\)/g)].flatMap(m => [m[1], m[2]]),
-        ...[...manager.matchAll(/this\._localize\(count === 1 \? '([A-Za-z]+)' : '([A-Za-z]+)'/g)].flatMap(m => [m[1], m[2]])
+        ...[...manager.matchAll(/_?localize\(([^)]*)\)/g)].flatMap(call => [...call[1].matchAll(/'([A-Za-z]+)'/g)].map(m => m[1])),
+        ...[...manager.matchAll(/slider\('[a-z]+', localize\('([A-Za-z]+)'\), localize\('([A-Za-z]+)'\)\)/g)].flatMap(m => [m[1], m[2]])
     ]);
     const have = Object.keys(lang).filter(key => key.startsWith('autowall.')).map(key => key.slice('autowall.'.length));
     for (const key of used) if (!have.includes(key)) fail(`missing string autowall.${key}`);

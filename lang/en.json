@@ -606,7 +606,7 @@
 		"autowall.barMap": "Map a wall: click a wall on the map and walls are drawn along it",
 		"autowall.barUndo": "Remove the walls added by the last Map a Wall",
 		"autowall.title": "Map This Wall",
-		"autowall.hint": "Click a wall on the map. Shift-click more of the same wall if it changes material.",
+		"autowall.hint": "Click a wall on the map. Shift-click more of the same wall if it changes material. Drag a yellow dot to move the end of a wall.",
 		"autowall.loading": "Reading the map image...",
 		"autowall.working": "Working...",
 		"autowall.result": "{count} wall segments found.",
@@ -628,7 +628,8 @@
 		"autowall.noUndo": "There are no walls from Map a Wall on this scene to remove.",
 		"autowall.noImage": "This scene has no still background image to read the walls from.",
 		"autowall.failed": "The walls could not be added. See the console.",
-		"autowall.outside": "That click is outside the map image. If it is on the map, the image is not lining up with the scene; the console says what was read."
+		"autowall.outside": "That click is outside the map image. If it is on the map, the image is not lining up with the scene; the console says what was read.",
+		"autowall.collapsed": "Found some wall there, but nothing long enough to keep. Turn off Snap to grid corners, lower Smoothing, or click a longer stretch."
 	}
 }
 
