@@ -606,7 +606,7 @@
 		"autowall.barMap": "Map walls, doors and windows: click on the map and they are drawn",
 		"autowall.barUndo": "Remove the walls added by the last Map a Wall",
 		"autowall.title": "Walls, Doors and Windows",
-		"autowall.hint": "Click a wall on the map. Shift-click more of the same wall if it changes material. Drag a yellow dot to move the end of a wall.",
+		"autowall.hint": "Click a wall on the map. Shift-click more of the same wall if it changes material. Drag a dot to move an end; shift-double-click a wall to put a point in it.",
 		"autowall.loading": "Reading the map image...",
 		"autowall.working": "Working...",
 		"autowall.result": "{count} wall segments found.",
@@ -635,8 +635,8 @@
 		"autowall.modeWindow": "Windows",
 		"autowall.kindDoor": "Door",
 		"autowall.kindWindow": "Window",
-		"autowall.hintDoor": "Map the walls first. Then click a door on the map and it is fitted between the wall ends either side of it. Drag a dot to move an end.",
-		"autowall.hintWindow": "Map the walls first. Then click a window on the map and it is fitted between the wall ends either side of it. Drag a dot to move an end.",
+		"autowall.hintDoor": "Map the walls first. Then click a door on the map: it is fitted into the gap between the wall ends either side of it. Drag a dot to move an end.",
+		"autowall.hintWindow": "Map the walls first. Then click a window on the map: it is fitted into the gap between the wall ends either side of it. Drag a dot to move an end.",
 		"autowall.afterWalls": "Walls added. When they are all in, switch to Doors, then Windows.",
 		"autowall.fitted": "{kind} fitted between two wall ends.",
 		"autowall.fittedOne": "{kind} fitted to one wall end. Drag the other end onto its wall end.",
@@ -656,7 +656,21 @@
 		"autowall.windowAttenuation": "Fade with distance",
 		"autowall.addDoor": "Add door",
 		"autowall.addWindow": "Add window",
-		"autowall.addedOpening": "Added the {kind}."
+		"autowall.addedOpening": "Added the {kind}.",
+		"autowall.tabMap": "Map",
+		"autowall.tabOptions": "Options",
+		"autowall.joinEnds": "Join nearest endpoints",
+		"autowall.joinEndsHint": "When you drop the end of a wall near another wall end, it snaps onto it, as editing walls does.",
+		"autowall.snapHint": "Walls snap to the nearest grid corner when moved, and as they are found.",
+		"autowall.joinDistance": "Join distance",
+		"autowall.joinDistanceHint": "How near, in grid squares, wall ends must be for Clean up walls to join them.",
+		"autowall.cleanup": "Clean up walls",
+		"autowall.cleanupHint": "Joins the ends of every wall, door and window on this scene that are within the join distance, so they meet exactly.",
+		"autowall.cleanupUndo": "Undo clean up",
+		"autowall.cleanupNothing": "Nothing to join: no wall ends are within the join distance, or they already meet.",
+		"autowall.cleanupDone": "{joined} wall ends joined, across {walls} walls.",
+		"autowall.cleanupSkipped": "{skipped} very short walls were left alone.",
+		"autowall.cleanupUndone": "Put {count} walls back as they were."
 	}
 }
 

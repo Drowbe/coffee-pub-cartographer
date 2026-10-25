@@ -4,7 +4,7 @@
 // junction, that a wall stops where its material does, that a flood which leaks
 // says so. It says nothing about how a real painted map behaves; that is tried
 // on the map.
-import { mapWall, mapOpening, floodMask, simplify, snapSegments, labBuffer, mergeStraight } from '../scripts/utils-autowall.js';
+import { mapWall, mapOpening, floodMask, simplify, snapSegments, labBuffer, mergeStraight, findOpening, cleanupEnds, splitSegmentAt } from '../scripts/utils-autowall.js';
 
 let failures = 0;
 const check = (label, ok, detail = '') => {
@@ -209,6 +209,80 @@ console.log('\na door: the line down its length');
     // Nothing there.
     const none = mapOpening(level, -5, -5, opts);
     check('a click outside the picture finds nothing', none.segment === null && none.count === 0);
+}
+
+// ------------------------------------------------------------------
+console.log('\na door is the gap between two wall ends that face each other');
+{
+    const grid = 100;
+    // A wall with a gap at x 300..400, and the wall that carries on.
+    const walls = [[0, 100, 300, 100], [400, 100, 700, 100]];
+    const gap = findOpening(walls, [350, 108], { grid });
+    check('the click between them finds the gap', JSON.stringify(gap) === JSON.stringify([[300, 100], [400, 100]]), JSON.stringify(gap));
+    check('a click far from the gap finds nothing', findOpening(walls, [350, 400], { grid }) === null);
+    check('a click on the wall, not the gap, finds nothing', findOpening(walls, [150, 100], { grid }) === null);
+
+    // The wall's own two ends are never a pair, however the click lies.
+    check('one wall alone has no gap', findOpening([[0, 100, 300, 100]], [150, 100], { grid }) === null);
+
+    // Walls that run along the gap rather than away from it do not face.
+    check('ends of walls that run along the line do not face', findOpening([[300, 100, 300, 400], [400, 100, 400, 400]], [350, 100], { grid }) !== null,
+        'perpendicular walls either side of a gap do face (a doorway in a corridor)');
+
+    // The gap that is too wide to be a door is not one.
+    check('too wide to be a door', findOpening([[0, 100, 100, 100], [700, 100, 800, 100]], [400, 100], { grid }) === null);
+
+    // Free ends beat a nearer pair with a wall meeting at one end.
+    const crowded = [[0, 100, 300, 100], [400, 100, 700, 100], [400, 100, 400, 300]];
+    const chosen = findOpening(crowded, [350, 100], { grid });
+    check('with a wall also meeting there, a gap is still found', chosen !== null);
+
+    // A gap that has a door in it is not a gap any more.
+    const filled = findOpening([[0, 100, 300, 100], [400, 100, 700, 100], [300, 100, 400, 100]], [350, 100], { grid });
+    check('a gap with a door already in it is not offered again', filled === null, JSON.stringify(filled));
+
+    // A slanted gap.
+    const slant = findOpening([[0, 0, 100, 100], [200, 200, 300, 300]], [150, 150], { grid });
+    check('a gap on a diagonal', JSON.stringify(slant) === JSON.stringify([[100, 100], [200, 200]]), JSON.stringify(slant));
+}
+
+// ------------------------------------------------------------------
+console.log('\njoining wall ends');
+{
+    const close = cleanupEnds([
+        { id: 'a', c: [0, 0, 100, 0] },
+        { id: 'b', c: [103, 2, 103, 100] }
+    ], 10);
+    check('ends within the distance are brought to one point', close.updates.length === 2 && close.joined === 2, JSON.stringify(close));
+    const [a, b] = close.updates;
+    check('which both walls share', a.c[2] === b.c[0] && a.c[3] === b.c[1], JSON.stringify(close.updates));
+
+    const apart = cleanupEnds([{ id: 'a', c: [0, 0, 100, 0] }, { id: 'b', c: [150, 0, 250, 0] }], 10);
+    check('ends further apart are left alone', apart.updates.length === 0 && apart.joined === 0);
+
+    const tiny = cleanupEnds([{ id: 'a', c: [0, 0, 4, 0] }, { id: 'b', c: [50, 50, 90, 50] }], 10);
+    check('a wall that would shrink to a point is not touched', tiny.skipped === 1 && tiny.updates.every(u => u.id !== 'a'), JSON.stringify(tiny));
+
+    // Ends at 100, 108 and 116: the first and last are 16 apart, but each is near the one between.
+    const chain = cleanupEnds([{ id: 'a', c: [0, 0, 100, 0] }, { id: 'b', c: [108, 0, 108, 50] }, { id: 'c', c: [116, 0, 116, 50] }], 10);
+    const byId = Object.fromEntries(chain.updates.map(u => [u.id, u.c]));
+    check('a chain of near ends is one group', byId.a?.[2] === 108 && byId.c?.[0] === 108 && byId.a?.[3] === 0 && byId.c?.[1] === 0, JSON.stringify(chain.updates));
+
+    const again = cleanupEnds(close.updates.map(u => ({ id: u.id, c: u.c })), 10);
+    check('doing it twice changes nothing more', again.updates.length === 0);
+}
+
+// ------------------------------------------------------------------
+console.log('\nputting a point in a wall');
+{
+    const segments = [[[0, 0], [100, 0]], [[100, 0], [100, 100]]];
+    const split = splitSegmentAt(segments, [40, 3], 8);
+    check('the wall nearest the click is cut in two there', split && split.segments.length === 3, JSON.stringify(split));
+    check('at the foot of the click on the wall', JSON.stringify(split.at) === JSON.stringify([40, 0]), JSON.stringify(split?.at));
+    check('the pieces meet at the new point', JSON.stringify(split.segments[0][1]) === JSON.stringify(split.segments[1][0]));
+    check('the other walls are as they were', JSON.stringify(split.segments[2]) === JSON.stringify(segments[1]));
+    check('a click out of reach does nothing', splitSegmentAt(segments, [40, 60], 8) === null);
+    check('a click at an end does nothing, a point is already there', splitSegmentAt(segments, [1, 1], 8) === null);
 }
 
 // ------------------------------------------------------------------

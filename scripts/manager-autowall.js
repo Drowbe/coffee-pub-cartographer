@@ -3,16 +3,19 @@
 // ==================================================================
 //
 // The GM clicks a wall on the scene's image and the walls along it are drawn.
-// Then, in the other two modes, a click on a door or a window fits one between
-// the wall ends on either side of it.
+// Then, in the other two modes, a click on a door or a window fits one into
+// the gap between the wall ends on either side of it.
+//
 // The picture work is in utils-autowall.js and knows nothing of Foundry; this
 // file is the Foundry side of it: reading the scene image, where the click
-// lands, the preview over the map, the panel with its few controls, and
-// writing the walls -- tagged, so the last run can be taken back whole.
+// lands, the preview over the map, and writing the walls -- tagged, so the
+// last run can be taken back whole. The window the GM works in is
+// window-autowall.js; it holds no state, and this is where the run lives.
 
 import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
-import { labBuffer, mapWall, mapOpening } from './utils-autowall.js';
+import { labBuffer, mapWall, mapOpening, findOpening, cleanupEnds, splitSegmentAt } from './utils-autowall.js';
+import { AutoWallWindow } from './window-autowall.js';
 
 /** The section of Cartographer's sub-menubar these sit in; registered in manager-toolbar.js. */
 const GROUP = 'Walls';
@@ -41,7 +44,7 @@ const STORE_KEY = `${MODULE.ID}.autowall.options.v2`;
 
 /** What the controls start at, and the limits they move between. */
 const DEFAULTS = {
-    mode: 'wall', match: 20, smoothing: 0.3, widest: 1, snap: false,
+    mode: 'wall', tab: 'map', joinEnds: true, joinDistance: 0.25, match: 20, smoothing: 0.3, widest: 1, snap: false,
     doorState: 'closed', doorSound: '', doorAnimation: '',
     windowDistance: 2, windowAttenuation: true
 };
@@ -49,7 +52,8 @@ const LIMITS = {
     match: { min: 8, max: 36, step: 1 },
     smoothing: { min: 0.05, max: 1, step: 0.05 },
     widest: { min: 0.25, max: 3, step: 0.05 },
-    windowDistance: { min: 0.5, max: 6, step: 0.5 }
+    windowDistance: { min: 0.5, max: 6, step: 0.5 },
+    joinDistance: { min: 0.05, max: 1, step: 0.05 }
 };
 
 function readOptions() {
@@ -73,11 +77,16 @@ class AutoWallManager {
         this._hooks = [];
         /** The run in progress: { seeds, options, image, result, segments }, or null. segments are the walls in scene pixels, which the GM may drag. */
         this.session = null;
+        /** The window the run is worked in. */
+        this.window = null;
+        /** The clean-up that can be taken back: { sceneId, walls: [{ _id, c }] }, or null. */
+        this._cleanupUndo = null;
         this._container = null;
         this._timer = null;
         this._onPointerDown = this._onPointerDown.bind(this);
         this._onPointerUp = this._onPointerUp.bind(this);
         this._onPointerMove = this._onPointerMove.bind(this);
+        this._onDoubleClick = this._onDoubleClick.bind(this);
         this._onDragMove = this._onDragMove.bind(this);
         this._onDragEnd = this._onDragEnd.bind(this);
         this._onKeyDown = this._onKeyDown.bind(this);
@@ -133,7 +142,9 @@ class AutoWallManager {
         this.session = session;
         this._status = null;
         this._refreshButtons();
-        this._buildPanel();
+        this._cleanupStatus = null;
+        await this._openWindow();
+        if (this.session !== session) return;
         this._setStatus(this._localize('loading'));
         try {
             session.image = await this._readImage();
@@ -157,8 +168,10 @@ class AutoWallManager {
         this._timer = null;
         this._unlisten();
         this._clearPreview();
-        this._panel?.remove();
-        this._panel = null;
+        // Closing the window reaches onWindowClosed, which finds it already let go.
+        const window = this.window;
+        this.window = null;
+        if (window) void window.close();
         if (canvas?.app?.view) canvas.app.view.style.cursor = '';
         this.session = null;
         this._status = null;
@@ -329,6 +342,26 @@ class AutoWallManager {
     _runOpening(session, first, rest) {
         const { image } = session;
         const grid = Number(canvas.scene.grid.size) || 100;
+
+        // The walls were drawn around it, so the door is the gap they left: the two
+        // wall ends that face each other with the click between. No picture needed.
+        const gap = findOpening(canvas.scene.walls.contents.map(wall => [...wall.c]), session.seeds[0], { grid });
+        if (gap) {
+            const segment = gap.map(point => point.map(Math.round));
+            session.result = {
+                capped: false, tooThick: false, tooLong: false, count: 0, viaGap: true,
+                mask: new Uint8Array(0), bounds: { x: 0, y: 0, width: 0, height: 0 },
+                segments: [segment.map(point => this._toImage(image, point))]
+            };
+            session.segments = [segment];
+            console.info(`${MODULE.NAME}: auto-wall ${session.mode} run`, { fitted: 'the gap between two wall ends', segment, wallEnds: this._wallEnds().length });
+            this._drawPreview(session);
+            this._drawThumb(session);
+            this._reportResult(session);
+            return;
+        }
+
+        // No gap to fit: read the art instead, and fit it to wall ends as near as there are.
         const result = mapOpening(image.pixels, first[0], first[1], { ...this._tracerOptions(session), extraSeeds: rest });
         result.segments = result.segment ? [result.segment] : [];
         result.tooThick = false;
@@ -547,123 +580,86 @@ class AutoWallManager {
     }
 
     // ==================================================================
-    // ===== THE PANEL ==================================================
+    // ===== THE WINDOW =================================================
     // ==================================================================
 
-    _buildPanel() {
-        const panel = document.createElement('div');
-        panel.className = 'cartographer-autowall-panel';
-        panel.addEventListener('input', event => this._onControl(event));
-        panel.addEventListener('click', event => {
-            const target = event.target.closest('[data-action]');
-            const action = target?.dataset.action;
-            if (action === 'add') void this.accept();
-            else if (action === 'cancel') this.cancel();
-            else if (action === 'mode') this._setMode(target.dataset.mode);
-        });
-        document.body.appendChild(panel);
-        this._panel = panel;
-        this._renderPanel();
+    async _openWindow() {
+        this.window = await AutoWallWindow.open(this);
+    }
+
+    _root() {
+        return this.window?.element ?? null;
+    }
+
+    /** The small picture in the window, when the Map tab is showing. */
+    get _thumb() {
+        return this._root()?.querySelector('.cartographer-autowall-thumb') ?? null;
+    }
+
+    /** The limits a slider moves between. */
+    limits(name) {
+        return LIMITS[name];
     }
 
     /** The door sounds Foundry offers, by name, with the default first. */
-    _doorSoundChoices() {
+    doorSoundChoices() {
         const sounds = Object.entries(CONFIG.Wall?.doorSounds ?? {})
             .map(([id, sound]) => [id, game.i18n.localize(sound.label)])
             .sort((a, b) => a[1].localeCompare(b[1]));
         return [['', this._localize('soundDefault')], ...sounds];
     }
 
-    _doorAnimationChoices() {
+    doorAnimationChoices() {
         const types = Object.entries(CONFIG.Wall?.animationTypes ?? {}).map(([id, type]) => [id, game.i18n.localize(type.label)]);
         return [['', this._localize('animationDefault')], ...types];
     }
 
-    /** The panel for the mode it is in: the same frame, and the controls that mode has. */
-    _renderPanel() {
-        const panel = this._panel;
-        const session = this.session;
-        if (!panel || !session) return;
-        const localize = key => this._localize(key);
-        const escape = text => foundry.utils.escapeHTML(String(text));
-        const { options, mode } = session;
-        const slider = (name, label, hint) => {
-            const { min, max, step } = LIMITS[name];
-            return `<label class="cartographer-autowall-row" title="${escape(hint)}">
-                <span class="cartographer-autowall-label">${escape(label)}</span>
-                <input type="range" name="${name}" min="${min}" max="${max}" step="${step}" value="${options[name]}">
-                <output class="cartographer-autowall-value" data-for="${name}"></output>
-            </label>`;
-        };
-        const select = (name, label, choices) => `<label class="cartographer-autowall-row">
-                <span class="cartographer-autowall-label">${escape(label)}</span>
-                <select class="cartographer-autowall-select" name="${name}">${choices
-                    .map(([value, text]) => `<option value="${escape(value)}"${String(options[name]) === String(value) ? ' selected' : ''}>${escape(text)}</option>`)
-                    .join('')}</select>
-            </label>`;
-        const check = (name, label) => `<label class="cartographer-autowall-check">
-                <input type="checkbox" name="${name}"${options[name] ? ' checked' : ''}>
-                <span>${escape(label)}</span>
-            </label>`;
-        const match = slider('match', localize('match'), localize('matchHint'));
-        const controls = {
-            wall: () => match
-                + slider('smoothing', localize('smoothing'), localize('smoothingHint'))
-                + slider('widest', localize('widest'), localize('widestHint'))
-                + check('snap', localize('snap')),
-            door: () => match
-                + select('doorState', localize('doorState'), [['closed', localize('stateClosed')], ['open', localize('stateOpen')], ['locked', localize('stateLocked')]])
-                + select('doorSound', localize('doorSound'), this._doorSoundChoices())
-                + select('doorAnimation', localize('doorAnimation'), this._doorAnimationChoices()),
-            window: () => match
-                + slider('windowDistance', localize('windowDistance'), localize('windowDistanceHint'))
-                + check('windowAttenuation', localize('windowAttenuation'))
-        }[mode]();
-        const modeButton = (id, icon, label) => `<button type="button" data-action="mode" data-mode="${id}" class="cartographer-autowall-mode${mode === id ? ' is-active' : ''}">
-                <i class="${icon}"></i> ${escape(label)}</button>`;
-        const addKey = { wall: 'add', door: 'addDoor', window: 'addWindow' }[mode];
-        panel.innerHTML = `
-            <div class="cartographer-autowall-title"><i class="fa-solid fa-border-none"></i> ${escape(localize('title'))}</div>
-            <div class="cartographer-autowall-modes">
-                ${modeButton('wall', 'fa-solid fa-border-none', localize('modeWall'))}
-                ${modeButton('door', 'fa-solid fa-door-closed', localize('modeDoor'))}
-                ${modeButton('window', 'fa-solid fa-window-maximize', localize('modeWindow'))}
-            </div>
-            <div class="cartographer-autowall-status" data-role="status"></div>
-            <canvas class="cartographer-autowall-thumb" width="316" height="150"></canvas>
-            ${controls}
-            <div class="cartographer-autowall-buttons">
-                <button type="button" data-action="add" disabled><i class="fa-solid fa-check"></i> ${escape(localize(addKey))}</button>
-                <button type="button" data-action="cancel"><i class="fa-solid fa-xmark"></i> ${escape(localize('cancel'))}</button>
-            </div>`;
-        this._thumb = panel.querySelector('.cartographer-autowall-thumb');
+    /** The window has been drawn again: put back what is written into it rather than built from it. */
+    afterRender(window) {
+        if (window !== this.window || !this.session) return;
         for (const name of Object.keys(LIMITS)) this._showValue(name);
-        this._drawThumb(session);
+        this._drawThumb(this.session);
         if (this._status) this._setStatus(this._status.text, this._status.tone);
+        if (this._cleanupStatus) this._setCleanupStatus(this._cleanupStatus);
+    }
+
+    /** The window was closed by the GM: that ends the run. */
+    onWindowClosed(window) {
+        if (this.window !== window) return;
+        this.window = null;
+        this.cancel();
     }
 
     /** Change what is being mapped. What was found for the last mode is not carried over. */
-    _setMode(mode) {
+    setMode(mode) {
         const session = this.session;
         if (!session || !MODES.includes(mode) || mode === session.mode) return;
         clearTimeout(this._timer);
         session.mode = mode;
         session.options.mode = mode;
+        session.options.tab = 'map';
         writeOptions(session.options);
         session.seeds = [];
         session.result = null;
         session.segments = [];
         this._clearPreview();
-        this._status = null;
-        this._renderPanel();
-        this._setStatus(this._localize(HINTS[mode]));
+        this._status = { text: this._localize(HINTS[mode]), tone: '' };
+        void this.window?.render();
+    }
+
+    setTab(tab) {
+        const session = this.session;
+        if (!session || !['map', 'options'].includes(tab) || session.options.tab === tab) return;
+        session.options.tab = tab;
+        writeOptions(session.options);
+        void this.window?.render();
     }
 
     _showValue(name) {
-        const output = this._panel?.querySelector(`[data-for="${name}"]`);
+        const output = this._root()?.querySelector(`[data-for="${name}"]`);
         if (!output) return;
         const value = Number(this.session.options[name]);
-        output.textContent = name === 'match' ? String(value) : name === 'windowDistance' ? value.toFixed(1) : value.toFixed(2);
+        output.textContent = name === 'match' ? String(value) : ['windowDistance'].includes(name) ? value.toFixed(1) : value.toFixed(2);
     }
 
     _onControl(event) {
@@ -674,23 +670,74 @@ class AutoWallManager {
         writeOptions(session.options);
         this._showValue(input.name);
         if (input.name === 'snap') {
-            if (!session.result) return;
+            if (!session.result || session.mode !== 'wall') return;
             session.segments = this._sceneSegments(session);
             this._drawSegments(session);
             this._reportResult(session);
         } else if (['match', 'smoothing', 'widest'].includes(input.name)) this._schedule();
     }
 
-    /** The line under the title. A warning keeps Add off; an ok or a note leaves it on. */
+    /** The line at the top of the Map tab. A warning keeps Add off; an ok or a note leaves it on. */
     _setStatus(text, tone = '') {
         this._status = { text, tone };
-        const status = this._panel?.querySelector('[data-role="status"]');
-        if (!status) return;
-        status.textContent = text;
-        status.dataset.tone = tone;
-        const add = this._panel.querySelector('[data-action="add"]');
+        const root = this._root();
+        const status = root?.querySelector('[data-role="status"]');
+        if (status) {
+            status.textContent = text;
+            status.dataset.tone = tone;
+        }
+        const add = root?.querySelector('[data-action="autowall-add"]');
         if (tone === 'ok' || tone === 'note') add?.removeAttribute('disabled');
         else add?.setAttribute('disabled', '');
+    }
+
+    _setCleanupStatus(text) {
+        this._cleanupStatus = text;
+        const line = this._root()?.querySelector('[data-role="cleanup"]');
+        if (line) line.textContent = text;
+    }
+
+    // ==================================================================
+    // ===== CLEAN UP ===================================================
+    // ==================================================================
+
+    /**
+     * Join the wall ends that are close, across every wall, door and window on
+     * the scene -- not only what this run made -- so that walls drawn by hand
+     * and by this meet cleanly. What was moved can be put back.
+     */
+    async cleanup() {
+        const scene = canvas.scene;
+        if (!game.user.isGM || !scene || !this.session) return;
+        const walls = scene.walls.contents.map(wall => ({ id: wall.id, c: [...wall.c] }));
+        const grid = Number(scene.grid.size) || 100;
+        const { updates, joined, skipped } = cleanupEnds(walls, this.session.options.joinDistance * grid);
+        if (!updates.length) {
+            this._setCleanupStatus(this._localize('cleanupNothing'));
+            return;
+        }
+        const before = new Map(walls.map(wall => [wall.id, wall.c]));
+        await scene.updateEmbeddedDocuments('Wall', updates.map(({ id, c }) => ({ _id: id, c })));
+        this._cleanupUndo = { sceneId: scene.id, walls: updates.map(({ id }) => ({ _id: id, c: before.get(id) })) };
+        this._endsCache = null;
+        const text = this._localize('cleanupDone', { joined, walls: updates.length });
+        this._setCleanupStatus(skipped ? `${text} ${this._localize('cleanupSkipped', { skipped })}` : text);
+        void this.window?.render();
+    }
+
+    canUndoCleanup() {
+        return !!this._cleanupUndo && this._cleanupUndo.sceneId === canvas.scene?.id;
+    }
+
+    async undoCleanup() {
+        const scene = canvas.scene;
+        if (!this.canUndoCleanup() || !scene) return;
+        const walls = this._cleanupUndo.walls.filter(wall => scene.walls.has(wall._id));
+        await scene.updateEmbeddedDocuments('Wall', walls);
+        this._cleanupUndo = null;
+        this._endsCache = null;
+        this._setCleanupStatus(this._localize('cleanupUndone', { count: walls.length }));
+        void this.window?.render();
     }
 
     // ==================================================================
@@ -704,6 +751,7 @@ class AutoWallManager {
         view.addEventListener('pointerdown', this._onPointerDown, true);
         view.addEventListener('pointerup', this._onPointerUp, true);
         view.addEventListener('pointermove', this._onPointerMove, true);
+        view.addEventListener('dblclick', this._onDoubleClick, true);
         document.addEventListener('keydown', this._onKeyDown, true);
         this._listening = view;
     }
@@ -714,6 +762,7 @@ class AutoWallManager {
             view.removeEventListener('pointerdown', this._onPointerDown, true);
             view.removeEventListener('pointerup', this._onPointerUp, true);
             view.removeEventListener('pointermove', this._onPointerMove, true);
+            view.removeEventListener('dblclick', this._onDoubleClick, true);
         }
         document.removeEventListener('pointermove', this._onDragMove, true);
         document.removeEventListener('pointerup', this._onDragEnd, true);
@@ -778,9 +827,10 @@ class AutoWallManager {
         this._swallow(event);
         let point = this._scenePoint(event);
         if (!point) return;
-        // An end let go near a wall end joins it; failing that, walls may snap to the grid.
+        // An end let go near another joins it, when asked to; failing that, walls may snap to the grid.
         const reach = HANDLE_PIXELS * 1.5 / (canvas.stage?.scale?.x || 1);
-        const end = this._nearestEnd(point, reach, drag.ends);
+        const own = session.segments.flat().filter(end => Math.hypot(end[0] - drag.at[0], end[1] - drag.at[1]) > 1.5);
+        const end = session.options.joinEnds ? this._nearestEnd(point, reach, drag.ends.concat(own)) : null;
         if (end) point = [...end];
         else if (session.mode === 'wall' && session.options.snap) {
             const target = canvas.grid.getSnappedPoint({ x: point[0], y: point[1] }, { mode: CONST.GRID_SNAPPING_MODES.VERTEX });
@@ -822,10 +872,25 @@ class AutoWallManager {
         if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > CLICK_PIXELS) return;
         const point = this._scenePoint(event);
         if (!point) return;
+        // A shift-click on a wall already found is the first half of putting a point in it.
+        if (event.shiftKey && session.mode === 'wall' && splitSegmentAt(session.segments, point, HANDLE_PIXELS / (canvas.stage?.scale?.x || 1))) return;
         // Shift adds to the wall being mapped; a plain click starts a new one.
         if (event.shiftKey && session.seeds.length) session.seeds.push(point);
         else session.seeds = [point];
         this._schedule();
+    }
+
+    /** Shift-double-click on a wall found puts a point in it, where it was clicked. */
+    _onDoubleClick(event) {
+        const session = this.session;
+        if (!event.shiftKey || !session || session.mode !== 'wall' || !session.segments.length) return;
+        const point = this._scenePoint(event);
+        const split = point ? splitSegmentAt(session.segments, point, HANDLE_PIXELS / (canvas.stage?.scale?.x || 1)) : null;
+        if (!split) return;
+        this._swallow(event);
+        session.segments = split.segments;
+        this._drawSegments(session);
+        this._reportResult(session);
     }
 
     _onKeyDown(event) {

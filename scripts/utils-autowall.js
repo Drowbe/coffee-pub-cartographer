@@ -753,3 +753,144 @@ export function mapOpening(pixels, seedX, seedY, options = {}) {
         capped
     };
 }
+
+// ------------------------------------------------------------------
+// Working with the walls already on the scene
+// ------------------------------------------------------------------
+
+function distanceToSegmentWithT([px, py], [ax, ay], [bx, by]) {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthSq = dx * dx + dy * dy;
+    const t = lengthSq ? ((px - ax) * dx + (py - ay) * dy) / lengthSq : 0;
+    const clamped = Math.max(0, Math.min(1, t));
+    return { distance: Math.hypot(px - (ax + clamped * dx), py - (ay + clamped * dy)), t };
+}
+
+/**
+ * The gap a click was meant for: the two wall ends that face each other across
+ * it, with the click between. Walls drawn from the picture stop at doors and
+ * windows, so this finds what is already there, and the line it returns is the
+ * door with no guessing from the picture at all.
+ *
+ * A pair is two ends of two different walls, the walls running away from the
+ * gap on either side (so the two ends of one wall are never a pair), a door's
+ * length apart, with the click on the line between them. Ends nothing else
+ * meets are preferred, since a gap's ends are free ends; of those that fit,
+ * the nearest to the click wins.
+ *
+ * @param {number[][]} walls  Each wall as [x1, y1, x2, y2].
+ * @param {number[]} point    The click, [x, y].
+ * @param {{ grid: number, minSquares?: number, maxSquares?: number, reachSquares?: number }} options
+ * @returns {number[][]|null}  [[x, y], [x, y]] or null.
+ */
+export function findOpening(walls, point, { grid, minSquares = 0.4, maxSquares = 4, reachSquares = 0.6 } = {}) {
+    const ends = [];
+    walls.forEach((wall, index) => {
+        ends.push({ wall: index, at: [wall[0], wall[1]], away: [wall[2], wall[3]] });
+        ends.push({ wall: index, at: [wall[2], wall[3]], away: [wall[0], wall[1]] });
+    });
+    // How many ends meet at each: one is a free end.
+    for (const end of ends) end.meeting = ends.filter(other => Math.hypot(other.at[0] - end.at[0], other.at[1] - end.at[1]) <= 2).length;
+
+    const unit = (from, to) => {
+        const length = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1;
+        return [(to[0] - from[0]) / length, (to[1] - from[1]) / length];
+    };
+    let best = null;
+    for (const free of [true, false]) {
+        for (let i = 0; i < ends.length; i++) {
+            for (let j = i + 1; j < ends.length; j++) {
+                const a = ends[i];
+                const b = ends[j];
+                if (a.wall === b.wall) continue;
+                if (free && (a.meeting > 1 || b.meeting > 1)) continue;
+                // Something already spans it: a door put there before.
+                const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) <= 2;
+                if (walls.some(w => (near([w[0], w[1]], a.at) && near([w[2], w[3]], b.at))
+                    || (near([w[0], w[1]], b.at) && near([w[2], w[3]], a.at)))) continue;
+                const length = Math.hypot(b.at[0] - a.at[0], b.at[1] - a.at[1]);
+                if (length < minSquares * grid || length > maxSquares * grid) continue;
+                // Each wall runs away from the gap, not along it.
+                const across = unit(a.at, b.at);
+                const fromA = unit(a.at, a.away);
+                const fromB = unit(b.at, b.away);
+                if (fromA[0] * across[0] + fromA[1] * across[1] > 0.2) continue;
+                if (-(fromB[0] * across[0] + fromB[1] * across[1]) > 0.2) continue;
+                const { distance, t } = distanceToSegmentWithT(point, a.at, b.at);
+                if (distance > reachSquares * grid || t < -0.1 || t > 1.1) continue;
+                const cost = distance + length * 0.02;
+                if (!best || cost < best.cost) best = { cost, a: a.at, b: b.at };
+            }
+        }
+        if (best) break;
+    }
+    return best ? [[...best.a], [...best.b]] : null;
+}
+
+/**
+ * Join the wall ends that are close together: every group of ends within
+ * distance of one another (a chain of near ends counts) moves to the group's
+ * middle. A wall whose two ends would land on one point is left as it is.
+ *
+ * @param {{ id: string, c: number[] }[]} walls
+ * @param {number} distance
+ * @returns {{ updates: { id: string, c: number[] }[], joined: number, skipped: number }}
+ */
+export function cleanupEnds(walls, distance) {
+    const points = walls.flatMap(wall => [[wall.c[0], wall.c[1]], [wall.c[2], wall.c[3]]]);
+    const parent = points.map((_, i) => i);
+    const find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    for (let i = 0; i < points.length; i++) {
+        for (let j = i + 1; j < points.length; j++) {
+            if (Math.hypot(points[i][0] - points[j][0], points[i][1] - points[j][1]) <= distance) parent[find(i)] = find(j);
+        }
+    }
+    const sums = new Map();
+    points.forEach(([x, y], i) => {
+        const root = find(i);
+        const sum = sums.get(root) ?? [0, 0, 0];
+        sum[0] += x; sum[1] += y; sum[2]++;
+        sums.set(root, sum);
+    });
+    const target = i => { const [x, y, n] = sums.get(find(i)); return [Math.round(x / n), Math.round(y / n)]; };
+
+    const updates = [];
+    let skipped = 0;
+    let joined = 0;
+    walls.forEach((wall, k) => {
+        const a = target(k * 2);
+        const b = target(k * 2 + 1);
+        const c = [a[0], a[1], b[0], b[1]];
+        if (c[0] === c[2] && c[1] === c[3]) { skipped++; return; }
+        if (c.every((value, index) => value === wall.c[index])) return;
+        joined += (a[0] !== wall.c[0] || a[1] !== wall.c[1] ? 1 : 0) + (b[0] !== wall.c[2] || b[1] !== wall.c[3] ? 1 : 0);
+        updates.push({ id: wall.id, c });
+    });
+    return { updates, joined, skipped };
+}
+
+/**
+ * Put a point in a wall: the segment nearest the click, if one is within
+ * reach, is cut in two there. Nothing is done at an end, where a point already is.
+ *
+ * @param {number[][][]} segments  [[[x, y], [x, y]], ...]
+ * @param {number[]} point
+ * @param {number} reach
+ * @returns {{ segments: number[][][], at: number[] }|null}
+ */
+export function splitSegmentAt(segments, point, reach) {
+    let best = null;
+    segments.forEach(([a, b], index) => {
+        const { distance, t } = distanceToSegmentWithT(point, a, b);
+        if (distance <= reach && (!best || distance < best.distance)) best = { index, distance, t };
+    });
+    if (!best) return null;
+    const [a, b] = segments[best.index];
+    const t = Math.max(0, Math.min(1, best.t));
+    const at = [Math.round(a[0] + (b[0] - a[0]) * t), Math.round(a[1] + (b[1] - a[1]) * t)];
+    if (Math.hypot(at[0] - a[0], at[1] - a[1]) <= 2 || Math.hypot(at[0] - b[0], at[1] - b[1]) <= 2) return null;
+    const out = segments.slice();
+    out.splice(best.index, 1, [a, at], [[...at], b]);
+    return { segments: out, at };
+}
