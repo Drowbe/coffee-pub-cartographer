@@ -14,7 +14,7 @@
 
 import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
-import { labBuffer, mapWall, mapOpening, findOpening, cleanupEnds, splitSegmentAt } from './utils-autowall.js';
+import { labBuffer, mapWall, mapOpening, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls } from './utils-autowall.js';
 import { AutoWallWindow } from './window-autowall.js';
 
 /** The section of Cartographer's sub-menubar these sit in; registered in manager-toolbar.js. */
@@ -709,20 +709,51 @@ class AutoWallManager {
     async cleanup() {
         const scene = canvas.scene;
         if (!game.user.isGM || !scene || !this.session) return;
-        const walls = scene.walls.contents.map(wall => ({ id: wall.id, c: [...wall.c] }));
         const grid = Number(scene.grid.size) || 100;
-        const { updates, joined, skipped } = cleanupEnds(walls, this.session.options.joinDistance * grid);
-        if (!updates.length) {
+        const documents = scene.walls.contents;
+        const walls = documents.map(wall => ({ id: wall.id, c: [...wall.c] }));
+
+        // First the ends that are near each other are brought together...
+        const { updates: joinedUpdates, joined, skipped } = cleanupEnds(walls, this.session.options.joinDistance * grid);
+        const joinedCoords = new Map(joinedUpdates.map(({ id, c }) => [id, c]));
+        // ...then walls that run on in a straight line are made one.
+        const { walls: kept, removed, merged } = mergeWalls(
+            documents.map(wall => ({ id: wall.id, c: joinedCoords.get(wall.id) ?? [...wall.c], key: this._mergeKey(wall) }))
+        );
+        const originals = new Map(documents.map(wall => [wall.id, wall]));
+        const updates = kept.filter(wall => wall.c.some((value, index) => value !== originals.get(wall.id).c[index]));
+        if (!updates.length && !removed.length) {
             this._setCleanupStatus(this._localize('cleanupNothing'));
             return;
         }
-        const before = new Map(walls.map(wall => [wall.id, wall.c]));
-        await scene.updateEmbeddedDocuments('Wall', updates.map(({ id, c }) => ({ _id: id, c })));
-        this._cleanupUndo = { sceneId: scene.id, walls: updates.map(({ id }) => ({ _id: id, c: before.get(id) })) };
+
+        // What is needed to put it all back: where each moved wall was, and every wall that went into another.
+        const undo = {
+            sceneId: scene.id,
+            moved: updates.map(({ id }) => ({ _id: id, c: [...originals.get(id).c] })),
+            removed: removed.map(id => originals.get(id).toObject())
+        };
+        if (updates.length) await scene.updateEmbeddedDocuments('Wall', updates.map(({ id, c }) => ({ _id: id, c })));
+        if (removed.length) await scene.deleteEmbeddedDocuments('Wall', removed);
+        this._cleanupUndo = undo;
         this._endsCache = null;
-        const text = this._localize('cleanupDone', { joined, walls: updates.length });
+        const text = this._localize('cleanupDone', { joined, merged });
         this._setCleanupStatus(skipped ? `${text} ${this._localize('cleanupSkipped', { skipped })}` : text);
         void this.window?.render();
+    }
+
+    /**
+     * What a wall is, for deciding whether two may be one: its senses and
+     * direction, door, sound, threshold and levels. Doors and windows have no
+     * key, so they are never merged into a wall or each other.
+     */
+    _mergeKey(wall) {
+        const sense = CONST.EDGE_SENSE_TYPES ?? CONST.WALL_SENSE_TYPES;
+        const isPlainDoor = wall.door === CONST.WALL_DOOR_TYPES.NONE;
+        const isWindow = wall.light === sense.PROXIMITY || wall.sight === sense.PROXIMITY;
+        if (!isPlainDoor || isWindow) return null;
+        const { light, move, sight, sound, dir } = wall;
+        return JSON.stringify({ light, move, sight, sound, dir, levels: [...(wall.levels ?? [])].sort() });
     }
 
     canUndoCleanup() {
@@ -732,11 +763,15 @@ class AutoWallManager {
     async undoCleanup() {
         const scene = canvas.scene;
         if (!this.canUndoCleanup() || !scene) return;
-        const walls = this._cleanupUndo.walls.filter(wall => scene.walls.has(wall._id));
-        await scene.updateEmbeddedDocuments('Wall', walls);
+        const { moved, removed } = this._cleanupUndo;
+        // The walls that were merged away come back as they were, with their ids...
+        if (removed.length) await scene.createEmbeddedDocuments('Wall', removed, { keepId: true });
+        // ...and the rest go back to where they stood.
+        const present = moved.filter(wall => scene.walls.has(wall._id));
+        if (present.length) await scene.updateEmbeddedDocuments('Wall', present);
         this._cleanupUndo = null;
         this._endsCache = null;
-        this._setCleanupStatus(this._localize('cleanupUndone', { count: walls.length }));
+        this._setCleanupStatus(this._localize('cleanupUndone', { count: present.length + removed.length }));
         void this.window?.render();
     }
 
@@ -853,11 +888,16 @@ class AutoWallManager {
         this._swallow(event);
         document.removeEventListener('pointermove', this._onDragMove, true);
         document.removeEventListener('pointerup', this._onDragEnd, true);
+        const at = this._drag?.at;
         this._drag = null;
         const session = this.session;
         if (!session) return;
         // An end dragged onto the other end of its wall leaves nothing to keep.
         session.segments = session.segments.filter(([a, b]) => a[0] !== b[0] || a[1] !== b[1]);
+        // Joined to another wall and running straight on: they are one wall.
+        if (at && session.mode === 'wall' && session.options.joinEnds) {
+            session.segments = mergeStraightAt(session.segments, at) ?? session.segments;
+        }
         this._drawSegments(session);
         this._reportResult(session);
     }

@@ -894,3 +894,91 @@ export function splitSegmentAt(segments, point, reach) {
     out.splice(best.index, 1, [a, at], [[...at], b]);
     return { segments: out, at };
 }
+
+/** The turn, in degrees, between a line arriving at a point and one leaving it. */
+function turnAt(from, at, to) {
+    const arriving = Math.atan2(at[1] - from[1], at[0] - from[0]);
+    const leaving = Math.atan2(to[1] - at[1], to[0] - at[0]);
+    return Math.abs(((leaving - arriving) * 180 / Math.PI + 540) % 360 - 180);
+}
+
+/**
+ * Where two segments meet at a point and the line carries on straight, they
+ * are one wall: merge them. Only at the point asked about, so a point put in a
+ * wall on purpose elsewhere is left where it is.
+ *
+ * @returns {number[][][]|null}  The segments with the two made one, or null if nothing was merged.
+ */
+export function mergeStraightAt(segments, point, degrees = 8) {
+    const meeting = [];
+    segments.forEach((segment, index) => {
+        segment.forEach((end, which) => {
+            if (Math.hypot(end[0] - point[0], end[1] - point[1]) <= 1.5) meeting.push({ index, which });
+        });
+    });
+    // Exactly two different segments: a third arriving makes it a junction, which stays.
+    if (meeting.length !== 2 || meeting[0].index === meeting[1].index) return null;
+    const [a, b] = meeting.map(({ index, which }) => ({ index, near: segments[index][which], far: segments[index][1 - which] }));
+    if (turnAt(a.far, a.near, b.far) > degrees) return null;
+    const out = segments.filter((_, index) => index !== a.index && index !== b.index);
+    out.push([a.far, b.far]);
+    return out;
+}
+
+/**
+ * Merge the walls of a scene that run on in a straight line into single walls.
+ * Two walls merge where exactly two meet at a point, the line does not turn
+ * more than the angle given, and they are alike in every other way: each wall
+ * carries a `key` naming what it is (sense, door, sound and so on), and walls
+ * merge only when keys are equal. A wall whose key is null never merges; that
+ * is how doors and windows stay what they are.
+ *
+ * @param {{ id: string, c: number[], key: string|null }[]} walls
+ * @param {number} degrees
+ * @returns {{ walls: { id: string, c: number[] }[], removed: string[], merged: number }}
+ *   The walls that remain, those that went into others, and how many merges were made.
+ */
+export function mergeWalls(walls, degrees = 8) {
+    const live = walls.map(wall => ({ id: wall.id, c: [...wall.c], key: wall.key }));
+    const removed = [];
+    let merged = 0;
+    let again = true;
+    while (again) {
+        again = false;
+        const at = new Map();
+        const keyOf = (x, y) => `${x},${y}`;
+        live.forEach((wall, index) => {
+            if (!wall || wall.key === null) return;
+            for (const which of [0, 1]) {
+                const k = keyOf(wall.c[which * 2], wall.c[which * 2 + 1]);
+                at.set(k, [...(at.get(k) ?? []), { index, which }]);
+            }
+        });
+        // Every end at a point counts, door ends too: a third wall there means a junction.
+        const everything = new Map();
+        walls.forEach((wall, index) => {
+            const original = live[index];
+            if (!original) return;
+            for (const which of [0, 1]) {
+                const k = keyOf(original.c[which * 2], original.c[which * 2 + 1]);
+                everything.set(k, (everything.get(k) ?? 0) + 1);
+            }
+        });
+        for (const [k, list] of at) {
+            if (list.length !== 2 || everything.get(k) !== 2 || list[0].index === list[1].index) continue;
+            const [a, b] = list.map(({ index, which }) => ({
+                index, near: [live[index].c[which * 2], live[index].c[which * 2 + 1]],
+                far: [live[index].c[(1 - which) * 2], live[index].c[(1 - which) * 2 + 1]]
+            }));
+            if (live[a.index].key !== live[b.index].key) continue;
+            if (turnAt(a.far, a.near, b.far) > degrees) continue;
+            live[a.index].c = [a.far[0], a.far[1], b.far[0], b.far[1]];
+            removed.push(live[b.index].id);
+            live[b.index] = null;
+            merged++;
+            again = true;
+            break;
+        }
+    }
+    return { walls: live.filter(Boolean).map(wall => ({ id: wall.id, c: wall.c })), removed, merged };
+}

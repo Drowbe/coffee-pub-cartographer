@@ -4,7 +4,7 @@
 // junction, that a wall stops where its material does, that a flood which leaks
 // says so. It says nothing about how a real painted map behaves; that is tried
 // on the map.
-import { mapWall, mapOpening, floodMask, simplify, snapSegments, labBuffer, mergeStraight, findOpening, cleanupEnds, splitSegmentAt } from '../scripts/utils-autowall.js';
+import { mapWall, mapOpening, floodMask, simplify, snapSegments, labBuffer, mergeStraight, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls } from '../scripts/utils-autowall.js';
 
 let failures = 0;
 const check = (label, ok, detail = '') => {
@@ -283,6 +283,51 @@ console.log('\nputting a point in a wall');
     check('the other walls are as they were', JSON.stringify(split.segments[2]) === JSON.stringify(segments[1]));
     check('a click out of reach does nothing', splitSegmentAt(segments, [40, 60], 8) === null);
     check('a click at an end does nothing, a point is already there', splitSegmentAt(segments, [1, 1], 8) === null);
+}
+
+// ------------------------------------------------------------------
+console.log('\njoined walls that run straight become one wall');
+{
+    const pair = [[[0, 0], [100, 0]], [[100, 0], [200, 2]]];
+    const one = mergeStraightAt(pair, [100, 0]);
+    check('two segments meeting on a straight line are made one', one && one.length === 1 && one[0][0][0] === 0 && one[0][1][0] === 200, JSON.stringify(one));
+    check('a corner is not merged', mergeStraightAt([[[0, 0], [100, 0]], [[100, 0], [100, 100]]], [100, 0]) === null);
+    check('a third wall there makes a junction, which stays',
+        mergeStraightAt([[[0, 0], [100, 0]], [[100, 0], [200, 0]], [[100, 0], [100, 80]]], [100, 0]) === null);
+    check('a point put in a wall elsewhere is left alone',
+        mergeStraightAt([[[0, 0], [50, 0]], [[50, 0], [100, 0]], [[100, 0], [150, 0]]], [100, 0]).length === 2);
+
+    const plain = 'normal';
+    const run = mergeWalls([
+        { id: 'a', c: [0, 0, 100, 0], key: plain },
+        { id: 'b', c: [100, 0, 200, 1], key: plain },
+        { id: 'c', c: [200, 1, 300, 0], key: plain }
+    ]);
+    check('a run of three plain walls is one', run.walls.length === 1 && run.merged === 2 && run.removed.length === 2, JSON.stringify(run));
+    check('from one end to the other', run.walls[0].c[0] === 0 && run.walls[0].c[2] === 300, JSON.stringify(run.walls));
+
+    const door = mergeWalls([
+        { id: 'a', c: [0, 0, 100, 0], key: plain },
+        { id: 'd', c: [100, 0, 160, 0], key: null },
+        { id: 'b', c: [160, 0, 300, 0], key: plain }
+    ]);
+    check('a door in a wall keeps the wall in two and is itself kept', door.walls.length === 3 && door.merged === 0, JSON.stringify(door));
+
+    const unlike = mergeWalls([{ id: 'a', c: [0, 0, 100, 0], key: 'normal' }, { id: 'b', c: [100, 0, 200, 0], key: 'invisible' }]);
+    check('walls that differ are not merged', unlike.walls.length === 2);
+
+    const corner = mergeWalls([{ id: 'a', c: [0, 0, 100, 0], key: plain }, { id: 'b', c: [100, 0, 100, 100], key: plain }]);
+    check('a corner is not merged', corner.walls.length === 2);
+
+    const tee = mergeWalls([
+        { id: 'a', c: [0, 0, 100, 0], key: plain }, { id: 'b', c: [100, 0, 200, 0], key: plain }, { id: 'c', c: [100, 0, 100, 90], key: plain }
+    ]);
+    check('a wall meeting the line there stops the merge', tee.walls.length === 3);
+
+    const doorBeside = mergeWalls([
+        { id: 'a', c: [0, 0, 100, 0], key: plain }, { id: 'b', c: [100, 0, 200, 0], key: plain }, { id: 'd', c: [100, 0, 100, 60], key: null }
+    ]);
+    check('a door meeting there counts as a wall meeting', doorBeside.walls.length === 3);
 }
 
 // ------------------------------------------------------------------
