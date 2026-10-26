@@ -6,7 +6,7 @@
 /* The window is built from Blacksmith's tool-window components -- tabs, the segmented
    control, sections, toggles, sliders, buttons -- which carry their own styling and follow
    Light, Dark and Glass. What is here is only what no shared component covers: the status
-   line, the small picture, and a row of label, control and value. Colours come from the
+   line, the small picture, and a row of a label and its control. Colours come from the
    --blacksmith-tool-* family. */
 
 .cartographer-autowall-window .cartographer-autowall-panel {
@@ -39,11 +39,11 @@
     background: var(--blacksmith-tool-surface-sunken, rgba(0, 0, 0, 0.35));
 }
 
-/* Label, control and value sit side by side; the labels share a column so the controls start at
-   the same place, but nothing is pushed to the far edge. */
+/* Label and control sit side by side; the labels share a column so the controls start at the same
+   place, but nothing is pushed to the far edge. A slider carries its own value readout. */
 .cartographer-autowall-window .cartographer-autowall-row {
     display: grid;
-    grid-template-columns: 92px minmax(0, 1fr) 40px;
+    grid-template-columns: 92px minmax(0, 1fr);
     align-items: center;
     gap: 8px;
     margin: 0;
@@ -55,14 +55,9 @@
     text-overflow: ellipsis;
 }
 
-.cartographer-autowall-window .cartographer-autowall-value {
-    font-variant-numeric: tabular-nums;
-    color: var(--blacksmith-tool-text-muted);
-}
-
-/* A choice sits beside its label like a slider does, taking the slider's and value's room. */
+/* A choice sits beside its label like a slider does. */
 .cartographer-autowall-window .cartographer-autowall-select {
-    grid-column: 2 / 4;
+    grid-column: 2;
     width: 100%;
     min-width: 0;
     height: 24px;

@@ -4,7 +4,7 @@
 // junction, that a wall stops where its material does, that a flood which leaks
 // says so. It says nothing about how a real painted map behaves; that is tried
 // on the map.
-import { mapWall, mapOpening, floodMask, simplify, snapSegments, labBuffer, mergeStraight, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls, openingOnWall, splitWallAt, countNearEnds, planJoinedMove, snapNewWall } from '../scripts/utils-autowall.js';
+import { mapWall, mapOpening, floodMask, simplify, snapSegments, labBuffer, mergeStraight, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls, openingOnWall, splitWallAt, countNearEnds, planJoinedMove, snapNewWall, sketchToSegments } from '../scripts/utils-autowall.js';
 
 let failures = 0;
 const check = (label, ok, detail = '') => {
@@ -466,6 +466,32 @@ console.log('\ndrawing a wall next to others');
     check('further off than the reach, it is left where it is', JSON.stringify(snapNewWall(walls, [160, 0, 300, 200], 30)) === JSON.stringify([160, 0, 300, 200]));
     check('with no reach, nothing joins', JSON.stringify(snapNewWall(walls, [102, 0, 300, 200], 0)) === JSON.stringify([102, 0, 300, 200]));
     check('a short wall is not folded flat onto one end', snapNewWall(walls, [96, 4, 104, 4], 30).join() !== '100,0,100,0');
+}
+
+// ------------------------------------------------------------------
+console.log('\na line drawn freehand becomes walls');
+{
+    let seed = 5;
+    const jitter = amount => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return ((seed / 0x7fffffff) - 0.5) * amount; };
+    const straight = Array.from({ length: 60 }, (_, i) => [i * 10, 100 + jitter(4)]);
+    const one = sketchToSegments(straight, { epsilon: 6 });
+    check('a shaky straight line is one wall', one.length === 1 && Math.abs(one[0][0][0]) <= 1 && Math.abs(one[0][1][0] - 590) <= 1, JSON.stringify(one));
+
+    const elbow = [...Array.from({ length: 30 }, (_, i) => [i * 10, 0 + jitter(3)]), ...Array.from({ length: 30 }, (_, i) => [290 + jitter(3), i * 10])];
+    const two = sketchToSegments(elbow, { epsilon: 6 });
+    check('a line with a corner is two walls, meeting at the corner', two.length === 2 && Math.abs(two[0][1][0] - 290) <= 8 && Math.abs(two[0][1][1]) <= 8, JSON.stringify(two));
+    check('and the walls follow one another', JSON.stringify(two[0][1]) === JSON.stringify(two[1][0]));
+
+    const circle = Array.from({ length: 80 }, (_, i) => [Math.round(500 + 300 * Math.cos(i / 80 * 2 * Math.PI + 0.1)), Math.round(500 + 300 * Math.sin(i / 80 * 2 * Math.PI + 0.1))]);
+    const open = sketchToSegments([...circle, [circle[0][0] + 12, circle[0][1] + 9]], { epsilon: 12 });
+    const ring = sketchToSegments([...circle, [circle[0][0] + 12, circle[0][1] + 9]], { epsilon: 12, closeDistance: 40 });
+    check('a loop that ends beside where it began is closed when asked', JSON.stringify(ring[0][0]) === JSON.stringify(ring[ring.length - 1][1]), JSON.stringify([ring[0][0], ring[ring.length - 1][1]]));
+    check('and left open when not', JSON.stringify(open[0][0]) !== JSON.stringify(open[open.length - 1][1]));
+    check('a curve is several walls, not one, with every point of it still near the line', ring.length >= 6 && ring.length <= 40, `${ring.length}`);
+
+    check('a point, or nothing, is not a wall', sketchToSegments([[5, 5]]).length === 0 && sketchToSegments([]).length === 0);
+    check('a line that goes nowhere is not a wall', sketchToSegments([[5, 5], [5, 5], [5, 5]]).length === 0);
+    check('the walls are in whole pixels', sketchToSegments([[0.4, 0.4], [100.6, 0.4]]).flat(2).every(Number.isInteger));
 }
 
 // ------------------------------------------------------------------

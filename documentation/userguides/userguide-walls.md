@@ -12,13 +12,15 @@ image; a video background cannot be read.
 
 ## Start
 
-In Cartographer's sub-menubar, the **Walls** section has two buttons: **Map walls, doors and
-windows**, which opens the window and starts a run, and **Undo**, which takes back the last run.
+There are two ways in. In Foundry's own controls, with the **Walls** layer open, there is a **Map
+walls, doors and windows** button among the wall tools. And in Cartographer's sub-menubar, the
+**Walls** section has the same button, and **Undo**, which takes back the last run.
 
 The window can be moved. It opens beside the map so the middle of the map is clear to click, and it
-remembers where you put it. The **Map** and **Options** tabs are at the top. On the Map tab, under
-them, **What to map** chooses the mode -- **Walls**, **Doors** or **Windows** -- in the order the work
-is done. **Add** and **Cancel** are at the foot, where they stay in reach on either tab.
+remembers where you put it. The **Map**, **Draw** and **Options** tabs are at the top. On the Map
+tab, under them, **What to map** chooses the mode -- **Walls**, **Doors** or **Windows** -- in the
+order the work is done. **Add** and **Cancel** are at the foot, where they stay in reach on the Map
+and Options tabs. The Map tab finds walls from the picture; the Draw tab is for placing them by hand.
 
 ## Walls
 
@@ -67,6 +69,21 @@ run on in a straight line they become one wall.
 Changing a slider, or clicking somewhere else on the map, starts the run over and discards what you
 dragged.
 
+## Walls on a tile
+
+Some walls are painted on a tile, not on the scene's background. You do not choose which: **the
+picture is read from where you click.** The top-most tile with a picture under your click is read, and
+if there is none, the scene's background is. The window says which, under the small picture of the
+map. A tile that is turned or flipped on the scene works the same, and the walls found are placed
+where the tile's picture is drawn.
+
+- A part of a tile that is transparent is not there to click: the click goes through it, to the tile
+  below or to the background.
+- A run reads one picture. Clicking on a different tile, or on the background, starts a fresh run
+  on that picture and leaves what was found before. **Shift-click** only ever adds to the picture
+  already being read.
+- Video and animated tiles are skipped, as a video background is.
+
 ## Doors
 
 Switch to **Doors** once the walls are in. Click a door on the map. Because the walls stopped at the
@@ -103,6 +120,38 @@ settings are:
   default is two squares, as Foundry's own window tool uses.
 - **Fade with distance** -- Foundry's attenuation setting for the window, on by default as it is
   for Foundry's own windows.
+
+## Drawing walls by hand
+
+The **Draw** tab is for when you would rather place the walls than have them found. Nothing is read
+from the picture. Walls are made as you draw them, and a chain or a stroke is one thing for **Undo**
+(in the sub-menubar) to take back.
+
+**How you draw** is **Points** or **Sketch**, and **What you draw** is a **Wall**, a **Door** or a
+**Window**; a door or window is drawn with the settings shown, as on the Map tab. Press **Start
+drawing**: while it is on, the map is for drawing, and **Stop drawing** gives it back to Foundry.
+
+**Points.** Click to place a point. Each click after it makes a wall from the last point to the new one,
+so you click a shape out one corner at a time.
+
+- **Carry on from a wall that is already there.** Start a chain by clicking at the end of a wall that
+  is already on the scene: the point snaps onto that end, so the new wall begins exactly where the old
+  one ends. This is the thing Foundry's own tool makes awkward, where dragging from an end takes hold
+  of that wall. A point is snapped to a wall end that is within the **Join distance**, and the same
+  for every later point, so a chain can end on a wall end too. A ring marks the end a point would join.
+- **Close a shape.** Click back on the first point, with at least three sides, and the shape is closed
+  and the chain ends.
+- **The last point.** The window says where the last point is, and it is marked in green on the map,
+  with a line to where the next would go. The first point of the chain is ringed.
+- **Enter** ends the chain; the next click begins another. **Escape** ends it too, and with no chain
+  turns drawing off. **Backspace** takes back the last wall and stands where it began.
+- **Shift** places a point exactly where you click, with no joining or snapping.
+- With **Snap to grid corners** on (Options), points that are not joined to a wall end snap to the grid.
+
+**Sketch.** Drag to draw a line freehand. When you let go it is turned into straight walls, as few as
+keep to your line; **Smoothing** sets how plain they are. A stroke that starts or ends near a wall end
+is joined to it, and one that ends near its start is closed into a ring. **Backspace** takes back the
+last stroke. Each stroke is one thing to undo.
 
 ## Cutting a wall in two
 

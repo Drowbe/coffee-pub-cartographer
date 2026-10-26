@@ -14,7 +14,7 @@
 
 import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
-import { labBuffer, mapWall, mapOpening, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls, openingOnWall, splitWallAt, countNearEnds, SKIP_JOIN } from './utils-autowall.js';
+import { labBuffer, mapWall, mapOpening, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls, openingOnWall, splitWallAt, countNearEnds, SKIP_JOIN, transformFromCorners, sketchToSegments } from './utils-autowall.js';
 import { AutoWallWindow } from './window-autowall.js';
 import { wallJoinManager } from './manager-walljoin.js';
 
@@ -26,6 +26,8 @@ const IDS = {
 };
 /** Scene flag on every wall this makes: { run, kind }, where run is when it was drawn. */
 const FLAG = 'autoWall';
+/** The name of the tool this adds to Foundry's own Walls controls. */
+const TOOL_ID = `${MODULE.ID}-autowall`;
 /** The widest the picture is read at, in pixels. A bigger image is shrunk to this to stay quick. */
 const MAX_WORK_SIZE = 2400;
 /** How far, in screen pixels, a click may move and still be a click, not a drag. */
@@ -45,7 +47,7 @@ const STORE_KEY = `${MODULE.ID}.autowall.options.v2`;
 
 /** What the controls start at, and the limits they move between. */
 const DEFAULTS = {
-    mode: 'wall', tab: 'map', joinEnds: true, joinDistance: 0.3, match: 20, smoothing: 0.3, widest: 1, snap: false,
+    mode: 'wall', tab: 'map', drawTool: 'point', drawKind: 'wall', joinEnds: true, joinDistance: 0.3, match: 20, smoothing: 0.3, widest: 1, snap: false,
     doorState: 'closed', doorSound: '', doorAnimation: '',
     windowDistance: 2, windowAttenuation: true
 };
@@ -90,6 +92,8 @@ class AutoWallManager {
         this._onDragMove = this._onDragMove.bind(this);
         this._onDragEnd = this._onDragEnd.bind(this);
         this._onKeyDown = this._onKeyDown.bind(this);
+        this._onSketchMove = this._onSketchMove.bind(this);
+        this._onSketchEnd = this._onSketchEnd.bind(this);
     }
 
     initialize() {
@@ -107,7 +111,7 @@ class AutoWallManager {
             order: 1,
             toggleable: true,
             active: () => !!this.session,
-            onClick: () => (this.session ? this.cancel() : void this.start())
+            onClick: () => this.toggle()
         });
         cartographerToolbar.registerTool(IDS.undo, {
             icon: 'fa-solid fa-rotate-left',
@@ -117,6 +121,29 @@ class AutoWallManager {
             toggleable: false,
             onClick: () => void this.undo()
         });
+    }
+
+    /** The tool's button in Foundry's own Walls controls, beside the wall tools. */
+    addWallTool(controls) {
+        const walls = controls?.walls;
+        if (!walls || !game.user.isGM) return;
+        const tool = {
+            name: TOOL_ID,
+            order: 20,
+            title: `${MODULE.ID}.autowall.barMap`,
+            icon: 'fa-solid fa-wand-magic-sparkles',
+            button: true,
+            visible: true,
+            onChange: () => this.toggle()
+        };
+        if (Array.isArray(walls.tools)) walls.tools.push(tool);
+        else (walls.tools ??= {})[TOOL_ID] = tool;
+    }
+
+    /** Open the window and start a run, or end the one under way. */
+    toggle() {
+        if (this.session) this.cancel();
+        else void this.start();
     }
 
     _refreshButtons() {
@@ -140,7 +167,10 @@ class AutoWallManager {
         options.joinDistance = Number(game.settings.get(MODULE.ID, 'walls.joinDistance'));
         const session = {
             seeds: [], options, mode: MODES.includes(options.mode) ? options.mode : 'wall',
-            image: null, result: null, segments: []
+            image: null, background: null, files: new Map(), result: null, segments: [],
+            // Drawing by hand: whether it is on, the last point placed and where the chain began,
+            // what has been drawn (to take back), a stroke being sketched, and writes in order.
+            draw: { active: false, last: null, start: null, run: null, count: 0, history: [], points: null, queue: Promise.resolve() }
         };
         this.session = session;
         this._status = null;
@@ -152,7 +182,7 @@ class AutoWallManager {
         if (this.session !== session) return;
         this._setStatus(this._localize('loading'));
         try {
-            session.image = await this._readImage();
+            session.image = session.background = await this._readImage();
         } catch (error) {
             console.error(`${MODULE.NAME}: could not read the scene image`, error);
             if (this.session === session) {
@@ -163,8 +193,9 @@ class AutoWallManager {
         }
         if (this.session !== session) return;
         this._listen();
-        canvas.app.view.style.cursor = 'crosshair';
+        this._syncCursor();
         this._drawThumb(session);
+        this._showSource(session);
         this._setStatus(this._localize(HINTS[session.mode]));
     }
 
@@ -190,37 +221,13 @@ class AutoWallManager {
     // ==================================================================
 
     /**
-     * The scene's background as pixels, shrunk if large, with where it sits on
-     * the scene. Read from the sprite Foundry is drawing so it is the picture
-     * the GM is looking at, and placed by that sprite so an offset or a
-     * resized background still lines up.
+     * Pixels from anything that can be drawn, shrunk if large, with the canvas they
+     * were drawn on, which is kept for the small picture in the window.
      */
-    async _readImage() {
-        const background = canvas.primary?.background;
-        // The file itself, when the scene names one: it is the picture as painted,
-        // where the texture Foundry holds may be resized, or released once drawn.
-        const src = canvas.level?.background?.src ?? canvas.scene?.background?.src ?? canvas.scene?.img ?? null;
-        let source = null;
-        let from = 'file';
-        if (src && !/\.(webm|mp4|m4v)$/i.test(src)) {
-            try {
-                source = new Image();
-                source.src = src;
-                await source.decode();
-            } catch (error) {
-                console.warn(`${MODULE.NAME}: could not load ${src}; using the texture on screen`, error);
-                source = null;
-            }
-        }
-        if (!source) {
-            from = 'texture';
-            source = background?.texture?.baseTexture?.resource?.source ?? background?.texture?.source?.resource ?? null;
-        }
-        if (!source) throw new Error('no still image');
+    _extract(source) {
         const naturalWidth = source.naturalWidth ?? source.videoWidth ?? source.width;
         const naturalHeight = source.naturalHeight ?? source.videoHeight ?? source.height;
         if (!naturalWidth || !naturalHeight) throw new Error('empty image');
-
         const shrink = Math.min(1, MAX_WORK_SIZE / Math.max(naturalWidth, naturalHeight));
         const width = Math.max(1, Math.round(naturalWidth * shrink));
         const height = Math.max(1, Math.round(naturalHeight * shrink));
@@ -229,18 +236,176 @@ class AutoWallManager {
         surface.height = height;
         const context = surface.getContext('2d', { willReadFrequently: true });
         context.drawImage(source, 0, 0, width, height);
-        const pixels = context.getImageData(0, 0, width, height);
+        return { pixels: context.getImageData(0, 0, width, height), surface, naturalWidth, naturalHeight };
+    }
+
+    /** An image file, as pixels. */
+    async _loadFile(src) {
+        const source = new Image();
+        source.src = src;
+        await source.decode();
+        return this._extract(source);
+    }
+
+    /**
+     * The scene's background as a picture, with where it sits on the scene. The file itself is
+     * read where the scene names one, since it is the picture as painted, where the texture
+     * Foundry holds may be resized or released once drawn. It is placed by the sprite Foundry is
+     * drawing, so an offset or a resized background still lines up.
+     */
+    async _readImage() {
+        const background = canvas.primary?.background;
+        const src = canvas.level?.background?.src ?? canvas.scene?.background?.src ?? canvas.scene?.img ?? null;
+        let file = null;
+        let from = 'file';
+        if (src && !/\.(webm|mp4|m4v)$/i.test(src)) {
+            try {
+                file = await this._loadFile(src);
+            } catch (error) {
+                console.warn(`${MODULE.NAME}: could not load ${src}; using the texture on screen`, error);
+            }
+        }
+        if (!file) {
+            from = 'texture';
+            const source = background?.texture?.baseTexture?.resource?.source ?? background?.texture?.source?.resource ?? null;
+            if (!source) throw new Error('no still image');
+            file = this._extract(source);
+        }
+        const { pixels, surface, naturalWidth, naturalHeight } = file;
+        const { width, height } = pixels;
 
         const rect = canvas.dimensions.sceneRect;
         const sceneRect = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
         const placement = this._placement(background) ?? sceneRect;
-        const image = { pixels, lab: labBuffer(pixels), placement, scaleX: width / placement.width, scaleY: height / placement.height, surface };
+        const transform = transformFromCorners(
+            [placement.x, placement.y], [placement.x + placement.width, placement.y], [placement.x, placement.y + placement.height], width, height
+        );
+        const image = { key: 'background', label: this._localize('sourceBackground'), pixels, lab: labBuffer(pixels), surface, ...transform };
         console.info(`${MODULE.NAME}: auto-wall read the map`, {
             from, src, natural: [naturalWidth, naturalHeight], work: [width, height],
             placement, sceneRect, spriteBox: background ? { x: background.x, y: background.y, width: background.width, height: background.height } : null,
             grid: canvas.scene.grid.size, contrast: this._contrast(pixels)
         });
         return image;
+    }
+
+    // ------------------------------------------------------------------
+    // Walls on a tile
+    // ------------------------------------------------------------------
+
+    /**
+     * Where a tile's picture is on the scene, for a version of it width by height pixels. The
+     * picture sits on its mesh the way a sprite does -- anchored, then moved, rotated, flipped
+     * and sized by the mesh's own transform -- so this takes it from there, and is right for
+     * whatever fit, scale, rotation or flip the tile has.
+     */
+    _tileTransform(tile, width, height) {
+        const mesh = tile.mesh;
+        const orig = mesh.texture?.orig ?? mesh.texture;
+        const anchor = mesh.anchor ?? { x: 0, y: 0 };
+        const toScene = (x, y) => {
+            const local = new PIXI.Point((x / width) * orig.width - anchor.x * orig.width, (y / height) * orig.height - anchor.y * orig.height);
+            const world = mesh.worldTransform.apply(local);
+            return canvas.stage.worldTransform.applyInverse(world);
+        };
+        const origin = toScene(0, 0);
+        const xEnd = toScene(width, 0);
+        const yEnd = toScene(0, height);
+        return transformFromCorners([origin.x, origin.y], [xEnd.x, xEnd.y], [yEnd.x, yEnd.y], width, height);
+    }
+
+    /** Whether a point on the scene is within a tile's picture. */
+    _tileContains(tile, point) {
+        try {
+            const orig = tile.mesh.texture?.orig ?? tile.mesh.texture;
+            if (!orig?.width || !orig?.height) return false;
+            const [x, y] = this._tileTransform(tile, orig.width, orig.height).toImage(point);
+            return x >= 0 && y >= 0 && x < orig.width && y < orig.height;
+        } catch {
+            return false;
+        }
+    }
+
+    /** The tiles with a still picture under a point, the one drawn on top first. */
+    _tilesAt(point) {
+        return (canvas.tiles?.placeables ?? [])
+            .filter(tile => tile.mesh && !tile.mesh.destroyed && tile.document?.texture?.src && !/\.(webm|mp4|m4v)$/i.test(tile.document.texture.src))
+            .filter(tile => this._tileContains(tile, point))
+            .sort((a, b) => ((b.document.elevation ?? 0) - (a.document.elevation ?? 0)) || ((b.document.sort ?? 0) - (a.document.sort ?? 0)));
+    }
+
+    /** A tile as a picture: its pixels, read once, and where it is now. */
+    async _tileImage(session, tile) {
+        const src = tile.document.texture.src;
+        const key = `tile:${tile.id}:${src}`;
+        let file = session.files.get(key);
+        if (!file) {
+            const loaded = await this._loadFile(src);
+            file = { pixels: loaded.pixels, lab: labBuffer(loaded.pixels), surface: loaded.surface };
+            session.files.set(key, file);
+            // A few at a time: each holds the whole picture twice over.
+            while (session.files.size > 3) session.files.delete(session.files.keys().next().value);
+        }
+        const name = decodeURIComponent(String(src).split('/').pop() ?? src);
+        return { key, label: this._localize('sourceTile', { name }), ...file, ...this._tileTransform(tile, file.pixels.width, file.pixels.height) };
+    }
+
+    /** Start from a click: on a different picture, nothing found on the last one carries over. */
+    _useImage(session, image, point) {
+        if (session.image?.key !== image.key) {
+            session.image = image;
+            session.result = null;
+            session.segments = [];
+            this._clearPreview();
+            this._drawThumb(session);
+        }
+        this._showSource(session);
+        session.seeds = [point];
+        this._schedule();
+    }
+
+    /**
+     * A new click (not a shift-click adding to the wall already being mapped): the picture it
+     * is read from is the top-most tile with something drawn where it landed, or the scene's
+     * background when there is none. A tile's transparent parts are not there to be clicked.
+     */
+    _pick(point, add) {
+        const session = this.session;
+        if (!session) return;
+        if (add && session.seeds.length) {
+            session.seeds.push(point);
+            this._schedule();
+            return;
+        }
+        const tiles = this._tilesAt(point);
+        if (!tiles.length) return this._useImage(session, session.background, point);
+        return this._pickTile(session, tiles, point);
+    }
+
+    async _pickTile(session, tiles, point) {
+        for (const tile of tiles) {
+            let image;
+            try {
+                image = await this._tileImage(session, tile);
+            } catch (error) {
+                console.warn(`${MODULE.NAME}: could not read the tile ${tile.id}`, error);
+                continue;
+            }
+            if (this.session !== session) return;
+            const [x, y] = image.toImage(point);
+            const { width, height, data } = image.pixels;
+            if (x < 0 || y < 0 || x >= width || y >= height) continue;
+            // Transparent here: the click went through the tile to what is under it.
+            if (data[(Math.floor(y) * width + Math.floor(x)) * 4 + 3] < 25) continue;
+            return this._useImage(session, image, point);
+        }
+        if (this.session === session) this._useImage(session, session.background, point);
+    }
+
+    /** What the picture being read is, in the window. */
+    _showSource(session) {
+        const line = this._root()?.querySelector('[data-role="source"]');
+        if (line) line.textContent = session?.image?.label ?? '';
     }
 
     /**
@@ -270,12 +435,12 @@ class AutoWallManager {
     }
 
     /** Scene pixels to this image's pixels, and back. */
-    _toImage(image, [x, y]) {
-        return [(x - image.placement.x) * image.scaleX, (y - image.placement.y) * image.scaleY];
+    _toImage(image, point) {
+        return image.toImage(point);
     }
 
-    _toScene(image, [x, y]) {
-        return [x / image.scaleX + image.placement.x, y / image.scaleY + image.placement.y];
+    _toScene(image, point) {
+        return image.toScene(point);
     }
 
     // ==================================================================
@@ -286,7 +451,7 @@ class AutoWallManager {
     _tracerOptions(session) {
         const { image, options } = session;
         const grid = Number(canvas.scene.grid.size) || 100;
-        const square = grid * image.scaleX;
+        const square = grid * image.scale;
         return {
             tolerance: options.match,
             stepTolerance: Math.max(3, options.match * 0.25),
@@ -373,7 +538,7 @@ class AutoWallManager {
         const result = mapOpening(image.pixels, first[0], first[1], { ...this._tracerOptions(session), extraSeeds: rest });
         result.segments = result.segment ? [result.segment] : [];
         result.tooThick = false;
-        result.tooLong = result.segment ? result.length / image.scaleX > MAX_OPENING_SQUARES * grid : false;
+        result.tooLong = result.segment ? result.length / image.scale > MAX_OPENING_SQUARES * grid : false;
         session.result = result;
         session.segments = [];
         session.onWall = false;
@@ -391,7 +556,7 @@ class AutoWallManager {
         }
         console.info(`${MODULE.NAME}: auto-wall ${session.mode} run`, {
             seeds: session.seeds.map(seed => seed.map(Math.round)), count: result.count, capped: result.capped,
-            lengthSquares: result.length / image.scaleX / grid, tooLong: result.tooLong,
+            lengthSquares: result.length / image.scale / grid, tooLong: result.tooLong,
             segment: session.segments[0], wallEnds: this._wallEnds().length
         });
         this._drawPreview(session);
@@ -568,10 +733,10 @@ class AutoWallManager {
             }
             context.putImageData(tint, 0, 0);
             const sprite = new PIXI.Sprite(PIXI.Texture.from(surface));
+            // Through the picture's own transform, so a tile turned or flipped on the scene is covered as it is drawn.
+            const [a, b, c, d] = image.matrix;
             const [sx, sy] = this._toScene(image, [x, y]);
-            sprite.position.set(sx, sy);
-            sprite.width = width / image.scaleX;
-            sprite.height = height / image.scaleY;
+            sprite.transform.setFromMatrix(new PIXI.Matrix(a, b, c, d, sx, sy));
             this._container.addChild(sprite);
         }
 
@@ -640,6 +805,8 @@ class AutoWallManager {
         if (window !== this.window || !this.session) return;
         for (const name of Object.keys(LIMITS)) this._showValue(name);
         this._drawThumb(this.session);
+        this._showSource(this.session);
+        this._setDrawStatus(this._drawStatusText());
         if (this._status) this._setStatus(this._status.text, this._status.tone);
         if (this._cleanupStatus) this._setCleanupStatus(this._cleanupStatus);
     }
@@ -670,9 +837,17 @@ class AutoWallManager {
 
     setTab(tab) {
         const session = this.session;
-        if (!session || !['map', 'options'].includes(tab) || session.options.tab === tab) return;
+        if (!session || !['map', 'draw', 'options'].includes(tab) || session.options.tab === tab) return;
+        // What was found on the Map tab, and a chain begun on the Draw tab, are left behind.
+        this._drawEndChain({ quiet: true });
+        session.draw.active = false;
+        session.seeds = [];
+        session.result = null;
+        session.segments = [];
+        this._clearPreview();
         session.options.tab = tab;
         writeOptions(session.options);
+        this._syncCursor();
         void this.window?.render();
     }
 
@@ -810,29 +985,39 @@ class AutoWallManager {
     // ===== CLICKS AND KEYS ============================================
     // ==================================================================
 
+    /**
+     * Listen for the pointer ahead of Foundry. Foundry's event system (PIXI's) listens on the
+     * canvas, the document and the window, all in the capture phase and all before this tool exists,
+     * so a listener on the canvas runs after it and swallowing the event there hides nothing from
+     * it: a drag would still start Foundry's selection box. The window is the first place an event
+     * is seen on its way down, so this takes the pointer there, and only when the event is on the
+     * canvas, since the window sees everything -- the sidebar, the windows -- as well.
+     */
     _listen() {
-        const view = canvas?.app?.view;
-        if (!view || this._listening === view) return;
-        this._unlisten();
-        view.addEventListener('pointerdown', this._onPointerDown, true);
-        view.addEventListener('pointerup', this._onPointerUp, true);
-        view.addEventListener('pointermove', this._onPointerMove, true);
+        if (this._listening || !canvas?.app?.view) return;
+        window.addEventListener('pointerdown', this._onPointerDown, true);
+        window.addEventListener('pointerup', this._onPointerUp, true);
+        window.addEventListener('pointermove', this._onPointerMove, true);
         document.addEventListener('keydown', this._onKeyDown, true);
-        this._listening = view;
+        this._listening = true;
     }
 
     _unlisten() {
-        const view = this._listening;
-        if (view) {
-            view.removeEventListener('pointerdown', this._onPointerDown, true);
-            view.removeEventListener('pointerup', this._onPointerUp, true);
-            view.removeEventListener('pointermove', this._onPointerMove, true);
-        }
-        document.removeEventListener('pointermove', this._onDragMove, true);
-        document.removeEventListener('pointerup', this._onDragEnd, true);
+        window.removeEventListener('pointerdown', this._onPointerDown, true);
+        window.removeEventListener('pointerup', this._onPointerUp, true);
+        window.removeEventListener('pointermove', this._onPointerMove, true);
+        window.removeEventListener('pointermove', this._onDragMove, true);
+        window.removeEventListener('pointerup', this._onDragEnd, true);
+        window.removeEventListener('pointermove', this._onSketchMove, true);
+        window.removeEventListener('pointerup', this._onSketchEnd, true);
         this._drag = null;
         document.removeEventListener('keydown', this._onKeyDown, true);
-        this._listening = null;
+        this._listening = false;
+    }
+
+    /** Whether an event is on the map itself and not on something drawn over it. */
+    _onCanvas(event) {
+        return !event.target || event.target === canvas?.app?.view;
     }
 
     _scenePoint(event) {
@@ -864,6 +1049,10 @@ class AutoWallManager {
 
     /** Only the left button picks; the others still pan and open menus. */
     _onPointerDown(event) {
+        if (!this._onCanvas(event)) return;
+        if (this._drawing()) return this._drawDown(event);
+        // Only the Map tab reads the picture; on the others the canvas is Foundry's.
+        if (this.session?.options.tab !== 'map') return;
         if (event.button !== 0) return;
         this._swallow(event);
         const handle = this._handleAt(this._scenePoint(event));
@@ -871,8 +1060,8 @@ class AutoWallManager {
             // An end is taken hold of: it and every end that met it move together.
             this._press = null;
             this._drag = { at: handle, ends: this._wallEnds() };
-            document.addEventListener('pointermove', this._onDragMove, true);
-            document.addEventListener('pointerup', this._onDragEnd, true);
+            window.addEventListener('pointermove', this._onDragMove, true);
+            window.addEventListener('pointerup', this._onDragEnd, true);
             return;
         }
         this._press = { x: event.clientX, y: event.clientY };
@@ -880,7 +1069,9 @@ class AutoWallManager {
 
     /** Over an end, the cursor says it can be moved. */
     _onPointerMove(event) {
-        if (this._drag || !this.session?.image) return;
+        if (!this._onCanvas(event)) return;
+        if (this._drawing()) return this._drawMove(event);
+        if (this._drag || !this.session?.image || this.session.options.tab !== 'map') return;
         canvas.app.view.style.cursor = this._handleAt(this._scenePoint(event)) ? 'move' : 'crosshair';
     }
 
@@ -915,8 +1106,8 @@ class AutoWallManager {
 
     _onDragEnd(event) {
         this._swallow(event);
-        document.removeEventListener('pointermove', this._onDragMove, true);
-        document.removeEventListener('pointerup', this._onDragEnd, true);
+        window.removeEventListener('pointermove', this._onDragMove, true);
+        window.removeEventListener('pointerup', this._onDragEnd, true);
         const at = this._drag?.at;
         this._drag = null;
         const session = this.session;
@@ -934,6 +1125,13 @@ class AutoWallManager {
     }
 
     _onPointerUp(event) {
+        // Let go over something else: the press began on the map, but this is not a click on it.
+        if (!this._onCanvas(event)) {
+            this._press = null;
+            return;
+        }
+        if (this._drawing()) return this._drawUp(event);
+        if (this.session?.options.tab !== 'map') return;
         if (event.button !== 0) return;
         this._swallow(event);
         const press = this._press;
@@ -950,9 +1148,7 @@ class AutoWallManager {
             return;
         }
         // Shift adds to the wall being mapped; a plain click starts a new one.
-        if (event.shiftKey && session.seeds.length) session.seeds.push(point);
-        else session.seeds = [point];
-        this._schedule();
+        this._pick(point, event.shiftKey);
     }
 
     /** Whether a point is on one of the walls found, and so not a click on the map. */
@@ -981,6 +1177,7 @@ class AutoWallManager {
         if (!this.session || event.target?.closest?.('input, textarea, select, [contenteditable]')) return;
         // Enter on a focused button presses that button; it is not also Add.
         if (event.key === 'Enter' && event.target?.closest?.('button')) return;
+        if (this._drawing() && this._drawKey(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();
@@ -993,13 +1190,337 @@ class AutoWallManager {
     }
 
     // ==================================================================
+    // ===== DRAWING WALLS BY HAND ======================================
+    // ==================================================================
+    //
+    // The Draw tab: walls made as they are drawn, for the GM who would rather place
+    // them than have them found. Two ways -- click points, each joined to the last, or
+    // sketch a line freehand and have it made into walls -- and either can begin on a
+    // wall end that is already there, which Foundry's own tool makes awkward, since a
+    // drag from an end takes hold of that wall. Walls are written as they are drawn,
+    // and every chain or stroke carries the run that Undo takes back.
+
+    /** Whether drawing is on and the Draw tab is the one showing: the canvas is then ours. */
+    _drawing() {
+        const session = this.session;
+        return !!session && session.options.tab === 'draw' && session.draw.active;
+    }
+
+    /** The cursor over the map: a crosshair while it is being read or drawn on, Foundry's own otherwise. */
+    _syncCursor() {
+        if (!canvas?.app?.view) return;
+        const session = this.session;
+        const ours = !!session && (session.options.tab === 'map' || this._drawing());
+        canvas.app.view.style.cursor = ours ? 'crosshair' : '';
+    }
+
+    setDrawTool(tool) {
+        const session = this.session;
+        if (!session || !['point', 'sketch'].includes(tool) || session.options.drawTool === tool) return;
+        this._drawEndChain({ quiet: true });
+        session.options.drawTool = tool;
+        writeOptions(session.options);
+        void this.window?.render();
+    }
+
+    setDrawKind(kind) {
+        const session = this.session;
+        if (!session || !MODES.includes(kind) || session.options.drawKind === kind) return;
+        session.options.drawKind = kind;
+        writeOptions(session.options);
+        void this.window?.render();
+    }
+
+    /** Start or stop drawing. Off, the map is Foundry's again. */
+    toggleDraw() {
+        const session = this.session;
+        if (!session) return;
+        session.draw.active = !session.draw.active;
+        if (!session.draw.active) this._drawEndChain({ quiet: true });
+        this._syncCursor();
+        this._setDrawStatus(this._drawStatusText());
+        void this.window?.render();
+    }
+
+    /** Where a point lands: on the end of a wall near it, if joining is on, else on the grid if asked, else as it is. */
+    _drawTarget(point, shift = false) {
+        const options = this.session.options;
+        const grid = Number(canvas.scene.grid.size) || 100;
+        if (!shift && options.joinEnds) {
+            const end = this._nearestEnd(point, options.joinDistance * grid, this._wallEnds());
+            if (end) return { point: [...end], node: true };
+        }
+        if (!shift && options.snap) {
+            const target = canvas.grid.getSnappedPoint({ x: point[0], y: point[1] }, { mode: CONST.GRID_SNAPPING_MODES.VERTEX });
+            return { point: [Math.round(target.x), Math.round(target.y)], node: false };
+        }
+        return { point: [Math.round(point[0]), Math.round(point[1])], node: false };
+    }
+
+    /** What the Draw tab says is happening, and what a click will do. */
+    _drawStatusText() {
+        const session = this.session;
+        if (!session) return '';
+        const draw = session.draw;
+        if (!draw.active) return this._localize('drawOff');
+        if (session.options.drawTool === 'sketch') return this._localize('drawSketching');
+        if (!draw.last) return this._localize('drawFirst');
+        return this._localize('drawNext', { x: draw.last[0], y: draw.last[1] });
+    }
+
+    _setDrawStatus(text) {
+        const line = this._root()?.querySelector('[data-role="draw-status"]');
+        if (line) line.textContent = text;
+    }
+
+    // ---- placing points
+
+    _drawDown(event) {
+        // Right and middle buttons still pan and open menus.
+        if (event.button !== 0) return;
+        this._swallow(event);
+        const point = this._scenePoint(event);
+        if (!point) return;
+        if (this.session.options.drawTool === 'sketch') {
+            this._sketchStart(point);
+            return;
+        }
+        this._press = { x: event.clientX, y: event.clientY };
+    }
+
+    _drawUp(event) {
+        if (event.button !== 0) return;
+        this._swallow(event);
+        if (this.session.options.drawTool === 'sketch') return;
+        const press = this._press;
+        this._press = null;
+        if (!press || Math.hypot(event.clientX - press.x, event.clientY - press.y) > CLICK_PIXELS) return;
+        const point = this._scenePoint(event);
+        if (point) this._drawPoint(point, event.shiftKey);
+    }
+
+    /** A point placed: the first begins a chain; each after joins the last with a wall. */
+    _drawPoint(point, shift = false) {
+        const session = this.session;
+        const draw = session.draw;
+        const target = this._drawTarget(point, shift).point;
+        if (!draw.last) {
+            draw.last = target;
+            draw.start = target;
+            draw.run = Date.now();
+            draw.count = 0;
+            this._drawSync(target);
+            this._setDrawStatus(this._drawStatusText());
+            return;
+        }
+        const from = draw.last;
+        if (from[0] === target[0] && from[1] === target[1]) return;
+        // Back at the start with a shape of at least three sides: the shape is closed, and that ends the chain.
+        const closing = !!draw.start && draw.count >= 2 && target[0] === draw.start[0] && target[1] === draw.start[1];
+        draw.count++;
+        draw.last = target;
+        const run = draw.run;
+        draw.queue = draw.queue.then(() => this._createDrawn([[from, target]], run, { from, to: target })).then(() => {
+            if (closing) this._drawEndChain();
+        });
+        this._drawSync(target);
+        this._setDrawStatus(this._drawStatusText());
+    }
+
+    /** Write walls that have been drawn, as one thing to take back. */
+    async _createDrawn(segments, run, entry) {
+        const session = this.session;
+        if (!session) return;
+        const data = segments.map(([a, b]) => this._wallData(session, [a[0], a[1], b[0], b[1]], run, session.options.drawKind));
+        try {
+            const made = await canvas.scene.createEmbeddedDocuments('Wall', data, { [SKIP_JOIN]: true });
+            session.draw.history.push({ ids: (made ?? []).map(wall => wall.id), run, ...entry });
+            this._endsCache = null;
+        } catch (error) {
+            console.error(`${MODULE.NAME}: could not add the wall`, error);
+            ui.notifications.error(this._localize('failed'));
+        }
+    }
+
+    /** The chain is over: the next point begins another. What was drawn stays. */
+    _drawEndChain({ quiet = false } = {}) {
+        const draw = this.session?.draw;
+        if (!draw) return;
+        const had = !!draw.last || !!draw.points;
+        draw.last = null;
+        draw.start = null;
+        draw.run = null;
+        draw.count = 0;
+        draw.points = null;
+        window.removeEventListener('pointermove', this._onSketchMove, true);
+        window.removeEventListener('pointerup', this._onSketchEnd, true);
+        this._clearPreview();
+        if (had && !quiet) this._setDrawStatus(this._drawStatusText());
+    }
+
+    /** Take back the last wall, or stroke, and stand where it began. With nothing drawn, forget the point placed. */
+    async drawBack() {
+        const session = this.session;
+        if (!session) return;
+        const draw = session.draw;
+        // Behind anything still being written.
+        await draw.queue;
+        const entry = draw.history.pop();
+        if (!entry) {
+            this._drawEndChain();
+            return;
+        }
+        try {
+            const present = entry.ids.filter(id => canvas.scene.walls.has(id));
+            if (present.length) await canvas.scene.deleteEmbeddedDocuments('Wall', present);
+        } catch (error) {
+            console.error(`${MODULE.NAME}: could not take back the wall`, error);
+        }
+        this._endsCache = null;
+        draw.last = entry.from ?? null;
+        draw.start ??= entry.from ?? null;
+        draw.run = entry.run;
+        draw.count = Math.max(0, draw.count - 1);
+        this._drawSync(draw.last);
+        this._setDrawStatus(this._drawStatusText());
+    }
+
+    /** Enter ends the chain; Escape ends it, or turns drawing off when there is none; Backspace takes the last back. */
+    _drawKey(event) {
+        const draw = this.session.draw;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            if (draw.last || draw.points) this._drawEndChain();
+            else this.toggleDraw();
+            return true;
+        }
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            event.stopPropagation();
+            this._drawEndChain();
+            return true;
+        }
+        if (event.key === 'Backspace') {
+            event.preventDefault();
+            event.stopPropagation();
+            void this.drawBack();
+            return true;
+        }
+        return false;
+    }
+
+    // ---- sketching
+
+    _sketchStart(point) {
+        const draw = this.session.draw;
+        draw.points = [point];
+        window.addEventListener('pointermove', this._onSketchMove, true);
+        window.addEventListener('pointerup', this._onSketchEnd, true);
+        this._drawSync();
+    }
+
+    _onSketchMove(event) {
+        const draw = this.session?.draw;
+        if (!draw?.points) return;
+        this._swallow(event);
+        const point = this._scenePoint(event);
+        if (!point) return;
+        const last = draw.points[draw.points.length - 1];
+        // A point for every few pixels of the screen, not for every move of the pointer.
+        if (Math.hypot(point[0] - last[0], point[1] - last[1]) * (canvas.stage?.scale?.x || 1) < 3) return;
+        draw.points.push(point);
+        this._drawSync();
+    }
+
+    _onSketchEnd(event) {
+        this._swallow(event);
+        window.removeEventListener('pointermove', this._onSketchMove, true);
+        window.removeEventListener('pointerup', this._onSketchEnd, true);
+        const session = this.session;
+        if (!session) return;
+        const points = session.draw.points;
+        session.draw.points = null;
+        this._clearPreview();
+        if (points?.length > 1) this._finishSketch(points);
+    }
+
+    /** A line sketched: simplified to straight walls, its ends joined to wall ends that are near. */
+    _finishSketch(points) {
+        const session = this.session;
+        const grid = Number(canvas.scene.grid.size) || 100;
+        const { joinEnds, joinDistance, smoothing } = session.options;
+        const segments = sketchToSegments(points, {
+            epsilon: Math.max(2, smoothing * grid * 0.25),
+            closeDistance: joinDistance * grid * 1.5
+        });
+        if (!segments.length) return;
+        // The stroke is simplified first and its ends joined after, so that joining moves the end
+        // of a wall and does not drag the line it was drawn along off course.
+        if (joinEnds) {
+            segments[0][0] = this._drawTarget(segments[0][0]).point;
+            segments[segments.length - 1][1] = this._drawTarget(segments[segments.length - 1][1]).point;
+        }
+        const run = Date.now();
+        const draw = session.draw;
+        draw.queue = draw.queue.then(() => this._createDrawn(segments, run, { from: segments[0][0], to: segments[segments.length - 1][1] }));
+        this._setDrawStatus(this._localize('drawStroke', { count: segments.length }));
+    }
+
+    // ---- the picture while drawing
+
+    _drawMove(event) {
+        if (this.session.options.drawTool === 'sketch') return;
+        const point = this._scenePoint(event);
+        if (!point) return;
+        const target = this._drawTarget(point, event.shiftKey);
+        this._drawSync(target.point, target.node);
+    }
+
+    /** The last point, the line to where the next would go, a mark on a wall end it would join, and a stroke in progress. */
+    _drawSync(pointer = null, onNode = false) {
+        if (!this._layer()) return;
+        this._clearPreview();
+        const draw = this.session.draw;
+        const line = Math.max(3, (Number(canvas.scene.grid.size) || 100) * 0.06);
+        const graphics = new PIXI.Graphics();
+        const color = { wall: 0xe03a2e, door: 0x5b7bff, window: 0x6fd0ff }[this.session.options.drawKind] ?? 0xe03a2e;
+        if (draw.points?.length > 1) {
+            graphics.lineStyle({ width: line * 0.7, color: 0xffd23f, alpha: 0.9, cap: 'round', join: 'round' });
+            graphics.moveTo(draw.points[0][0], draw.points[0][1]);
+            for (const point of draw.points.slice(1)) graphics.lineTo(point[0], point[1]);
+        }
+        if (draw.last && pointer) {
+            graphics.lineStyle({ width: line, color, alpha: 0.6, cap: 'round' });
+            graphics.moveTo(draw.last[0], draw.last[1]).lineTo(pointer[0], pointer[1]);
+        }
+        graphics.lineStyle(0);
+        if (pointer && onNode) {
+            graphics.lineStyle({ width: 2, color: 0xffd23f, alpha: 1 });
+            graphics.drawCircle(pointer[0], pointer[1], line * 1.8);
+            graphics.lineStyle(0);
+        }
+        if (draw.start && draw.last && (draw.start[0] !== draw.last[0] || draw.start[1] !== draw.last[1])) {
+            graphics.lineStyle({ width: 2, color: 0x3fd16a, alpha: 0.9 });
+            graphics.drawCircle(draw.start[0], draw.start[1], line * 1.4);
+            graphics.lineStyle(0);
+        }
+        if (draw.last) {
+            graphics.beginFill(0x3fd16a, 1);
+            graphics.drawCircle(draw.last[0], draw.last[1], line * 1.1);
+            graphics.endFill();
+        }
+        this._graphics = this._container.addChild(graphics);
+    }
+
+    // ==================================================================
     // ===== WRITING AND TAKING BACK ====================================
     // ==================================================================
 
     /** The wall data for one segment, as Foundry's own wall tool would make it for this mode. */
-    _wallData(session, c, run) {
+    _wallData(session, c, run, mode = session.mode) {
         const sense = CONST.EDGE_SENSE_TYPES ?? CONST.WALL_SENSE_TYPES;
-        const { options, mode } = session;
+        const { options } = session;
         const data = { c, flags: { [MODULE.ID]: { [FLAG]: { run, kind: mode } } } };
         // On a scene with several levels a wall belongs to the level being looked at.
         if (canvas.scene.levels?.size > 1 && canvas.level?.id) data.levels = [canvas.level.id];

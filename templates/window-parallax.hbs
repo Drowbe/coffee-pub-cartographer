@@ -13,7 +13,7 @@
     <div class="cartographer-parallax-layer-header">
         <span class="cartographer-parallax-grip" draggable="true" data-drag-layer="{{id}}"
             data-tooltip="{{localize "coffee-pub-cartographer.parallax.dragToReorder"}}"><i class="fa-solid fa-grip-vertical"></i></span>
-        <button type="button" class="cartographer-parallax-button cartographer-parallax-collapse" data-action="toggle-collapse" data-layer-id="{{id}}"
+        <button type="button" class="blacksmith-tool-btn is-icon cartographer-parallax-collapse" data-action="toggle-collapse" data-layer-id="{{id}}"
             data-tooltip="{{localize (ifThen collapsed "coffee-pub-cartographer.parallax.expand" "coffee-pub-cartographer.parallax.collapse")}}"><i class="fa-solid {{#if collapsed}}fa-chevron-right{{else}}fa-chevron-down{{/if}}"></i></button>
         <button type="button" class="cartographer-parallax-thumb" data-action="replace-layer" data-layer-id="{{id}}"
             data-tooltip="{{localize "coffee-pub-cartographer.parallax.replaceImage"}}">
@@ -28,17 +28,17 @@
             {{/if}}
         </div>
         <div class="cartographer-parallax-layer-actions">
-            <button type="button" class="cartographer-parallax-button{{#if visible}} is-active{{/if}}" data-action="toggle-visible" data-layer-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon {{#if visible}} is-active{{/if}}" data-action="toggle-visible" data-layer-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleVisible"}}"><i class="fa-solid {{#if visible}}fa-eye{{else}}fa-eye-slash{{/if}}"></i></button>
-            <button type="button" class="cartographer-parallax-button" data-action="move-up" data-layer-id="{{id}}" {{#if isFirst}}disabled{{/if}}
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="move-up" data-layer-id="{{id}}" {{#if isFirst}}disabled{{/if}}
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.moveNearer"}}"><i class="fa-solid fa-chevron-up"></i></button>
-            <button type="button" class="cartographer-parallax-button" data-action="move-down" data-layer-id="{{id}}" {{#if isLast}}disabled{{/if}}
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="move-down" data-layer-id="{{id}}" {{#if isLast}}disabled{{/if}}
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.moveFarther"}}"><i class="fa-solid fa-chevron-down"></i></button>
-            <button type="button" class="cartographer-parallax-button" data-action="rename-layer" data-layer-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="rename-layer" data-layer-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.renameLayer"}}"><i class="fa-solid fa-pen"></i></button>
-            <button type="button" class="cartographer-parallax-button" data-action="duplicate-layer" data-layer-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="duplicate-layer" data-layer-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.duplicateLayer"}}"><i class="fa-solid fa-clone"></i></button>
-            <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-layer" data-layer-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon is-danger" data-action="remove-layer" data-layer-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.removeLayer"}}"><i class="fa-solid fa-trash-can"></i></button>
         </div>
     </div>
@@ -81,15 +81,19 @@
             <label><span>Y</span><input type="number" data-field="startY" data-layer-id="{{id}}" value="{{startY}}" step="1"></label>
         </div>
     </div>
-    {{! Two exclusive answers, so two buttons rather than a checkbox. The band's
+    {{! Two exclusive answers: Blacksmith's segmented control, each a native radio. The band's
         offset sits in the value column, where the sliders show their numbers. }}
     <div class="cartographer-parallax-field cartographer-parallax-repeat">
         <span class="cartographer-parallax-label" data-tooltip="{{localize "coffee-pub-cartographer.parallax.bandHint"}}">{{localize "coffee-pub-cartographer.parallax.repeat"}}</span>
-        <div class="cartographer-parallax-segmented" role="radiogroup">
-            <button type="button" class="cartographer-parallax-segment{{#unless band}} is-active{{/unless}}" data-action="set-band" data-layer-id="{{id}}" data-band="false"
-                role="radio" aria-checked="{{#if band}}false{{else}}true{{/if}}" data-tooltip="{{localize "coffee-pub-cartographer.parallax.tileHint"}}">{{localize "coffee-pub-cartographer.parallax.tile"}}</button>
-            <button type="button" class="cartographer-parallax-segment{{#if band}} is-active{{/if}}" data-action="set-band" data-layer-id="{{id}}" data-band="true"
-                role="radio" aria-checked="{{#if band}}true{{else}}false{{/if}}" data-tooltip="{{localize "coffee-pub-cartographer.parallax.bandHint"}}">{{localize "coffee-pub-cartographer.parallax.band"}}</button>
+        <div class="blacksmith-tool-segmented is-fill cartographer-parallax-repeat-choice" role="radiogroup" aria-label="{{localize "coffee-pub-cartographer.parallax.repeat"}}">
+            <label class="blacksmith-tool-segment" data-tooltip="{{localize "coffee-pub-cartographer.parallax.tileHint"}}">
+                <input type="radio" name="band-{{id}}" value="false" data-action="set-band" data-layer-id="{{id}}" data-band="false"{{#unless band}} checked{{/unless}}>
+                <span>{{localize "coffee-pub-cartographer.parallax.tile"}}</span>
+            </label>
+            <label class="blacksmith-tool-segment" data-tooltip="{{localize "coffee-pub-cartographer.parallax.bandHint"}}">
+                <input type="radio" name="band-{{id}}" value="true" data-action="set-band" data-layer-id="{{id}}" data-band="true"{{#if band}} checked{{/if}}>
+                <span>{{localize "coffee-pub-cartographer.parallax.band"}}</span>
+            </label>
         </div>
         {{#if band}}
         <input type="number" class="cartographer-parallax-band-offset" data-field="bandOffset" data-layer-id="{{id}}" value="{{bandOffset}}" step="1"
@@ -105,7 +109,7 @@
 <div class="cartographer-parallax-set-member{{#if offInSet}} is-off{{/if}}">
     <span class="cartographer-parallax-set-member-thumb">{{#if isVideo}}<i class="fa-solid fa-film"></i>{{else}}<img src="{{src}}" alt="">{{/if}}</span>
     <span class="cartographer-parallax-layer-name" data-tooltip="{{src}}">{{name}}</span>
-    <button type="button" class="cartographer-parallax-button{{#unless offInSet}} is-active{{/unless}}" data-action="toggle-set-layer" data-set-id="{{setId}}" data-layer-id="{{id}}"
+    <button type="button" class="blacksmith-tool-btn is-icon {{#unless offInSet}} is-active{{/unless}}" data-action="toggle-set-layer" data-set-id="{{setId}}" data-layer-id="{{id}}"
         data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleInSet"}}"><i class="fa-solid {{#if offInSet}}fa-eye-slash{{else}}fa-eye{{/if}}"></i></button>
 </div>
 {{/inline}}
@@ -121,7 +125,7 @@
 <div class="cartographer-parallax-set-member{{#if offInSet}} is-off{{/if}}">
     <span class="cartographer-parallax-set-member-thumb">{{#if isVideo}}<i class="fa-solid fa-film"></i>{{else}}<img src="{{src}}" alt="">{{/if}}</span>
     <span class="cartographer-parallax-layer-name" data-tooltip="{{src}}"><i class="fa-solid fa-arrows-spin cartographer-parallax-kind"></i> {{name}}</span>
-    <button type="button" class="cartographer-parallax-button{{#unless offInSet}} is-active{{/unless}}" data-action="toggle-set-tile" data-set-id="{{setId}}" data-tile-id="{{id}}"
+    <button type="button" class="blacksmith-tool-btn is-icon {{#unless offInSet}} is-active{{/unless}}" data-action="toggle-set-tile" data-set-id="{{setId}}" data-tile-id="{{id}}"
         data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleInSet"}}"><i class="fa-solid {{#if offInSet}}fa-eye-slash{{else}}fa-eye{{/if}}"></i></button>
 </div>
 {{/inline}}
@@ -137,13 +141,15 @@
 </label>
 {{/inline}}
 
-{{! An Off / On pair for one part of a tile's motion. The chosen side is disabled: choosing it again does nothing. }}
-{{! The one control for a setting that is simply on or off, everywhere in the window.
-    A choice between named options (Tile | Band) is a set of buttons instead. }}
+{{! The one control for a setting that is simply on or off, everywhere in the window:
+    Blacksmith's toggle, its checkbox carrying the action. A choice between named
+    options (Tile | Band) is the segmented control instead. }}
 {{#*inline "switch"}}
-<button type="button" class="cartographer-parallax-switch{{#if on}} is-on{{/if}}" role="switch" aria-checked="{{#if on}}true{{else}}false{{/if}}"
-    data-action="{{action}}"{{#if tileId}} data-tile-id="{{tileId}}"{{/if}}{{#if part}} data-part="{{part}}"{{/if}}{{#if setId}} data-set-id="{{setId}}"{{/if}}
-    {{#if tooltip}}data-tooltip="{{tooltip}}"{{/if}} {{#if disabled}}disabled{{/if}}><span class="cartographer-parallax-switch-knob"></span></button>
+<label class="blacksmith-toggle"{{#if tooltip}} data-tooltip="{{tooltip}}"{{/if}}>
+    <input type="checkbox" class="blacksmith-toggle-input" data-action="{{action}}"{{#if tileId}} data-tile-id="{{tileId}}"{{/if}}{{#if part}} data-part="{{part}}"{{/if}}{{#if setId}} data-set-id="{{setId}}"{{/if}}
+        {{#if label}}aria-label="{{label}}"{{/if}}{{#if on}} checked{{/if}}{{#if disabled}} disabled{{/if}}>
+    <span class="blacksmith-toggle-slider"></span>
+</label>
 {{/inline}}
 
 {{! A labelled row with a switch at its end. }}
@@ -158,7 +164,7 @@
 {{#*inline "tileRow"}}
 <div class="cartographer-parallax-layer{{#unless visible}} is-hidden{{/unless}}{{#if collapsed}} is-collapsed{{/if}}{{#if selected}} is-selected{{/if}}">
     <div class="cartographer-parallax-layer-header">
-        <button type="button" class="cartographer-parallax-button cartographer-parallax-collapse" data-action="toggle-tile-collapse" data-tile-id="{{id}}"
+        <button type="button" class="blacksmith-tool-btn is-icon cartographer-parallax-collapse" data-action="toggle-tile-collapse" data-tile-id="{{id}}"
             data-tooltip="{{localize (ifThen collapsed "coffee-pub-cartographer.parallax.expand" "coffee-pub-cartographer.parallax.collapse")}}"><i class="fa-solid {{#if collapsed}}fa-chevron-right{{else}}fa-chevron-down{{/if}}"></i></button>
         <button type="button" class="cartographer-parallax-thumb" data-action="select-tile" data-tile-id="{{id}}"
             data-tooltip="{{localize "coffee-pub-cartographer.parallax.selectTile"}}">
@@ -169,9 +175,9 @@
             {{#if collapsed}}<span class="cartographer-parallax-layer-summary">{{summary}}</span>{{/if}}
         </div>
         <div class="cartographer-parallax-layer-actions">
-            <button type="button" class="cartographer-parallax-button{{#if visible}} is-active{{/if}}" data-action="toggle-tile-visible" data-tile-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon {{#if visible}} is-active{{/if}}" data-action="toggle-tile-visible" data-tile-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.toggleTileVisible"}}"><i class="fa-solid {{#if visible}}fa-eye{{else}}fa-eye-slash{{/if}}"></i></button>
-            <button type="button" class="cartographer-parallax-button is-danger" data-action="clear-tile-motion" data-tile-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon is-danger" data-action="clear-tile-motion" data-tile-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.clearTileMotion"}}"><i class="fa-solid fa-trash-can"></i></button>
         </div>
     </div>
@@ -218,13 +224,13 @@
     <p class="cartographer-parallax-hint">{{groupsHint}}</p>
     <div class="cartographer-parallax-set-list">
         <div class="cartographer-parallax-set-row is-common{{#if allActive}} is-active{{/if}}">
-            <button type="button" class="cartographer-parallax-button{{#if allActive}} is-active{{/if}}" data-action="select-set" data-set-id=""
+            <button type="button" class="blacksmith-tool-btn is-icon {{#if allActive}} is-active{{/if}}" data-action="select-set" data-set-id=""
                 data-tooltip="{{allHint}}"><i class="fa-solid {{#if allActive}}fa-circle-dot{{else}}fa-circle{{/if}}"></i></button>
             <span class="cartographer-parallax-set-name">{{allLabel}}</span>
             <span class="cartographer-parallax-set-count">{{itemTotal}}</span>
         </div>
         <div class="cartographer-parallax-set-row is-common{{#if noneActive}} is-active{{/if}}">
-            <button type="button" class="cartographer-parallax-button{{#if noneActive}} is-active{{/if}}" data-action="select-set" data-set-id="{{noneId}}"
+            <button type="button" class="blacksmith-tool-btn is-icon {{#if noneActive}} is-active{{/if}}" data-action="select-set" data-set-id="{{noneId}}"
                 data-tooltip="{{noneHint}}"><i class="fa-solid {{#if noneActive}}fa-circle-dot{{else}}fa-circle{{/if}}"></i></button>
             <span class="cartographer-parallax-set-name">{{noneLabel}}</span>
             <span class="cartographer-parallax-set-count">0</span>
@@ -232,16 +238,16 @@
         {{#each sets}}
         <div class="cartographer-parallax-set{{#if active}} is-active{{/if}}{{#if expanded}} is-expanded{{/if}}">
             <div class="cartographer-parallax-set-row{{#if active}} is-active{{/if}}">
-                <button type="button" class="cartographer-parallax-button cartographer-parallax-collapse" data-action="toggle-set-expand" data-set-id="{{id}}"
+                <button type="button" class="blacksmith-tool-btn is-icon cartographer-parallax-collapse" data-action="toggle-set-expand" data-set-id="{{id}}"
                     data-tooltip="{{localize (ifThen expanded "coffee-pub-cartographer.parallax.collapse" "coffee-pub-cartographer.parallax.expand")}}"><i class="fa-solid {{#if expanded}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i></button>
                 {{> switch action="toggle-group" setId=id on=active tooltip=(localize "coffee-pub-cartographer.parallax.toggleGroup")}}
                 <span class="cartographer-parallax-set-name">{{name}}</span>
                 <span class="cartographer-parallax-set-count">{{itemCount}}</span>
-                <button type="button" class="cartographer-parallax-button" data-action="edit-set" data-set-id="{{id}}"
+                <button type="button" class="blacksmith-tool-btn is-icon" data-action="edit-set" data-set-id="{{id}}"
                     data-tooltip="{{localize "coffee-pub-cartographer.parallax.editSet"}}"><i class="fa-solid fa-pen"></i></button>
-                <button type="button" class="cartographer-parallax-button" data-action="duplicate-set" data-set-id="{{id}}"
+                <button type="button" class="blacksmith-tool-btn is-icon" data-action="duplicate-set" data-set-id="{{id}}"
                     data-tooltip="{{localize "coffee-pub-cartographer.parallax.duplicateSet"}}"><i class="fa-solid fa-clone"></i></button>
-                <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-set" data-set-id="{{id}}"
+                <button type="button" class="blacksmith-tool-btn is-icon is-danger" data-action="remove-set" data-set-id="{{id}}"
                     data-tooltip="{{localize "coffee-pub-cartographer.parallax.removeSet"}}"><i class="fa-solid fa-trash-can"></i></button>
             </div>
             {{#if expanded}}
@@ -259,7 +265,7 @@
         {{/each}}
     </div>
     <div class="cartographer-parallax-panel-actions">
-        <button type="button" class="cartographer-parallax-button is-labelled" data-action="add-set"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.addSet"}}</span></button>
+        <button type="button" class="blacksmith-tool-btn" data-action="add-set"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.addSet"}}</span></button>
     </div>
 </div>
 {{/inline}}
@@ -312,17 +318,17 @@
     <div class="cartographer-parallax-set-list">
         {{#each collections.collections}}
         <div class="cartographer-parallax-set-row{{#if current}} is-active{{/if}}">
-            <button type="button" class="cartographer-parallax-button{{#if current}} is-active{{/if}}" data-action="apply-collection" data-collection-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon {{#if current}} is-active{{/if}}" data-action="apply-collection" data-collection-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.applyCollection"}}"><i class="fa-solid {{#if current}}fa-circle-dot{{else}}fa-circle{{/if}}"></i></button>
             <div class="cartographer-parallax-layer-title">
                 <span class="cartographer-parallax-set-name">{{name}}</span>
                 <span class="cartographer-parallax-layer-summary">{{summary}}</span>
             </div>
-            <button type="button" class="cartographer-parallax-button" data-action="edit-collection" data-collection-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="edit-collection" data-collection-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.editCollection"}}"><i class="fa-solid fa-pen"></i></button>
-            <button type="button" class="cartographer-parallax-button" data-action="duplicate-collection" data-collection-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="duplicate-collection" data-collection-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.duplicateCollection"}}"><i class="fa-solid fa-clone"></i></button>
-            <button type="button" class="cartographer-parallax-button is-danger" data-action="remove-collection" data-collection-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon is-danger" data-action="remove-collection" data-collection-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.removeCollection"}}"><i class="fa-solid fa-trash-can"></i></button>
         </div>
         {{/each}}
@@ -331,7 +337,7 @@
     <div class="cartographer-parallax-hint">{{localize "coffee-pub-cartographer.parallax.noCollections"}}</div>
     {{/if}}
     <div class="cartographer-parallax-panel-actions">
-        <button type="button" class="cartographer-parallax-button is-labelled" data-action="add-collection"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.addCollection"}}</span></button>
+        <button type="button" class="blacksmith-tool-btn" data-action="add-collection"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.addCollection"}}</span></button>
     </div>
 </div>
 {{/inline}}
@@ -347,10 +353,10 @@
     {{else}}
 
     {{! The settings, as tabs. Running the scene is the control bar's job. }}
-    <nav class="cartographer-parallax-tabs" role="tablist">
+    <nav class="blacksmith-tool-tabs is-fill" role="tablist">
         {{#each tabs}}
-        <button type="button" role="tab" class="cartographer-parallax-tab{{#if active}} is-active{{/if}}" data-action="set-tab" data-tab="{{id}}" aria-selected="{{active}}">
-            <i class="{{icon}}"></i><span>{{label}}</span>{{#if count}}<span class="cartographer-parallax-tab-count">{{count}}</span>{{/if}}
+        <button type="button" role="tab" class="blacksmith-tool-tab{{#if active}} is-active{{/if}}" data-action="set-tab" data-tab="{{id}}" aria-selected="{{active}}">
+            <i class="{{icon}}"></i><span>{{label}}</span>{{#if count}}<span class="blacksmith-tool-tab-count">{{count}}</span>{{/if}}
         </button>
         {{/each}}
     </nav>
@@ -366,7 +372,7 @@
             <span class="cartographer-parallax-value">{{tiles.motion.easeSeconds}}s</span>
         </label>
         <div class="cartographer-parallax-panel-actions">
-            <button type="button" class="cartographer-parallax-button is-labelled" data-action="reset-tile-positions"
+            <button type="button" class="blacksmith-tool-btn" data-action="reset-tile-positions"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.resetTilesHint"}}"><i class="fa-solid fa-rotate-left"></i><span>{{localize "coffee-pub-cartographer.parallax.resetPositions"}}</span></button>
         </div>
     </div>
@@ -390,7 +396,7 @@
         {{/if}}
         {{#if tiles.hasManaged}}
         <div class="cartographer-parallax-panel-actions">
-            <button type="button" class="cartographer-parallax-button" data-action="{{#if tiles.allCollapsed}}expand-all-tiles{{else}}collapse-all-tiles{{/if}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="{{#if tiles.allCollapsed}}expand-all-tiles{{else}}collapse-all-tiles{{/if}}"
                 data-tooltip="{{localize (ifThen tiles.allCollapsed "coffee-pub-cartographer.parallax.expandAll" "coffee-pub-cartographer.parallax.collapseAll")}}"><i class="fa-solid {{#if tiles.allCollapsed}}fa-angles-down{{else}}fa-angles-up{{/if}}"></i></button>
         </div>
         {{/if}}
@@ -406,7 +412,7 @@
                 <span class="cartographer-parallax-label"><i class="fa-solid fa-compass"></i> {{localize "coffee-pub-cartographer.parallax.direction"}}</span>
                 <div class="cartographer-parallax-preset-buttons">
                     {{#each directions}}
-                    <button type="button" class="cartographer-parallax-button{{#if active}} is-active{{/if}}" data-action="set-direction" data-direction="{{id}}"
+                    <button type="button" class="blacksmith-tool-btn is-icon {{#if active}} is-active{{/if}}" data-action="set-direction" data-direction="{{id}}"
                         data-tooltip="{{label}}" aria-label="{{label}}"><i class="{{icon}}"></i></button>
                     {{/each}}
                 </div>
@@ -426,7 +432,7 @@
         </div>
 
         <div class="cartographer-parallax-panel-actions">
-            <button type="button" class="cartographer-parallax-button is-labelled" data-action="reset-positions"
+            <button type="button" class="blacksmith-tool-btn" data-action="reset-positions"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.resetPositionsHint"}}"><i class="fa-solid fa-rotate-left"></i><span>{{localize "coffee-pub-cartographer.parallax.resetPositions"}}</span></button>
         </div>
 
@@ -521,7 +527,7 @@
                 {{#if travel.routeLinked}}
                 <span class="cartographer-parallax-travel-inline">
                     <span>{{travel.routeText}}</span>
-                    <button type="button" class="cartographer-parallax-button" data-action="travel-unlink-route"
+                    <button type="button" class="blacksmith-tool-btn is-icon" data-action="travel-unlink-route"
                         data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelUnlinkRoute"}}"><i class="fa-solid fa-link-slash"></i></button>
                 </span>
                 {{else}}
@@ -532,7 +538,7 @@
                         {{#each travel.unitOptions}}<option value="{{unit}}" {{#if selected}}selected{{/if}}>{{unit}}</option>{{/each}}
                     </select>
                     {{#if travel.hasDestination}}
-                    <button type="button" class="cartographer-parallax-button" data-action="travel-clear-destination"
+                    <button type="button" class="blacksmith-tool-btn is-icon" data-action="travel-clear-destination"
                         data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelClearDestination"}}"><i class="fa-solid fa-xmark"></i></button>
                     {{/if}}
                 </span>
@@ -543,7 +549,7 @@
             {{/if}}
         </div>
         <div class="cartographer-parallax-panel-actions">
-            <button type="button" class="cartographer-parallax-button is-labelled" data-action="travel-reset"
+            <button type="button" class="blacksmith-tool-btn" data-action="travel-reset"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.travelResetHint"}}"><i class="fa-solid fa-gauge"></i><span>{{localize "coffee-pub-cartographer.parallax.travelReset"}}</span></button>
         </div>
     </div>
@@ -568,16 +574,16 @@
         {{/if}}
         <div class="cartographer-parallax-panel-actions">
             {{#if hasLayers}}
-            <button type="button" class="cartographer-parallax-button" data-action="{{#if allCollapsed}}expand-all{{else}}collapse-all{{/if}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="{{#if allCollapsed}}expand-all{{else}}collapse-all{{/if}}"
                 data-tooltip="{{localize (ifThen allCollapsed "coffee-pub-cartographer.parallax.expandAll" "coffee-pub-cartographer.parallax.collapseAll")}}"><i class="fa-solid {{#if allCollapsed}}fa-angles-down{{else}}fa-angles-up{{/if}}"></i></button>
             {{/if}}
-            <button type="button" class="cartographer-parallax-button" data-action="copy-from-scene"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="copy-from-scene"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.copyFromScene"}}"><i class="fa-solid fa-copy"></i></button>
-            <button type="button" class="cartographer-parallax-button" data-action="export-parallax"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="export-parallax"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.exportParallax"}}"><i class="fa-solid fa-file-export"></i></button>
-            <button type="button" class="cartographer-parallax-button" data-action="import-parallax"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="import-parallax"
                 data-tooltip="{{localize "coffee-pub-cartographer.parallax.importParallax"}}"><i class="fa-solid fa-file-import"></i></button>
-            <button type="button" class="cartographer-parallax-button is-labelled" data-action="add-layer"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.addLayer"}}</span></button>
+            <button type="button" class="blacksmith-tool-btn" data-action="add-layer"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.parallax.addLayer"}}</span></button>
         </div>
     </div>
     {{/if}}

@@ -67,6 +67,16 @@ as `ShiftLeft` or `ShiftRight` in `game.keyboard.downKeys`; and that undo with C
 back. Touches `scripts/manager-walljoin.js`. Verified by dragging a joint, a loose end and a new wall
 on a real scene, and undoing each.
 
+**Walk walls on tiles, the Draw tab and the Walls-controls button in a running world.** All three are
+checked in node against stand-ins. Tiles rest on an assumption read from Foundry's source and not yet
+seen: that a tile's picture sits on `tile.mesh` as a sprite does, anchored, then carried by the mesh's
+world transform, with `texture.orig` as its size. Unconfirmed on a tile with a fit other than fill, one
+turned, one flipped, and one whose picture has transparent edges. The button needs `getSceneControlButtons`
+to hand over `controls.walls.tools`, and to show it for the GM only. Drawing needs the canvas events to
+reach the tool in the capture phase ahead of Foundry's, as Ctrl-click does. Touches
+`scripts/manager-autowall.js`, `scripts/window-autowall.js`. Verified by a wall found on a turned tile, a
+chain begun on an existing end, a sketch, and the button, on a real scene.
+
 **Find out why a found wall sometimes shows nothing with Snap to grid corners on.** One run found the
 tower's arc, drew the cyan area, and reported nothing to add, with snapping on; the same click traced
 one segment on the author's screenshot in node. The message now says the wall was lost to snapping or

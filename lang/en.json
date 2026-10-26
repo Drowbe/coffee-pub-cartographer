@@ -682,7 +682,24 @@
 		"autowall.settingsTitle": "Settings",
 		"autowall.joining": "Joining",
 		"autowall.cleanupTitle": "Clean up",
-		"walls.splitDone": "Wall cut in two."
+		"walls.splitDone": "Wall cut in two.",
+		"autowall.sourceBackground": "Reading the scene background.",
+		"autowall.sourceTile": "Reading the tile {name}.",
+		"autowall.tabDraw": "Draw",
+		"autowall.drawHow": "How you draw",
+		"autowall.drawWhat": "What you draw",
+		"autowall.drawTitle": "Draw",
+		"autowall.drawPoint": "Points",
+		"autowall.drawSketch": "Sketch",
+		"autowall.drawStart": "Start drawing",
+		"autowall.drawStop": "Stop drawing",
+		"autowall.drawUndo": "Undo last",
+		"autowall.drawUndoHint": "Take back the last wall drawn, and stand where it began (Backspace).",
+		"autowall.drawOff": "Drawing is off, and the map is Foundry's. Press Start drawing, then click the map.",
+		"autowall.drawFirst": "Click to place the first point. Click the end of a wall that is already there to carry on from it.",
+		"autowall.drawNext": "Last point {x}, {y}. Click to add a wall to it, or click the start to close the shape. Enter or Esc ends this chain; Backspace takes back the last wall; Shift places a point freely.",
+		"autowall.drawSketching": "Drag to draw a line freehand. When you let go it becomes straight walls, joined to wall ends it starts or ends at. Smoothing sets how plain they are.",
+		"autowall.drawStroke": "Drew {count} walls."
 	}
 }
 

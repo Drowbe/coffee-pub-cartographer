@@ -169,7 +169,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
         const safe = foundry.utils.escapeHTML(label ?? '');
         const caption = text ? `<span>${foundry.utils.escapeHTML(text)}</span>` : '';
         const data = Object.entries(dataset).map(([name, value]) => ` data-${name}="${foundry.utils.escapeHTML(String(value))}"`).join('');
-        return `<button type="button" class="cartographer-parallax-button ${className}${text ? ' is-labelled' : ''}" data-action="${action}" data-tooltip="${safe}" aria-label="${safe}"${data}${disabled ? ' disabled' : ''}><i class="${icon}"></i>${caption}</button>`;
+        return `<button type="button" class="blacksmith-tool-btn${text ? '' : ' is-icon'} ${className}" data-action="${action}" data-tooltip="${safe}" aria-label="${safe}"${data}${disabled ? ' disabled' : ''}><i class="${icon}"></i>${caption}</button>`;
     }
 
     _buildBar(localize) {

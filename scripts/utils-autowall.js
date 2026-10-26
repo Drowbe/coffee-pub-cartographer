@@ -1224,3 +1224,72 @@ export function snapNewWall(walls, c, reach) {
     }
     return result;
 }
+
+// ------------------------------------------------------------------
+// Where a picture is on the scene
+// ------------------------------------------------------------------
+
+/**
+ * A picture's place on the scene as an affine map: scene = [a c; b d] x image + [tx, ty].
+ * It carries a scale, rotation and flip alike, which is what a tile can have, and the
+ * scene background is the simple case of it.
+ *
+ * @param {number[]} matrix  [a, b, c, d, tx, ty], as PIXI.Matrix has them.
+ * @returns {{ matrix: number[], toScene: (p: number[]) => number[], toImage: (p: number[]) => number[], scale: number }}
+ *   scale is how many of the picture's pixels there are to a scene pixel.
+ */
+export function imageTransform(matrix) {
+    const [a, b, c, d, tx, ty] = matrix;
+    const determinant = a * d - b * c;
+    return {
+        matrix: [...matrix],
+        toScene: ([x, y]) => [a * x + c * y + tx, b * x + d * y + ty],
+        toImage: ([x, y]) => [(d * (x - tx) - c * (y - ty)) / determinant, (-b * (x - tx) + a * (y - ty)) / determinant],
+        scale: 1 / Math.sqrt(Math.abs(determinant))
+    };
+}
+
+/**
+ * The same, from where three corners of the picture land on the scene: its origin, the end of
+ * its top edge (width pixels along) and the end of its left edge (height pixels down).
+ */
+export function transformFromCorners(origin, xEnd, yEnd, width, height) {
+    return imageTransform([
+        (xEnd[0] - origin[0]) / width, (xEnd[1] - origin[1]) / width,
+        (yEnd[0] - origin[0]) / height, (yEnd[1] - origin[1]) / height,
+        origin[0], origin[1]
+    ]);
+}
+
+// ------------------------------------------------------------------
+// Drawing by hand
+// ------------------------------------------------------------------
+
+/**
+ * A line drawn freehand, as walls: the points are simplified to straight pieces within a
+ * tolerance, and if the line ends near where it began it is closed into a ring. Pieces of no
+ * length are dropped.
+ *
+ * @param {number[][]} points  The points the pointer passed through, [[x, y], ...].
+ * @param {{ epsilon?: number, closeDistance?: number }} [options]
+ *   epsilon: how far, in pixels, the walls may stray from the line. closeDistance: how near the end
+ *   must come to the start to close the ring, in pixels, 0 for never.
+ * @returns {number[][][]}  [[[x, y], [x, y]], ...], in whole pixels, one after another.
+ */
+export function sketchToSegments(points, { epsilon = 3, closeDistance = 0 } = {}) {
+    if (!Array.isArray(points) || points.length < 2) return [];
+    const path = points.map(point => [point[0], point[1]]);
+    const first = path[0];
+    const last = path[path.length - 1];
+    if (closeDistance > 0 && path.length > 2 && Math.hypot(first[0] - last[0], first[1] - last[1]) <= closeDistance) {
+        path[path.length - 1] = [first[0], first[1]];
+    }
+    const simple = simplify(path, epsilon);
+    const segments = [];
+    for (let i = 0; i < simple.length - 1; i++) {
+        const a = [Math.round(simple[i][0]), Math.round(simple[i][1])];
+        const b = [Math.round(simple[i + 1][0]), Math.round(simple[i + 1][1])];
+        if (a[0] !== b[0] || a[1] !== b[1]) segments.push([a, b]);
+    }
+    return segments;
+}

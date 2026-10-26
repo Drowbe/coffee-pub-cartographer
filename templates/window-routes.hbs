@@ -2,7 +2,7 @@
 
 {{! The chevron that opens a card, first in its title row as on the scene-motion window's cards. }}
 {{#*inline "expander"}}
-<button type="button" class="cartographer-parallax-button cartographer-parallax-collapse" data-action="path-expand"
+<button type="button" class="blacksmith-tool-btn is-icon cartographer-parallax-collapse" data-action="path-expand"
     {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}
     data-tooltip="{{#if expanded}}{{localize "coffee-pub-cartographer.parallax.collapse"}}{{else}}{{localize "coffee-pub-cartographer.parallax.expand"}}{{/if}}"><i class="fa-solid {{#if expanded}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i></button>
 {{/inline}}
@@ -16,7 +16,7 @@
         <select data-field="pathPace" {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}>
             {{#each controls.paces}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
         </select>
-        <button type="button" class="cartographer-parallax-button" data-action="path-reset" {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}
+        <button type="button" class="blacksmith-tool-btn is-icon" data-action="path-reset" {{#if (eq kind "journeyId")}}data-journey-id="{{id}}"{{else}}data-route-id="{{id}}"{{/if}}
             data-tooltip="{{localize "coffee-pub-cartographer.routes.resetJourney"}}"><i class="fa-solid fa-backward-fast"></i></button>
     </span>
 </div>
@@ -30,10 +30,10 @@
 </p>
 {{/inline}}
 
-<nav class="cartographer-parallax-tabs" role="tablist">
+<nav class="blacksmith-tool-tabs is-fill" role="tablist">
     {{#each tabs}}
-    <button type="button" role="tab" class="cartographer-parallax-tab{{#if active}} is-active{{/if}}" data-action="routes-tab" data-tab="{{id}}" aria-selected="{{active}}">
-        <i class="{{icon}}"></i><span>{{label}}</span>{{#if count}}<span class="cartographer-parallax-tab-count">{{count}}</span>{{/if}}
+    <button type="button" role="tab" class="blacksmith-tool-tab{{#if active}} is-active{{/if}}" data-action="routes-tab" data-tab="{{id}}" aria-selected="{{active}}">
+        <i class="{{icon}}"></i><span>{{label}}</span>{{#if count}}<span class="blacksmith-tool-tab-count">{{count}}</span>{{/if}}
     </button>
     {{/each}}
 </nav>
@@ -75,8 +75,10 @@
         <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.parallax.travelFollowClock"}}</span>
         <div class="cartographer-parallax-measure cartographer-routes-marker" data-tooltip="{{localize "coffee-pub-cartographer.routes.followClockHint"}}">
             {{#if canPlan}}
-            <button type="button" class="cartographer-parallax-switch{{#if followClock}} is-on{{/if}}" role="switch" aria-checked="{{#if followClock}}true{{else}}false{{/if}}"
-                data-action="map-clock"><span class="cartographer-parallax-switch-knob"></span></button>
+            <label class="blacksmith-toggle">
+                <input type="checkbox" class="blacksmith-toggle-input" data-action="map-clock"{{#if followClock}} checked{{/if}}>
+                <span class="blacksmith-toggle-slider"></span>
+            </label>
             {{/if}}
             <span>{{#if followClock}}{{localize "coffee-pub-cartographer.routes.clockOn"}}{{else}}{{localize "coffee-pub-cartographer.routes.clockOff"}}{{/if}}</span>
         </div>
@@ -85,16 +87,18 @@
         <span class="cartographer-parallax-label">{{localize "coffee-pub-cartographer.routes.partyMarkerLabel"}}</span>
         <div class="cartographer-parallax-measure cartographer-routes-marker">
             {{#if marker.removed}}
-            <button type="button" class="cartographer-parallax-button is-labelled" data-action="marker-add" {{#unless marker.canAdd}}disabled{{/unless}}
+            <button type="button" class="blacksmith-tool-btn" data-action="marker-add" {{#unless marker.canAdd}}disabled{{/unless}}
                 data-tooltip="{{#if marker.canAdd}}{{localize "coffee-pub-cartographer.routes.markerAddHint"}}{{else}}{{localize "coffee-pub-cartographer.routes.markerNothingToFollow"}}{{/if}}"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.routes.markerAdd"}}</span></button>
             <span>{{localize "coffee-pub-cartographer.routes.markerRemoved"}}</span>
             {{else}}
             {{#if marker.exists}}
-            <button type="button" class="cartographer-parallax-switch{{#if marker.shown}} is-on{{/if}}" role="switch" aria-checked="{{#if marker.shown}}true{{else}}false{{/if}}"
-                data-action="marker-shown" data-tooltip="{{localize "coffee-pub-cartographer.routes.markerShownHint"}}"><span class="cartographer-parallax-switch-knob"></span></button>
+            <label class="blacksmith-toggle" data-tooltip="{{localize "coffee-pub-cartographer.routes.markerShownHint"}}">
+                <input type="checkbox" class="blacksmith-toggle-input" data-action="marker-shown"{{#if marker.shown}} checked{{/if}}>
+                <span class="blacksmith-toggle-slider"></span>
+            </label>
             <span>{{localize "coffee-pub-cartographer.routes.markerToPlayers"}}</span>
             {{/if}}
-            <button type="button" class="cartographer-parallax-button is-labelled" data-action="marker-configure" {{#unless marker.canConfigure}}disabled{{/unless}}
+            <button type="button" class="blacksmith-tool-btn" data-action="marker-configure" {{#unless marker.canConfigure}}disabled{{/unless}}
                 data-tooltip="{{#if marker.canConfigure}}{{localize "coffee-pub-cartographer.routes.markerConfigureHint"}}{{else}}{{localize "coffee-pub-cartographer.routes.markerNothingToFollow"}}{{/if}}"><i class="fa-solid fa-palette"></i><span>{{localize "coffee-pub-cartographer.routes.markerConfigure"}}</span></button>
             {{/if}}
         </div>
@@ -109,10 +113,10 @@
     {{/if}}
     <div class="cartographer-parallax-panel-actions">
         {{#if partyOffRoute}}
-        <button type="button" class="cartographer-parallax-button is-labelled" data-action="route-draw-from-party"
+        <button type="button" class="blacksmith-tool-btn" data-action="route-draw-from-party"
             data-tooltip="{{localize "coffee-pub-cartographer.routes.drawFromPartyHint"}}"><i class="fa-solid fa-person-walking-arrow-right"></i><span>{{localize "coffee-pub-cartographer.routes.drawFromParty"}}</span></button>
         {{/if}}
-        <button type="button" class="cartographer-parallax-button is-labelled{{#if drawing}} is-active{{/if}}" data-action="route-draw"
+        <button type="button" class="blacksmith-tool-btn {{#if drawing}} is-active{{/if}}" data-action="route-draw"
             data-tooltip="{{localize "coffee-pub-cartographer.routes.drawHint"}}"><i class="fa-solid {{#if drawing}}fa-check{{else}}fa-route{{/if}}"></i><span>{{#if drawing}}{{localize "coffee-pub-cartographer.routes.finishDrawing"}}{{else}}{{localize "coffee-pub-cartographer.routes.draw"}}{{/if}}</span></button>
     </div>
     {{#each routes}}
@@ -127,16 +131,16 @@
             {{/if}}
             <span class="cartographer-routes-name">{{name}}{{#if maker}} <span class="cartographer-routes-maker">{{maker}}</span>{{/if}}</span>
             <strong class="cartographer-routes-length">{{length}}</strong>
-            <button type="button" class="cartographer-parallax-button" data-action="route-focus" data-route-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="route-focus" data-route-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.focus"}}"><i class="fa-solid fa-crosshairs"></i></button>
             {{#if canEdit}}
-            <button type="button" class="cartographer-parallax-button" data-action="route-hide" data-route-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="route-hide" data-route-id="{{id}}"
                 data-tooltip="{{#if hidden}}{{localize "coffee-pub-cartographer.routes.showRoute"}}{{else}}{{localize "coffee-pub-cartographer.routes.hideRoute"}}{{/if}}"><i class="fa-solid {{#if hidden}}fa-eye-slash{{else}}fa-eye{{/if}}"></i></button>
-            <button type="button" class="cartographer-parallax-button{{#if editing}} is-active{{/if}}" data-action="route-edit" data-route-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon {{#if editing}} is-active{{/if}}" data-action="route-edit" data-route-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.editWaypoints"}}"><i class="fa-solid fa-bezier-curve"></i></button>
-            <button type="button" class="cartographer-parallax-button" data-action="route-rename" data-route-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="route-rename" data-route-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.rename"}}"><i class="fa-solid fa-pen"></i></button>
-            <button type="button" class="cartographer-parallax-button is-danger" data-action="route-remove" data-route-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon is-danger" data-action="route-remove" data-route-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.remove"}}"><i class="fa-solid fa-trash"></i></button>
             {{/if}}
         </div>
@@ -183,7 +187,7 @@
     {{#if isJourneys}}
     {{! Journeys: routes in order, joined end to end. }}
     <div class="cartographer-parallax-panel-actions">
-        <button type="button" class="cartographer-parallax-button is-labelled" data-action="journey-new"
+        <button type="button" class="blacksmith-tool-btn" data-action="journey-new"
             data-tooltip="{{localize "coffee-pub-cartographer.routes.journeyHint"}}"><i class="fa-solid fa-plus"></i><span>{{localize "coffee-pub-cartographer.routes.newJourney"}}</span></button>
     </div>
     {{#each journeys}}
@@ -193,12 +197,12 @@
             <i class="fa-solid fa-map-signs"></i>
             <span class="cartographer-routes-name">{{name}}</span>
             <strong class="cartographer-routes-length">{{length}}</strong>
-            <button type="button" class="cartographer-parallax-button" data-action="journey-focus" data-journey-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="journey-focus" data-journey-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.focus"}}"><i class="fa-solid fa-crosshairs"></i></button>
             {{#if canEdit}}
-            <button type="button" class="cartographer-parallax-button" data-action="journey-rename" data-journey-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon" data-action="journey-rename" data-journey-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.renameJourney"}}"><i class="fa-solid fa-pen"></i></button>
-            <button type="button" class="cartographer-parallax-button is-danger" data-action="journey-remove" data-journey-id="{{id}}"
+            <button type="button" class="blacksmith-tool-btn is-icon is-danger" data-action="journey-remove" data-journey-id="{{id}}"
                 data-tooltip="{{localize "coffee-pub-cartographer.routes.removeJourney"}}"><i class="fa-solid fa-trash"></i></button>
             {{/if}}
         </div>
@@ -216,11 +220,11 @@
                 <span>{{length}}</span>
                 {{#if ../canEdit}}
                 <span class="cartographer-routes-order">
-                    <button type="button" class="cartographer-parallax-button" data-action="journey-move" data-journey-id="{{../id}}" data-index="{{index}}" data-by="-1"
+                    <button type="button" class="blacksmith-tool-btn is-icon" data-action="journey-move" data-journey-id="{{../id}}" data-index="{{index}}" data-by="-1"
                         {{#if isFirst}}disabled{{/if}} data-tooltip="{{localize "coffee-pub-cartographer.routes.moveUp"}}"><i class="fa-solid fa-arrow-up"></i></button>
-                    <button type="button" class="cartographer-parallax-button" data-action="journey-move" data-journey-id="{{../id}}" data-index="{{index}}" data-by="1"
+                    <button type="button" class="blacksmith-tool-btn is-icon" data-action="journey-move" data-journey-id="{{../id}}" data-index="{{index}}" data-by="1"
                         {{#if isLast}}disabled{{/if}} data-tooltip="{{localize "coffee-pub-cartographer.routes.moveDown"}}"><i class="fa-solid fa-arrow-down"></i></button>
-                    <button type="button" class="cartographer-parallax-button is-danger" data-action="journey-drop" data-journey-id="{{../id}}" data-index="{{index}}"
+                    <button type="button" class="blacksmith-tool-btn is-icon is-danger" data-action="journey-drop" data-journey-id="{{../id}}" data-index="{{index}}"
                         data-tooltip="{{localize "coffee-pub-cartographer.routes.dropFromJourney"}}"><i class="fa-solid fa-xmark"></i></button>
                 </span>
                 {{/if}}

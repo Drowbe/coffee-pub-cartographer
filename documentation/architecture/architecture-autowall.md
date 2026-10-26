@@ -24,9 +24,8 @@ The work is in three layers, each in its own file, and the dependency runs one w
   them; a segmented control for the mode, since the mode changes what a click does; sections for the
   groups of settings; the range slider and the toggle switch; tool buttons; and the footer's
   secondary and primary buttons for Cancel and Add. Only what no shared component covers is in
-  `styles/tool-autowall.css`: the status line, the small picture, and a row of label, control and
-  value. Blacksmith's range slider colours its value readout for a dark window with no Tool-window
-  override, so the slider's track and thumb are used and the readout is the window's own.
+  `styles/tool-autowall.css`: the status line, the small picture, and a row of a label and its
+  control. The range slider is Blacksmith's whole, with its own value readout.
 
 Keeping the first apart is what makes the work testable. The tracer is run on pictures painted in
 code, with grain, ragged edges and shadows; the manager's scene-changing methods are sliced out of
@@ -79,6 +78,21 @@ to the texture Foundry holds. The first version used the sprite's own numbers an
 in the wrong place; the small picture in the window, which shows where the tool took the click to be,
 exists to make that kind of fault visible.
 
+### A tile's picture
+
+Where the picture is read from is chosen by the click. `_tilesAt` finds the tiles with a still picture
+under it, the one drawn on top first, by elevation and then sort order; `_tilesAt` tests with the tile's
+own geometry before anything is loaded, so only a tile that is hit is read. A tile's picture sits on
+its mesh the way a sprite does -- its texels offset by the anchor, then carried by the mesh's world
+transform and the stage's -- so `_tileTransform` takes where the picture lands on the scene from three
+of its corners rather than from the tile's own fields, and is right for whatever fit, scale, rotation
+or flip the tile has. That placement is an affine map (`imageTransform`, with `transformFromCorners`),
+and the scene background is its simple case, so everything that converts between the picture and the
+scene -- the click, the walls found, the preview of what was taken for wall -- goes through one pair of
+functions. The preview of the mask is drawn through the same matrix so a turned tile is covered as it is
+drawn. A tile's transparent pixels are not clickable: the click goes on to the next tile and finally
+the background. A run reads one picture; clicking another starts afresh.
+
 ## Doors and windows
 
 Walls found from the picture stop at a door, a gate or a window, because those are different
@@ -126,6 +140,36 @@ A click on a wall already found is not a new wall to find, and with Ctrl or Comm
 segment in two at the click. It is not a double-click: on a wall on the scene Foundry takes the
 double-click to open the wall's settings. Changing a setting or clicking again works the
 walls out afresh and discards the edits, because the edits are on the result and not on the settings.
+
+## Taking the pointer from Foundry
+
+The tool takes the pointer on the window, not on the canvas. Foundry's event system (PIXI's) registers
+its pointer listeners on the canvas (pointerdown), the document (pointermove) and the window
+(pointerup), all in the capture phase and all before the tool exists, so a listener the tool adds on
+the canvas runs after PIXI's and swallowing the event there hides nothing from it: a drag still
+started Foundry's selection rectangle over a sketch. An ancestor is reached first on the way down, so
+the tool listens on the window for pointerdown and pointermove, ahead of PIXI's canvas and document
+listeners. PIXI's own pointerup listener is on the window and was there first, so it still sees a
+release, which does nothing when it never saw the press. Because the window sees everything, an
+event is the tool's only when its target is the canvas, so the sidebar and the windows keep their
+clicks; drags and strokes in progress are followed on the window too, since the pointer may leave the
+map.
+
+## Drawing by hand
+
+The Draw tab places walls without reading the picture. Events are routed by what is showing: on the
+Map tab the canvas is the tool's, on the Options tab or with drawing off it is Foundry's, and
+nothing is swallowed that the tool is not using, so a right-click still pans.
+
+Points are one wall per click from the last point, written as they are drawn. The point a click lands
+on is the end of a wall near it if joining is on, else the grid if snapping is, else as clicked, and
+Shift holds both back; this is what lets a chain begin on an existing end. Sketching collects the
+pointer's path, simplifies it with the tracer's own `simplify` through `sketchToSegments`, and joins
+the ends of the result to wall ends afterwards: joining the raw path first would drag its first point
+off the line and leave a kink. Writes are queued so walls come out in order however fast the clicks
+come. Each wall or stroke is a history entry holding the ids it made, for Backspace, and a chain's
+walls share one run for the sub-menubar's Undo. They are written with `SKIP_JOIN` because the points
+have already been joined.
 
 ## Clean up
 
@@ -184,6 +228,8 @@ already uses to place an end off the grid, also holds the joining back.
   held, and an update that must not be followed.
 - `tests/test-autowall-wiring.mjs` checks that every string, class, action and control the window
   uses exists.
+- `tests/test-autowall-flow.mjs` also covers a wall on a turned tile, a click through a tile's
+  transparent hole, walls drawn by points and by sketching, and the canvas being left to Foundry.
 - `tests/test-autowall-window.mjs` builds the window's HTML for every mode and tab from the real
   methods and checks the controls, the selected values and the escaping.
 - `tests/test-autowall-flow.mjs` runs the whole manager class in node, from its source, against

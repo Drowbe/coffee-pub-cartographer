@@ -405,7 +405,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         // One section per mode. "Groups" with nothing ticked is None.
         const section = (kind, title, groups, value, allKey, noneKey) => {
             const mode = value === null ? 'all' : (value.length ? 'groups' : 'none');
-            const radio = (choice, labelKey) => `<label><input type="radio" name="${kind}Mode" value="${choice}" ${mode === choice ? 'checked' : ''}> ${esc(localize(labelKey))}</label>`;
+            const radio = (choice, labelKey) => `<label class="blacksmith-tool-segment"><input type="radio" name="${kind}Mode" value="${choice}" ${mode === choice ? 'checked' : ''}><span>${esc(localize(labelKey))}</span></label>`;
             const boxes = groups.length
                 ? groups.map(group => `<label class="cartographer-parallax-set-dialog-row">
                     <input type="checkbox" name="${kind}" value="${esc(group.id)}" ${value?.includes(group.id) ? 'checked' : ''}>
@@ -413,7 +413,7 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
                 </label>`).join('')
                 : `<p class="cartographer-parallax-set-dialog-empty">${esc(localize('collectionNoGroups'))}</p>`;
             return `<div class="cartographer-parallax-set-dialog-head"><span>${esc(localize(title))}</span></div>
-                <div class="cartographer-parallax-collection-modes" data-kind="${kind}">
+                <div class="blacksmith-tool-segmented cartographer-parallax-collection-modes" role="radiogroup" data-kind="${kind}">
                     ${radio('all', allKey)}${radio('none', noneKey)}${radio('groups', 'collectionTheseGroups')}
                 </div>
                 <div class="cartographer-parallax-set-dialog-list" data-kind-list="${kind}">${boxes}</div>`;
@@ -676,10 +676,10 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
     /** The Append / Replace choice shared by Copy from Scene and Import. */
     _importModeField() {
         const localize = key => foundry.utils.escapeHTML(game.i18n.localize(`${MODULE.ID}.parallax.${key}`));
-        return `<fieldset class="cartographer-parallax-import-mode">
-            <label><input type="radio" name="mode" value="append" checked> ${localize('importAppend')}</label>
-            <label><input type="radio" name="mode" value="replace"> ${localize('importReplace')}</label>
-        </fieldset>`;
+        return `<div class="blacksmith-tool-segmented cartographer-parallax-import-mode" role="radiogroup">
+            <label class="blacksmith-tool-segment"><input type="radio" name="mode" value="append" checked><span>${localize('importAppend')}</span></label>
+            <label class="blacksmith-tool-segment"><input type="radio" name="mode" value="replace"><span>${localize('importReplace')}</span></label>
+        </div>`;
     }
 
     /** Bring the layers, groups and motion settings over from another scene. */
@@ -1168,16 +1168,17 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
         return `<select class="cartographer-parallax-set-select" data-field="collection" aria-label="${label}" data-tooltip="${label}">${custom}${options}</select>`;
     }
 
-    /** Parallax, Tiles or Collections: which the bar and settings are running. */
+    /** Parallax, Tiles or Collections: which the bar and settings are running. Blacksmith's segmented control, icons only. */
     _buildTargetSwitch(localize) {
-        const buttons = TARGETS.map(entry => this._button({
-            action: 'set-target',
-            icon: entry.icon,
-            label: localize(entry.labelKey),
-            className: `cartographer-parallax-segment${entry.id === this.target ? ' is-active' : ''}`,
-            dataset: { target: entry.id }
-        })).join('');
-        return `<div class="cartographer-parallax-segmented cartographer-parallax-target" role="radiogroup">${buttons}</div>`;
+        const esc = value => foundry.utils.escapeHTML(String(value));
+        const segments = TARGETS.map(entry => {
+            const label = esc(localize(entry.labelKey));
+            return `<label class="blacksmith-tool-segment" data-tooltip="${label}">
+                <input type="radio" name="parallax-target" value="${entry.id}" data-action="set-target" data-target="${entry.id}" aria-label="${label}"${entry.id === this.target ? ' checked' : ''}>
+                <i class="${entry.icon}"></i>
+            </label>`;
+        }).join('');
+        return `<div class="blacksmith-tool-segmented cartographer-parallax-target" role="radiogroup">${segments}</div>`;
     }
 
     /** What the Tiles settings show: the shared ease, the selected tile's editor, and every animated tile. */
@@ -1256,12 +1257,12 @@ export class ParallaxWindow extends BlacksmithToolWindowBaseV2 {
 
     _button({ action, icon, label, text = '', className = '', dataset = {}, disabled = false }) {
         const safeLabel = foundry.utils.escapeHTML(label ?? '');
-        const classes = [className, text ? 'is-labelled' : ''].filter(Boolean).join(' ');
+        const classes = className;
         const data = Object.entries(dataset)
             .map(([name, value]) => ` data-${name}="${foundry.utils.escapeHTML(String(value))}"`)
             .join('');
         const caption = text ? `<span>${foundry.utils.escapeHTML(text)}</span>` : '';
-        return `<button type="button" class="cartographer-parallax-button ${classes}" data-action="${action}" data-tooltip="${safeLabel}" aria-label="${safeLabel}"${data}${disabled ? ' disabled' : ''}><i class="${icon}"></i>${caption}</button>`;
+        return `<button type="button" class="blacksmith-tool-btn${text ? '' : ' is-icon'} ${classes}" data-action="${action}" data-tooltip="${safeLabel}" aria-label="${safeLabel}"${data}${disabled ? ' disabled' : ''}><i class="${icon}"></i>${caption}</button>`;
     }
 
     // ==================================================================

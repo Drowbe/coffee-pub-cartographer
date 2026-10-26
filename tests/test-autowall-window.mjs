@@ -34,10 +34,10 @@ const LIMITS = {
     match: { min: 8, max: 36, step: 1 }, smoothing: { min: 0.05, max: 1, step: 0.05 }, widest: { min: 0.25, max: 3, step: 0.05 },
     windowDistance: { min: 0.5, max: 6, step: 0.5 }, joinDistance: { min: 0.05, max: 1, step: 0.05 }
 };
-const options = { mode: 'wall', tab: 'map', joinEnds: true, joinDistance: 0.25, match: 20, smoothing: 0.3, widest: 1, snap: false,
+const options = { mode: 'wall', tab: 'map', drawTool: 'point', drawKind: 'wall', joinEnds: true, joinDistance: 0.25, match: 20, smoothing: 0.3, widest: 1, snap: false,
     doorState: 'closed', doorSound: 'wood', doorAnimation: '', windowDistance: 2, windowAttenuation: true };
 const manager = (mode, tab, undo = false) => ({
-    session: { mode, options: { ...options, mode, tab } },
+    session: { mode, options: { ...options, mode, tab }, draw: { active: false } },
     limits: name => LIMITS[name],
     doorSoundChoices: () => [['', 'Default'], ['wood', 'Wood'], ['metal', 'Metal']],
     doorAnimationChoices: () => [['', 'Default'], ['slide', 'Slide']],
@@ -55,18 +55,18 @@ const count = (html, pattern) => (html.match(pattern) ?? []).length;
 const names = html => [...html.matchAll(/name="([\w-]+)"/g)].map(m => m[1]).filter(name => !name.startsWith('autowall-')).sort();
 
 console.log('every mode and tab builds');
-for (const [mode, tab] of [['wall', 'map'], ['door', 'map'], ['window', 'map'], ['wall', 'options'], ['door', 'options'], ['window', 'options']]) {
+for (const [mode, tab] of [['wall', 'map'], ['door', 'map'], ['window', 'map'], ['wall', 'draw'], ['door', 'draw'], ['window', 'draw'], ['wall', 'options'], ['door', 'options'], ['window', 'options']]) {
     const window_ = new Harness(manager(mode, tab));
     const body = window_._buildBody(window_.manager.session);
     const left = window_._buildFooterLeft();
     const right = window_._buildFooterRight();
     const all = body + left + right;
     check(`${mode} / ${tab}: nothing is undefined`, !/undefined|\[object|NaN/.test(all), all.match(/.{30}(undefined|\[object|NaN).{30}/)?.[0]);
-    check(`${mode} / ${tab}: the tabs come first, two of them, the one showing marked`,
-        body.trimStart().startsWith('<nav class="blacksmith-tool-tabs') && count(body, /data-action="autowall-tab"/g) === 2 && count(body, /blacksmith-tool-tab is-active/g) === 1);
-    check(`${mode} / ${tab}: Cancel on the left of the footer, Add on the right and off to start`,
-        has(left, 'data-action="autowall-cancel"') && has(left, 'blacksmith-window-btn-secondary')
-        && has(right, 'data-action="autowall-add"') && has(right, 'blacksmith-window-btn-primary') && /autowall-add"[^>]*disabled/.test(right));
+    check(`${mode} / ${tab}: the tabs come first, three of them, the one showing marked`,
+        body.trimStart().startsWith('<nav class="blacksmith-tool-tabs') && count(body, /data-action="autowall-tab"/g) === 3 && count(body, /blacksmith-tool-tab is-active/g) === 1);
+    check(`${mode} / ${tab}: Cancel on the left of the footer`, has(left, 'data-action="autowall-cancel"') && has(left, 'blacksmith-window-btn-secondary'));
+    if (tab === 'draw') check(`${mode} / ${tab}: no Add, since walls are made as they are drawn`, right === '');
+    else check(`${mode} / ${tab}: Add on the right, off to start`, has(right, 'data-action="autowall-add"') && has(right, 'blacksmith-window-btn-primary') && /autowall-add"[^>]*disabled/.test(right));
 }
 
 console.log('\nthe mode is chosen on the Map tab, under the tabs');
@@ -107,6 +107,28 @@ console.log('\nthe controls each place has');
 
     const undo = new Harness(manager('wall', 'options', true));
     check('Options: Undo is on when there is something to undo', !/autowall-cleanup-undo"[^>]*disabled/.test(undo._buildBody(undo.manager.session)));
+}
+
+console.log('\nthe Draw tab');
+{
+    const draw = (kind, tool = 'point', active = false) => {
+        const w = new Harness(manager('wall', 'draw'));
+        w.manager.session.options.drawKind = kind;
+        w.manager.session.options.drawTool = tool;
+        w.manager.session.draw.active = active;
+        return w._buildBody(w.manager.session);
+    };
+    const wall = draw('wall');
+    check('two segmented controls: how, and what', count(wall, /class="blacksmith-tool-segmented/g) === 2);
+    check('how: points or sketch, the one in use checked', count(wall, /name="autowall-draw-tool"/g) === 2 && /data-tool="point" checked/.test(wall) && !/data-tool="sketch" checked/.test(wall));
+    check('what: wall, door or window, the one in use checked', count(wall, /name="autowall-draw-kind"/g) === 3 && /data-kind="wall" checked/.test(wall));
+    check('a wall has no settings of its own to show', JSON.stringify(names(wall)) === JSON.stringify([]), JSON.stringify(names(wall)));
+    check('sketching has smoothing, points do not', JSON.stringify(names(draw('wall', 'sketch'))) === JSON.stringify(['smoothing']) && !has(wall, 'name="smoothing"'));
+    check('a door draws with its state, sound and animation', JSON.stringify(names(draw('door'))) === JSON.stringify(['doorAnimation', 'doorSound', 'doorState']), JSON.stringify(names(draw('door'))));
+    check('a window draws with its see-through distance and fade', JSON.stringify(names(draw('window'))) === JSON.stringify(['windowAttenuation', 'windowDistance']), JSON.stringify(names(draw('window'))));
+    check('Start drawing, off', has(wall, 'data-action="autowall-draw-toggle"') && has(wall, 'fa-play') && !/blacksmith-tool-btn is-active/.test(wall));
+    check('and Stop drawing when it is on, lit', has(draw('wall', 'point', true), 'fa-stop') && /blacksmith-tool-btn is-active/.test(draw('wall', 'point', true)));
+    check('a button to take back the last wall, and a place for what is happening', has(wall, 'data-action="autowall-draw-undo"') && has(wall, 'data-role="draw-status"'));
 }
 
 console.log('\nnothing of the scene-motion window is borrowed');

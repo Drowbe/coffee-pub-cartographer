@@ -28,6 +28,7 @@ const MODES = [
 ];
 const TABS = [
     { id: 'map', icon: 'fa-solid fa-map', labelKey: 'tabMap' },
+    { id: 'draw', icon: 'fa-solid fa-pen-ruler', labelKey: 'tabDraw' },
     { id: 'options', icon: 'fa-solid fa-sliders', labelKey: 'tabOptions' }
 ];
 
@@ -51,6 +52,10 @@ export class AutoWallWindow extends BlacksmithToolWindowBaseV2 {
     static ACTION_HANDLERS = {
         'autowall-mode': (_event, target, app) => app.manager.setMode(target.dataset.mode),
         'autowall-tab': (_event, target, app) => app.manager.setTab(target.dataset.tab),
+        'autowall-draw-tool': (_event, target, app) => app.manager.setDrawTool(target.dataset.tool),
+        'autowall-draw-kind': (_event, target, app) => app.manager.setDrawKind(target.dataset.kind),
+        'autowall-draw-toggle': (_event, _target, app) => app.manager.toggleDraw(),
+        'autowall-draw-undo': (_event, _target, app) => void app.manager.drawBack(),
         'autowall-add': (_event, _target, app) => void app.manager.accept(),
         'autowall-cancel': (_event, _target, app) => app.manager.cancel(),
         'autowall-cleanup': (_event, _target, app) => void app.manager.cleanup(),
@@ -111,6 +116,8 @@ export class AutoWallWindow extends BlacksmithToolWindowBaseV2 {
 
     /** Add, off until there is something to add; the manager turns it on. */
     _buildFooterRight() {
+        // On the Draw tab walls are made as they are drawn, so there is nothing to add.
+        if (this.manager.session?.options.tab === 'draw') return '';
         const mode = this.manager.session?.mode ?? 'wall';
         const addKey = { wall: 'add', door: 'addDoor', window: 'addWindow' }[mode];
         return `<button type="button" class="blacksmith-window-btn-primary" data-action="autowall-add" disabled><i class="fa-solid fa-check"></i> ${this._escape(this._localize(addKey))}</button>`;
@@ -133,14 +140,13 @@ export class AutoWallWindow extends BlacksmithToolWindowBaseV2 {
             </section>`;
     }
 
-    /** A range, with its label beside it and its value after it. The track and thumb are Blacksmith's. */
+    /** A range, with its label beside it. The track, thumb and value readout are all Blacksmith's. */
     _slider(name, label, hint) {
         const { min, max, step } = this.manager.limits(name);
         const value = this.manager.session.options[name];
         return `<label class="cartographer-autowall-row" title="${this._escape(hint)}">
                 <span class="cartographer-autowall-label">${this._escape(label)}</span>
-                <span class="blacksmith-slider"><input type="range" name="${name}" min="${min}" max="${max}" step="${step}" value="${value}"></span>
-                <output class="cartographer-autowall-value" data-for="${name}"></output>
+                <span class="blacksmith-slider"><input type="range" name="${name}" min="${min}" max="${max}" step="${step}" value="${value}"><span data-for="${name}"></span></span>
             </label>`;
     }
 
@@ -175,9 +181,10 @@ export class AutoWallWindow extends BlacksmithToolWindowBaseV2 {
     }
 
     _buildBody(session) {
-        const tab = session.options.tab === 'options' ? 'options' : 'map';
+        const tab = ['options', 'draw'].includes(session.options.tab) ? session.options.tab : 'map';
+        const content = { map: () => this._buildMap(session), draw: () => this._buildDraw(session), options: () => this._buildOptions() }[tab]();
         return `${this._buildTabs(tab)}
-            <div class="blacksmith-tool-stack cartographer-autowall-panel">${tab === 'options' ? this._buildOptions() : this._buildMap(session)}</div>`;
+            <div class="blacksmith-tool-stack cartographer-autowall-panel">${content}</div>`;
     }
 
     /** The choice of what to map: a segmented control, since it changes what a click does. */
@@ -207,8 +214,46 @@ export class AutoWallWindow extends BlacksmithToolWindowBaseV2 {
         }[session.mode]();
         return this._section('fa-solid fa-bullseye', localize('mapWhat'), this._buildModes(session))
             + this._section('fa-solid fa-wand-magic-sparkles', localize('resultTitle'), `<div class="cartographer-autowall-status" data-role="status"></div>
-                <canvas class="cartographer-autowall-thumb" width="316" height="150"></canvas>`)
+                <canvas class="cartographer-autowall-thumb" width="316" height="150"></canvas>
+                <div class="blacksmith-tool-hint" data-role="source"></div>`)
             + this._section('fa-solid fa-sliders', localize('settingsTitle'), controls);
+    }
+
+    /** A choice of one from a few, as Blacksmith's segmented control, each a native radio. */
+    _segmented(group, label, choices, current, dataKey) {
+        const segments = choices.map(choice => `<label class="blacksmith-tool-segment">
+                <input type="radio" name="${group}" value="${choice.id}" data-action="${group}" data-${dataKey}="${choice.id}"${current === choice.id ? ' checked' : ''}>
+                <i class="${choice.icon}"></i><span>${this._escape(this._localize(choice.labelKey))}</span>
+            </label>`).join('');
+        return `<div class="blacksmith-tool-segmented is-fill" role="radiogroup" aria-label="${this._escape(label)}">${segments}</div>`;
+    }
+
+    /** The Draw tab: walls made by hand, as they are drawn. */
+    _buildDraw(session) {
+        const localize = key => this._localize(key);
+        const { options } = session;
+        const draw = session.draw;
+        const how = this._segmented('autowall-draw-tool', localize('drawHow'), [
+            { id: 'point', icon: 'fa-solid fa-location-dot', labelKey: 'drawPoint' },
+            { id: 'sketch', icon: 'fa-solid fa-pen', labelKey: 'drawSketch' }
+        ], options.drawTool, 'tool') + (options.drawTool === 'sketch' ? this._slider('smoothing', localize('smoothing'), localize('smoothingHint')) : '');
+        const kindSettings = {
+            wall: () => '',
+            door: () => this._select('doorState', localize('doorState'), [['closed', localize('stateClosed')], ['open', localize('stateOpen')], ['locked', localize('stateLocked')]])
+                + this._select('doorSound', localize('doorSound'), this.manager.doorSoundChoices())
+                + this._select('doorAnimation', localize('doorAnimation'), this.manager.doorAnimationChoices()),
+            window: () => this._slider('windowDistance', localize('windowDistance'), localize('windowDistanceHint'))
+                + this._toggle('windowAttenuation', localize('windowAttenuation'))
+        }[options.drawKind ?? 'wall']();
+        const what = this._segmented('autowall-draw-kind', localize('drawWhat'), MODES, options.drawKind, 'kind') + kindSettings;
+        const buttons = `<div class="cartographer-autowall-buttons">
+                <button type="button" class="blacksmith-tool-btn${draw.active ? ' is-active' : ''}" data-action="autowall-draw-toggle"><i class="${draw.active ? 'fa-solid fa-stop' : 'fa-solid fa-play'}"></i><span>${this._escape(localize(draw.active ? 'drawStop' : 'drawStart'))}</span></button>
+                ${this._button({ action: 'autowall-draw-undo', icon: 'fa-solid fa-rotate-left', label: localize('drawUndoHint'), text: localize('drawUndo') })}
+            </div>
+            <div class="cartographer-autowall-status" data-role="draw-status"></div>`;
+        return this._section('fa-solid fa-pen', localize('drawHow'), how)
+            + this._section('fa-solid fa-bullseye', localize('drawWhat'), what)
+            + this._section('fa-solid fa-play', localize('drawTitle'), buttons);
     }
 
     /** The Options tab: how ends join, snapping, and tidying the walls already there. */

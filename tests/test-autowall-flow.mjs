@@ -56,7 +56,7 @@ const documentStand = {
 };
 const foundry = { utils: { escapeHTML: text => String(text) } };
 const CONFIG = { Wall: { doorSounds: { wood: { label: 'Wood' } }, animationTypes: { slide: { label: 'Slide' } } } };
-const PIXI = { Container: function () { return anything(); }, Graphics: function () { return anything(); }, Sprite: function () { return anything(); }, Point: function (x, y) { return { x, y }; }, Texture: { from: () => anything() } };
+const PIXI = { Matrix: function () { return anything(); }, Container: function () { return anything(); }, Graphics: function () { return anything(); }, Sprite: function () { return anything(); }, Point: function (x, y) { return { x, y }; }, Texture: { from: () => anything() } };
 
 /** A scene whose walls can be changed, and which records every call. */
 function makeScene(wallData = []) {
@@ -66,25 +66,27 @@ function makeScene(wallData = []) {
         getFlag(module, key) { return this.flags?.[module]?.[key]; }, toObject() { return { _id: this.id, c: [...this.c] }; }, ...(data.door ? { door: data.door } : {}) });
     scene.list = wallData.map(make);
     scene.walls = { get contents() { return scene.list; }, has: id => scene.list.some(w => w.id === id), filter: fn => scene.list.filter(fn) };
-    scene.createEmbeddedDocuments = async (_type, data) => { scene.calls.push(['create', data]); data.forEach(item => scene.list.push(make(item))); };
+    scene.createEmbeddedDocuments = async (_type, data) => { scene.calls.push(['create', data]); return data.map(item => { const doc = make(item); scene.list.push(doc); return doc; }); };
     scene.deleteEmbeddedDocuments = async (_type, ids) => { scene.list = scene.list.filter(w => !ids.includes(w.id)); };
     scene.updateEmbeddedDocuments = async (_type, updates) => { for (const update of updates) Object.assign(scene.list.find(w => w.id === update._id), { c: [...update.c] }); };
     return scene;
 }
 
-function makeCanvas(scene) {
+function makeCanvas(scene, tiles = []) {
     const view = { getBoundingClientRect: () => ({ left: 0, top: 0 }), style: {}, addEventListener() {}, removeEventListener() {} };
     return {
         scene, ready: true, interface: anything(), level: null, dimensions: { distance: 5, sceneRect: { x: 0, y: 0, width: 400, height: 200 } },
         grid: { getSnappedPoint: p => ({ x: Math.round(p.x / GRID) * GRID, y: Math.round(p.y / GRID) * GRID }) },
-        stage: { scale: { x: 1 }, toLocal: p => p },
+        tiles: { placeables: tiles },
+        stage: { scale: { x: 1 }, toLocal: p => p, worldTransform: { applyInverse: p => p } },
         app: { view, stage: { toLocal: p => p } }
     };
 }
 
 let canvas;
 const injected = { MODULE, CONST, game, ui, foundry, CONFIG, PIXI, performance, Hooks: { on: () => 1 }, document: documentStand,
-    cartographerToolbar: { registerTool() {} }, wallJoinManager: { suspended: false }, AutoWallWindow: { open: async () => ({ element: null, render: async () => {}, close: async () => {} }) },
+    cartographerToolbar: { registerTool() {} }, wallJoinManager: { suspended: false },
+    window: { addEventListener() {}, removeEventListener() {}, innerWidth: 1600 }, AutoWallWindow: { open: async () => ({ element: null, render: async () => {}, close: async () => {} }) },
     ...utils };
 const names = Object.keys(injected);
 const build = () => new Function('canvas', ...names, `${body}\nreturn autoWallManager;`)(canvas, ...names.map(name => injected[name]));
@@ -121,10 +123,14 @@ function startSession(manager, over = {}) {
     const pixels = picture();
     const session = {
         seeds: [], mode: 'wall', result: null, segments: [],
-        options: { mode: 'wall', tab: 'map', joinEnds: true, joinDistance: 0.25, match: 20, smoothing: 0.3, widest: 1, snap: false,
+        options: { mode: 'wall', tab: 'map', drawTool: 'point', drawKind: 'wall', joinEnds: true, joinDistance: 0.25, match: 20, smoothing: 0.3, widest: 1, snap: false,
             doorState: 'closed', doorSound: '', doorAnimation: '', windowDistance: 2, windowAttenuation: true, ...over },
-        image: { pixels, lab: utils.labBuffer(pixels), placement: { x: 0, y: 0, width: WIDTH, height: HEIGHT }, scaleX: 1, scaleY: 1, surface: { width: WIDTH, height: HEIGHT } }
+        image: { key: 'background', label: 'Scene background', pixels, lab: utils.labBuffer(pixels), surface: { width: WIDTH, height: HEIGHT },
+            ...utils.transformFromCorners([0, 0], [WIDTH, 0], [0, HEIGHT], WIDTH, HEIGHT) },
+        files: new Map(),
+        draw: { active: false, last: null, start: null, run: null, count: 0, history: [], points: null, queue: Promise.resolve() }
     };
+    session.background = session.image;
     manager.session = session;
     manager._status = null;
     return session;
@@ -276,6 +282,278 @@ console.log('\na door on a wall that runs straight across it');
     manager._onDragMove(event(session.segments[0][1][0], 150));
     manager._onDragEnd(event(session.segments[0][1][0], 150));
     check('dragged off the wall, it is no longer cut out of it', session.onWall === false, JSON.stringify(session.segments));
+}
+
+// ---------------------------------------------------------------- a wall on a tile
+console.log('\na wall painted on a tile, not on the background');
+{
+    // A tile 200 by 100, turned a quarter, with its top-left corner at 1000,500. Its picture has a wall
+    // along the middle, across the width; turned, that is a wall running down the scene at x of about 950.
+    const TW = 200, TH = 100;
+    const tileData = new Uint8ClampedArray(TW * TH * 4);
+    let seed = 11;
+    const grain = amount => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return ((seed / 0x7fffffff) - 0.5) * amount; };
+    for (let y = 0; y < TH; y++) {
+        for (let x = 0; x < TW; x++) {
+            const i = (y * TW + x) * 4;
+            const wall = y >= 45 && y < 55 && x >= 10 && x < 190;
+            const hole = x >= 150 && y < 20;
+            const base = wall ? [150, 140, 120] : [110, 80, 50];
+            const n = grain(6);
+            tileData[i] = base[0] + n; tileData[i + 1] = base[1] + n; tileData[i + 2] = base[2] + n; tileData[i + 3] = hole ? 0 : 255;
+        }
+    }
+    const tilePixels = { data: tileData, width: TW, height: TH };
+    // x' = a x + c y + tx ; y' = b x + d y + ty, for a quarter turn about the top-left corner.
+    const turned = { a: 0, b: 1, c: -1, d: 0, tx: 1000, ty: 500 };
+    const mesh = {
+        destroyed: false, texture: { orig: { width: TW, height: TH } }, anchor: { x: 0, y: 0 },
+        worldTransform: { apply: p => ({ x: turned.a * p.x + turned.c * p.y + turned.tx, y: turned.b * p.x + turned.d * p.y + turned.ty }) }
+    };
+    const tile = { id: 't1', mesh, document: { texture: { src: 'tiles/Dock Wall.png' }, elevation: 0, sort: 0 } };
+    const files = [];
+    const prepare = () => {
+        canvas = makeCanvas(makeScene(), [tile]);
+        const manager = build();
+        manager._loadFile = async src => { files.push(src); return { pixels: tilePixels, surface: { width: TW, height: TH }, naturalWidth: TW, naturalHeight: TH }; };
+        const session = startSession(manager);
+        return { manager, session };
+    };
+
+    const { manager, session } = prepare();
+    manager._pick([950, 600], false);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    check('a click on a tile reads that tile, not the background', session.image.key.startsWith('tile:') && files.length === 1, session.image.key);
+    check('and says which', /autowall.sourceTile/.test(session.image.label) && /Dock Wall.png/.test(session.image.label), session.image.label);
+    check('the picture is placed on the scene as the tile is: a point of it lands where the mesh puts it', JSON.stringify(session.image.toScene([100, 50]).map(Math.round)) === '[950,600]', JSON.stringify(session.image.toScene([100, 50])));
+    check('and back again', JSON.stringify(session.image.toImage([950, 600]).map(Math.round)) === '[100,50]');
+    check('its scale is one picture pixel to a scene pixel', Math.abs(session.image.scale - 1) < 1e-9);
+
+    manager._run(session);
+    const ends = session.segments.flat();
+    check('the wall found is in scene pixels: a line down the scene at x of 950', session.segments.length >= 1 && ends.every(p => Math.abs(p[0] - 950) <= 3), JSON.stringify(session.segments));
+    check('from one end of the wall to the other, as the tile is turned', Math.min(...ends.map(p => p[1])) <= 530 && Math.max(...ends.map(p => p[1])) >= 670, JSON.stringify(session.segments));
+
+    // The same tile, clicked where its picture is transparent: the click goes through to the background.
+    const through = prepare();
+    through.manager._pick([1000 - 10, 500 + 160], false);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    check('a click where the tile is transparent goes through to what is under it', through.session.image.key === 'background', through.session.image.key);
+
+    // Off the tile altogether.
+    const off = prepare();
+    off.manager._pick([300, 100], false);
+    check('a click off any tile reads the background, with no waiting', off.session.image.key === 'background' && JSON.stringify(off.session.seeds) === '[[300,100]]');
+
+    // Shift-click adds to the picture already being read; it does not choose again.
+    const add = prepare();
+    add.manager._pick([950, 600], false);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const reads = files.length;
+    add.manager._pick([950, 540], true);
+    check('a shift-click adds a click to the same picture', add.session.seeds.length === 2 && files.length === reads);
+
+    // Back to the background: what was found on the tile is not carried over.
+    add.session.segments = [[[1, 1], [2, 2]]];
+    add.manager._pick([300, 100], false);
+    check('clicking the background after a tile starts afresh on the background', add.session.image.key === 'background' && add.session.segments.length === 0 && JSON.stringify(add.session.seeds) === '[[300,100]]');
+}
+
+console.log('\nthe button among the wall tools');
+{
+    canvas = makeCanvas(makeScene());
+    const manager = build();
+    const controls = { walls: { tools: { select: { name: 'select' } } } };
+    manager.addWallTool(controls);
+    const tool = controls.walls.tools[Object.keys(controls.walls.tools).find(name => name !== 'select')];
+    check('the tool is added to the Walls controls', !!tool && tool.button === true && /autowall.barMap/.test(tool.title), JSON.stringify(controls.walls.tools));
+    check('and Foundry\'s own tools are left as they are', controls.walls.tools.select.name === 'select');
+    const list = { walls: { tools: [] } };
+    manager.addWallTool(list);
+    check('as an array too, for an older shape of the controls', list.walls.tools.length === 1);
+    const none = {};
+    manager.addWallTool(none);
+    check('with no Walls controls there is nothing to add to, and no error', Object.keys(none).length === 0);
+}
+
+// ---------------------------------------------------------------- walls drawn by hand
+console.log('\ndrawing walls by hand, with points');
+{
+    // Events that say whether the tool took them, since a click it does not want must reach Foundry.
+    const ev = (x, y, extra = {}) => { const e = event(x, y, extra); e.swallowed = false; e.stopImmediatePropagation = () => { e.swallowed = true; }; return e; };
+    const click = async (manager, x, y, extra = {}) => {
+        const down = ev(x, y, extra);
+        const up = ev(x, y, extra);
+        manager._onPointerDown(down);
+        manager._onPointerUp(up);
+        await manager.session.draw.queue;
+        return down.swallowed && up.swallowed;
+    };
+    const setup = (scenery = [], over = {}) => {
+        canvas = makeCanvas(makeScene(scenery));
+        const manager = build();
+        const session = startSession(manager, { tab: 'draw', ...over });
+        return { manager, session };
+    };
+    const drawn = scene => scene.list.filter(w => w.flags?.[MODULE.ID]?.autoWall);
+
+    // Off, the map is Foundry's.
+    const off = setup();
+    check('with drawing off, a click is left to Foundry', await click(off.manager, 100, 100) === false && off.session.draw.last === null);
+
+    // On: the first click places a point, each after makes a wall to it.
+    const { manager, session } = setup();
+    manager.toggleDraw();
+    check('turning drawing on says what to do', /autowall.drawFirst/.test(manager._drawStatusText()), manager._drawStatusText());
+    check('the first click places a point and makes no wall', await click(manager, 100, 100) === true && JSON.stringify(session.draw.last) === '[100,100]' && canvas.scene.list.length === 0);
+    await click(manager, 200, 100);
+    check('the second makes a wall from the first to it', drawn(canvas.scene).length === 1 && drawn(canvas.scene)[0].c.join() === '100,100,200,100', JSON.stringify(canvas.scene.list.map(w => w.c)));
+    await click(manager, 200, 200);
+    check('and each after carries on from the last', drawn(canvas.scene).length === 2 && drawn(canvas.scene)[1].c.join() === '200,100,200,200');
+    check('the status names the last point', /autowall.drawNext/.test(manager._drawStatusText()) && /"x":200,"y":200/.test(manager._drawStatusText()), manager._drawStatusText());
+    check('a chain is one run, to take back together', new Set(drawn(canvas.scene).map(w => w.flags[MODULE.ID].autoWall.run)).size === 1);
+
+    // Back at the start, the shape is closed and the chain is over.
+    await click(manager, 100, 200);
+    await click(manager, 100, 100);
+    check('a click back on the start closes the shape', drawn(canvas.scene).length === 4 && drawn(canvas.scene)[3].c.join() === '100,200,100,100', JSON.stringify(drawn(canvas.scene).map(w => w.c.join())));
+    check('and ends the chain', session.draw.last === null && session.draw.start === null);
+    check('the next click begins a new chain', await click(manager, 600, 600) && JSON.stringify(session.draw.last) === '[600,600]');
+
+    // Backspace takes the last wall back and stands where it began.
+    await click(manager, 700, 600);
+    check('a wall is made', drawn(canvas.scene).length === 5);
+    manager._drawKey({ key: 'Backspace', preventDefault() {}, stopPropagation() {} });
+    await session.draw.queue;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    check('Backspace takes it back', drawn(canvas.scene).length === 4, `${drawn(canvas.scene).length}`);
+    check('and stands where it began', JSON.stringify(session.draw.last) === '[600,600]', JSON.stringify(session.draw.last));
+
+    // Enter, then Escape.
+    manager._drawKey({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+    check('Enter ends the chain', session.draw.last === null);
+    check('Escape with no chain turns drawing off', (manager._drawKey({ key: 'Escape', preventDefault() {}, stopPropagation() {} }), session.draw.active === false));
+}
+{
+    // A chain can begin on a wall end already on the scene: the thing Foundry's own tool makes hard.
+    const scenery = [{ c: [400, 300, 400, 500] }];
+    canvas = makeCanvas(makeScene(scenery));
+    const manager = build();
+    const session = startSession(manager, { tab: 'draw' });
+    manager.toggleDraw();
+    const down = x => manager._onPointerDown(event(x[0], x[1]));
+    const up = x => manager._onPointerUp(event(x[0], x[1]));
+    down([410, 296]); up([410, 296]);
+    check('a first click near the end of a wall is that end, to carry on from', JSON.stringify(session.draw.last) === '[400,300]', JSON.stringify(session.draw.last));
+    down([600, 300]); up([600, 300]);
+    await session.draw.queue;
+    const made = canvas.scene.list.find(w => w.id !== 'w1');
+    check('so the new wall starts on the old wall\'s end exactly', made?.c.join() === '400,300,600,300', JSON.stringify(canvas.scene.list.map(w => w.c)));
+
+    // Shift places a point freely.
+    manager._drawEndChain();
+    manager._onPointerDown(event(410, 296, { shiftKey: true }));
+    manager._onPointerUp(event(410, 296, { shiftKey: true }));
+    check('Shift places a point where it is, not on the end near it', JSON.stringify(session.draw.last) === '[410,296]', JSON.stringify(session.draw.last));
+
+    // Joining off: no snapping to ends.
+    manager._drawEndChain();
+    session.options.joinEnds = false;
+    manager._onPointerDown(event(410, 296));
+    manager._onPointerUp(event(410, 296));
+    check('with joining off, it is where it was clicked', JSON.stringify(session.draw.last) === '[410,296]');
+}
+{
+    // What is drawn is a door, or a window, as it is chosen.
+    canvas = makeCanvas(makeScene());
+    const manager = build();
+    const session = startSession(manager, { tab: 'draw', drawKind: 'door', doorState: 'locked', doorSound: 'wood' });
+    manager.toggleDraw();
+    for (const [x, y] of [[100, 100], [200, 100]]) { manager._onPointerDown(event(x, y)); manager._onPointerUp(event(x, y)); }
+    await session.draw.queue;
+    const door = canvas.scene.list[0];
+    check('drawn as a door, with its state and sound', door.door === 1 && canvas.scene.calls.at(-1)[1][0].ds === 2 && canvas.scene.calls.at(-1)[1][0].doorSound === 'wood', JSON.stringify(canvas.scene.calls.at(-1)));
+    check('and tagged as a door from a run', door.flags[MODULE.ID].autoWall.kind === 'door');
+    session.options.drawKind = 'window';
+    manager._drawEndChain();
+    for (const [x, y] of [[300, 100], [400, 100]]) { manager._onPointerDown(event(x, y)); manager._onPointerUp(event(x, y)); }
+    await session.draw.queue;
+    check('a window as a window', canvas.scene.calls.at(-1)[1][0].light === 30 && canvas.scene.calls.at(-1)[1][0].threshold.light === 10);
+}
+
+console.log('\nsketching a wall freehand');
+{
+    const ev = (x, y, extra = {}) => event(x, y, extra);
+    canvas = makeCanvas(makeScene([{ c: [100, 300, 100, 500] }]));
+    const manager = build();
+    const session = startSession(manager, { tab: 'draw', drawTool: 'sketch' });
+    manager.toggleDraw();
+    let seed = 9;
+    const jitter = amount => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return ((seed / 0x7fffffff) - 0.5) * amount; };
+    // From near the end of a wall already there, along and then down: an L.
+    manager._onPointerDown(ev(108, 296));
+    check('sketching takes hold of the pointer', session.draw.points !== null);
+    // The pointer reports every few pixels, as a real one does.
+    for (let x = 108; x <= 400; x += 3) manager._onSketchMove(ev(x, 296 + jitter(2)));
+    for (let y = 299; y <= 500; y += 3) manager._onSketchMove(ev(400 + jitter(2), y));
+    manager._onSketchEnd(ev(400, 500));
+    await session.draw.queue;
+    const walls = canvas.scene.list.filter(w => w.flags?.[MODULE.ID]?.autoWall);
+    check('a stroke with a corner is two walls', walls.length === 2, JSON.stringify(walls.map(w => w.c)));
+    check('it begins on the end of the wall it started beside', walls[0].c[0] === 100 && walls[0].c[1] === 300, JSON.stringify(walls[0].c));
+    check('the corner is where the stroke turned', Math.abs(walls[0].c[2] - 400) <= 10 && Math.abs(walls[0].c[3] - 300) <= 10, JSON.stringify(walls));
+    check('one stroke is one thing to take back', new Set(walls.map(w => w.flags[MODULE.ID].autoWall.run)).size === 1);
+    manager.drawBack();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    check('Backspace takes the whole stroke back', canvas.scene.list.filter(w => w.flags?.[MODULE.ID]?.autoWall).length === 0, `${canvas.scene.list.length}`);
+
+    // A pointer that did not go anywhere draws nothing.
+    manager._onPointerDown(ev(500, 500));
+    manager._onSketchEnd(ev(500, 500));
+    await session.draw.queue;
+    check('a click with no stroke draws nothing', canvas.scene.list.every(w => !w.flags?.[MODULE.ID]?.autoWall));
+}
+
+console.log('\nthe canvas is left alone when it is not wanted');
+{
+    // Foundry's own windows and sidebar are under the same window listener: the tool must not take their clicks.
+    {
+        const over = { target: { tagName: 'DIV' }, button: 0, clientX: 100, clientY: 100, shiftKey: false, swallowed: false, preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() { over.swallowed = true; } };
+        canvas = makeCanvas(makeScene());
+        const manager = build();
+        const session = startSession(manager, { tab: 'map' });
+        manager._onPointerDown(over);
+        check('a click on something drawn over the map is not the tool\'s', over.swallowed === false);
+        const onMap = { ...over, target: canvas.app.view, swallowed: false, stopImmediatePropagation() { onMap.swallowed = true; } };
+        manager._onPointerDown(onMap);
+        check('and a click on the map is', onMap.swallowed === true);
+        manager._onPointerUp({ ...over, target: { tagName: 'DIV' } });
+        check('a press on the map let go over something else is not a click', manager._press === null);
+        session.draw.active = false;
+    }
+
+    const ev = (x, y, extra = {}) => { const e = event(x, y, extra); e.swallowed = false; e.stopImmediatePropagation = () => { e.swallowed = true; }; return e; };
+    canvas = makeCanvas(makeScene());
+    const manager = build();
+    const session = startSession(manager, { tab: 'options' });
+    const down = ev(100, 100);
+    manager._onPointerDown(down);
+    check('on the Options tab, a click is Foundry\'s', down.swallowed === false);
+    session.options.tab = 'draw';
+    const idle = ev(100, 100);
+    manager._onPointerDown(idle);
+    check('on the Draw tab with drawing off, a click is Foundry\'s', idle.swallowed === false);
+    session.options.tab = 'map';
+    const map = ev(100, 100);
+    manager._onPointerDown(map);
+    check('on the Map tab it is the tool\'s', map.swallowed === true);
+    session.draw.active = true;
+    session.options.tab = 'draw';
+    const right = ev(100, 100, { button: 2 });
+    manager._onPointerDown(right);
+    check('a right-click while drawing still pans and opens menus', right.swallowed === false);
+    manager.setTab('options');
+    check('leaving the Draw tab turns drawing off and drops the chain', session.draw.active === false && session.draw.last === null);
 }
 
 // ---------------------------------------------------------------- things that go wrong

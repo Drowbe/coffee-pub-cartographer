@@ -23,6 +23,11 @@
     color: var(--blacksmith-tool-text);
 }
 
+/* LEGACY, unused: the windows now use Blacksmith's shared Tool window controls
+   (.blacksmith-tool-btn, -tabs, -segmented, .blacksmith-toggle). This button,
+   the tabs, the segmented control and the switch below are kept only until the
+   author has seen the shared ones on Light, Glass and dark; then delete them
+   (and their names from LEGACY in tests/test-scene-motion-wiring.mjs). */
 .cartographer-parallax-window .cartographer-parallax-button {
     display: inline-flex;
     align-items: center;
@@ -270,25 +275,13 @@
 }
 
 .cartographer-parallax-import-mode {
-    display: flex;
-    gap: 16px;
-    margin: 0;
-    border: none;
-    padding: 0;
+    margin: 4px 0;
 }
 
 /* --- Set dialog -------------------- */
 /* In the collection dialog: All / None / These groups, per mode. */
 .cartographer-parallax-set-dialog .cartographer-parallax-collection-modes {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 14px;
-}
-
-.cartographer-parallax-set-dialog .cartographer-parallax-collection-modes label {
-    display: flex;
-    align-items: center;
-    gap: 4px;
+    align-self: flex-start;
 }
 
 /* The add/edit set dialog is its own Foundry dialog, outside the tool window,
@@ -934,9 +927,9 @@
     max-width: none;
 }
 
-.cartographer-parallax-window .cartographer-parallax-target .cartographer-parallax-segment {
+/* Icons only: a narrow segment each. */
+.cartographer-parallax-window .cartographer-parallax-target .blacksmith-tool-segment {
     min-width: 28px;
-    height: 24px;
 }
 
 .cartographer-parallax-window .cartographer-parallax-tile-part {
@@ -1199,7 +1192,7 @@
     gap: 2px;
 }
 
-.cartographer-parallax-window .cartographer-routes-order .cartographer-parallax-button {
+.cartographer-parallax-window .cartographer-routes-order .blacksmith-tool-btn {
     min-width: 20px;
     height: 20px;
     padding: 0 3px;

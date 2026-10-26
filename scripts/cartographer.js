@@ -39,6 +39,9 @@ Hooks.on('canvasTearDown', () => {
     drawingTool.cleanup();
 });
 
+// The walls tool has a button among Foundry's own wall tools. Registered at load, before the controls are first built.
+Hooks.on('getSceneControlButtons', controls => autoWallManager.addWallTool(controls));
+
 Hooks.once('init', () => {
     game.keybindings.register(MODULE.ID, 'drawHotkey', {
         name: 'Cartographer: Draw Hotkey',
