@@ -60,6 +60,8 @@ There is one official map per scene.
 - **Rename, reset and delete on official maps.**
 - **Revealing and hiding official maps.**
 - **Clearing everybody's sketches** from the canvas at once.
+- **Walls, doors and windows from a painted map.** Click them on the scene image and they are added
+  to the scene; see [Walls, doors and windows](userguide-walls.md).
 
 ## Mapping with your own tokens
 

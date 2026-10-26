@@ -48,6 +48,54 @@ live contribution both rest on. Much of it is currently in `plans/plan-map-kinds
 `plans/plan-mapping-tool.md`, which are scaffolding and are supposed to be dismantled into exactly
 this.
 
+## Walls, doors and windows
+
+**Walk the walls tool in a running world.** Everything about it was built and checked without Foundry
+running, apart from the first stages, which were walked on the author's own map. Not yet seen: the
+window opening, moving and remembering its place; a door fitted into the gap between two wall ends,
+including the second door that first chose a wrong end; a window written with Proximity and a
+two-square threshold and accepted by Foundry; door sound and animation values accepted; Join nearest
+endpoints, shift-double-click, Clean up and Undo clean up; and a scene with several levels. Touches
+`scripts/manager-autowall.js`, `scripts/window-autowall.js`. Verified when each has been done on a
+real scene and the console shows nothing but the tool's own `auto-wall` lines.
+
+**Walk the joined-walls behaviour in a running world.** The hooks that move a joint and join a dropped
+end are tested against a stand-in scene that fires `preUpdateWall`, `updateWall` and `preCreateWall`
+as Foundry does, but not in Foundry. Unconfirmed: that the hooks run in that order for a drag on a
+single wall; that a wall dragged by one end arrives as a change to only that end; that Shift is seen
+as `ShiftLeft` or `ShiftRight` in `game.keyboard.downKeys`; and that undo with Ctrl+Z puts the joint
+back. Touches `scripts/manager-walljoin.js`. Verified by dragging a joint, a loose end and a new wall
+on a real scene, and undoing each.
+
+**Find out why a found wall sometimes shows nothing with Snap to grid corners on.** One run found the
+tower's arc, drew the cyan area, and reported nothing to add, with snapping on; the same click traced
+one segment on the author's screenshot in node. The message now says the wall was lost to snapping or
+to being too short, and the console records how many segments the tracer produced against how many
+survived snapping, but the cause is not established. Verified when the console line from a failing
+click explains it.
+
+**Give curved walls a way to follow the curve.** A round tower is traced as straight chords whose
+length follows the Smoothing setting, so a circle takes lower Smoothing and several clicks. A circle
+fit, replacing a run of chords with an arc of equal steps, would give a tower in one click. Verified on
+a painted ring of two or three radii.
+
+**Handle a thick solid wall.** A wall drawn as a block rather than a line is refused as too wide,
+because its centreline is meaningless. Mapping the block's outline, as two walls along its faces, is
+the useful result, and is where an AI assist, which the module's API already has, would earn its
+place. Verified on a painted map with a keep's walls.
+
+**Secret doors and other door types.** Left out on purpose; a door is a normal door. The panel would
+need a door type choice, and the written data a door type to match, with Foundry's own preset as the
+guide. Verified by the openings test for the new type.
+
+**Check version 13.** The data written reads `CONST.EDGE_SENSE_TYPES` with the older name as a
+fallback and sets levels only where a scene has several, but version 13's schema was not available to
+check against, so neither is confirmed. Verified by creating a wall, a door and a window on 13.
+
+**Decide whether to keep the thumbnail and the console logging.** The small picture in the window and
+the `auto-wall` console lines were added to find why clicks landed in the wrong place. The picture is
+useful when a result looks wrong; the logs are noisy. Keep, hide behind a setting, or remove.
+
 ## Foundry v14
 
 **Settle whether `canvas.drawings.controls` ever existed** (`scripts/manager-drawing.js`, around

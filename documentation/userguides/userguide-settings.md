@@ -55,6 +55,20 @@ actually see: a square inside the window is still only mapped if the token could
 Whether the mapping button appears in your menubar. Hiding it does not disable mapping; the window
 can still be opened by other means, and your maps are untouched.
 
+## Walls
+
+**Join Walls Where They Meet** -- GM, affects everyone.
+When on, walls that meet at a point move as one joint, throughout Foundry and not only in
+Cartographer's walls tool. A wall end let go near another wall's end snaps onto it, whether the wall
+is being drawn or dragged. Moving a wall end that other walls meet at moves their ends with it, so
+lifting the middle of two joined walls lifts both sides. Hold **Shift** while you place an end to
+put it exactly where you let go, as Shift already turns off the grid. It applies to the GM's own
+edits. On by default.
+
+**Join Distance** -- GM, affects everyone.
+How near, in grid squares, an end must be let go to another end to join it. It is also how near wall
+ends must be for **Clean up walls** to join them. The default is 0.3 of a square.
+
 ## Settings that are not in the settings window
 
 Some choices are remembered for you where you make them, rather than in Configure Settings:

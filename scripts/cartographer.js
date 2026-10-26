@@ -17,6 +17,7 @@ import { routesManager } from './manager-routes.js';
 import { travelPinsManager } from './manager-travelpins.js';
 import { journeysManager } from './manager-journeys.js';
 import { autoWallManager } from './manager-autowall.js';
+import { wallJoinManager } from './manager-walljoin.js';
 
 // ================================================================== 
 // ===== BLACKSMITH API INTEGRATION =================================
@@ -230,6 +231,8 @@ Hooks.once('canvasReady', async () => {
  * Tools are initialized in the canvasReady hook after Canvas Layer is available
  */
 function initializeModule() {
+    // Walls that meet move as one joint, for the GM.
+    wallJoinManager.initialize();
     // Shared services and tools will be initialized in canvasReady hook
     console.log(`${MODULE.NAME}: Module initialized`);
 }

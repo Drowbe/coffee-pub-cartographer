@@ -4,7 +4,7 @@
 // junction, that a wall stops where its material does, that a flood which leaks
 // says so. It says nothing about how a real painted map behaves; that is tried
 // on the map.
-import { mapWall, mapOpening, floodMask, simplify, snapSegments, labBuffer, mergeStraight, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls } from '../scripts/utils-autowall.js';
+import { mapWall, mapOpening, floodMask, simplify, snapSegments, labBuffer, mergeStraight, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls, openingOnWall, splitWallAt, countNearEnds, planJoinedMove, snapNewWall } from '../scripts/utils-autowall.js';
 
 let failures = 0;
 const check = (label, ok, detail = '') => {
@@ -328,6 +328,144 @@ console.log('\njoined walls that run straight become one wall');
         { id: 'a', c: [0, 0, 100, 0], key: plain }, { id: 'b', c: [100, 0, 200, 0], key: plain }, { id: 'd', c: [100, 0, 100, 60], key: null }
     ]);
     check('a door meeting there counts as a wall meeting', doorBeside.walls.length === 3);
+}
+
+// ------------------------------------------------------------------
+console.log('\na door on a wall that runs straight through it');
+{
+    const grid = 100;
+    const walls = [[0, 100, 1000, 100]];
+    const onWall = openingOnWall(walls, [400, 104], null, { grid });
+    check('a click on a wall puts a door there, a square wide', onWall && onWall.wall === 0
+        && JSON.stringify(onWall.segment) === JSON.stringify([[350, 100], [450, 100]]), JSON.stringify(onWall));
+
+    const sized = openingOnWall(walls, [400, 104], [[330, 101], [470, 99]], { grid });
+    check('the length the picture found is used when it runs along the wall', JSON.stringify(sized.segment) === JSON.stringify([[330, 100], [470, 100]]), JSON.stringify(sized));
+
+    const across = openingOnWall(walls, [400, 104], [[400, 40], [400, 160]], { grid });
+    check('a picture that runs across the wall is ignored', JSON.stringify(across.segment) === JSON.stringify([[350, 100], [450, 100]]), JSON.stringify(across));
+
+    check('a click off the wall finds nothing', openingOnWall(walls, [400, 300], null, { grid }) === null);
+    check('a click at the end of a wall is a gap, not a cut', openingOnWall(walls, [1005, 100], null, { grid }) === null);
+    check('a click near an end is too near to cut', openingOnWall(walls, [10, 100], null, { grid }) === null);
+
+    const near = openingOnWall([[0, 0, 1000, 0], [0, 40, 1000, 40]], [500, 30], null, { grid });
+    check('the nearer of two walls', near.wall === 1, JSON.stringify(near));
+
+    const cut = splitWallAt([0, 100, 1000, 100], [[350, 100], [450, 100]]);
+    check('cut from the middle, a wall is two', cut && cut.pieces.length === 2
+        && JSON.stringify(cut.pieces[0]) === JSON.stringify([0, 100, 350, 100]) && JSON.stringify(cut.pieces[1]) === JSON.stringify([450, 100, 1000, 100]), JSON.stringify(cut));
+    const fromEnd = splitWallAt([0, 100, 1000, 100], [[0, 100], [120, 100]]);
+    check('cut from an end, a wall is shortened', fromEnd && fromEnd.pieces.length === 1 && JSON.stringify(fromEnd.pieces[0]) === JSON.stringify([120, 100, 1000, 100]), JSON.stringify(fromEnd));
+    const backwards = splitWallAt([0, 100, 1000, 100], [[450, 100], [350, 100]]);
+    check('whichever way the opening is drawn', backwards && backwards.pieces.length === 2 && backwards.pieces[0][2] === 350);
+    check('an opening that is the whole wall leaves nothing to cut', splitWallAt([0, 100, 200, 100], [[0, 100], [200, 100]]) === null);
+    check('an opening off the wall is not a cut', splitWallAt([0, 100, 1000, 100], [[350, 140], [450, 140]]) === null);
+    check('an opening that runs past the end is not a cut', splitWallAt([0, 100, 1000, 100], [[950, 100], [1100, 100]]) === null);
+    const slanted = splitWallAt([0, 0, 1000, 1000], [[300, 300], [500, 500]]);
+    check('on a slanted wall', slanted && slanted.pieces.length === 2 && slanted.pieces[0][2] === 300 && slanted.pieces[1][0] === 500, JSON.stringify(slanted));
+}
+
+// ------------------------------------------------------------------
+console.log('\na curved wall is not made straight');
+{
+    // A ring of walls, the way a hand-drawn curve is: many short walls, each turning a few degrees.
+    const ring = (steps, radius) => Array.from({ length: steps }, (_, i) => {
+        const a = (i / steps) * 2 * Math.PI;
+        const b = ((i + 1) / steps) * 2 * Math.PI;
+        return { id: `r${i}`, c: [Math.round(5000 + radius * Math.cos(a)), Math.round(5000 + radius * Math.sin(a)), Math.round(5000 + radius * Math.cos(b)), Math.round(5000 + radius * Math.sin(b))], key: 'normal' };
+    });
+    // Five degrees at a joint is within the angle for straight, and the old merge ate it joint by joint.
+    const coarse = mergeWalls(ring(72, 1000), 8, 3);
+    check('a ring turning five degrees a wall keeps its walls', coarse.walls.length >= 70, `${coarse.walls.length} of 72`);
+    const same = mergeWalls(ring(72, 1000), 8);
+    check('and with no check on the curve a third of the ring was all that was left', same.walls.length < 40, `${same.walls.length} of 72`);
+
+    // Finer than that, merging is allowed so long as the curve stays within the tolerance of itself.
+    const fine = mergeWalls(ring(360, 1000), 8, 3);
+    check('a very fine ring may be simplified, but is still a ring', fine.walls.length > 40 && fine.walls.length < 360, `${fine.walls.length} of 360`);
+    const pointsOnCircle = fine.walls.every(w => Math.abs(Math.hypot(w.c[0] - 5000, w.c[1] - 5000) - 1000) < 2 && Math.abs(Math.hypot(w.c[2] - 5000, w.c[3] - 5000) - 1000) < 2);
+    check('every end of it is still on the circle', pointsOnCircle);
+
+    // A straight run with a little jitter is still one wall.
+    const jitter = mergeWalls([
+        { id: 'a', c: [0, 0, 100, 1], key: 'normal' }, { id: 'b', c: [100, 1, 200, -1], key: 'normal' }, { id: 'c', c: [200, -1, 300, 0], key: 'normal' }
+    ], 8, 3);
+    check('a straight run with jitter is still made one', jitter.walls.length === 1 && jitter.merged === 2, JSON.stringify(jitter));
+
+    // In the tracer's own output too.
+    const bent = mergeStraight([[[0, 0], [100, 0]], [[100, 0], [200, 9]]], 12, 3);
+    check('a bend the tracer found is kept when it is more than the tolerance', bent.length === 2, JSON.stringify(bent));
+    check('and merged when it is within it', mergeStraight([[[0, 0], [100, 0]], [[100, 0], [200, 4]]], 12, 3).length === 1);
+}
+
+// ------------------------------------------------------------------
+console.log('\nwall ends that nearly meet');
+{
+    const walls = [{ c: [0, 0, 100, 0] }, { c: [128, 0, 300, 0] }, { c: [100, 60, 400, 400] }];
+    check('ends beyond the join distance but within a square are counted', countNearEnds(walls, 25, 100) === 3, `${countNearEnds(walls, 25, 100)}`);
+    check('and none once the join distance reaches them', countNearEnds(walls, 70, 100) === 0);
+    check('ends of the same wall are not pairs', countNearEnds([{ c: [0, 0, 40, 0] }], 10, 100) === 0);
+}
+
+// ------------------------------------------------------------------
+console.log('\nmoving a joint moves the walls on each side of it');
+{
+    const chain = [{ id: 'a', c: [0, 0, 100, 0] }, { id: 'b', c: [100, 0, 200, 0] }];
+    const plan = planJoinedMove(chain, 'a', [0, 0, 100, 0], [0, 0, 100, 50]);
+    check('the end moved is the wall the GM moved', JSON.stringify(plan.c) === JSON.stringify([0, 0, 100, 50]), JSON.stringify(plan));
+    check('and the wall that met it there follows', plan.updates.length === 1 && plan.updates[0]._id === 'b' && JSON.stringify(plan.updates[0].c) === JSON.stringify([100, 50, 200, 0]), JSON.stringify(plan.updates));
+
+    const fromStart = planJoinedMove(chain, 'b', [100, 0, 200, 0], [100, -40, 200, 0]);
+    check('whichever wall of the two is the one moved', fromStart.updates.length === 1 && JSON.stringify(fromStart.updates[0].c) === JSON.stringify([0, 0, 100, -40]), JSON.stringify(fromStart));
+
+    const star = [{ id: 'a', c: [0, 0, 100, 0] }, { id: 'b', c: [100, 0, 200, 0] }, { id: 'c', c: [100, 0, 100, 150] }];
+    const three = planJoinedMove(star, 'a', [0, 0, 100, 0], [0, 0, 120, 30]);
+    check('every wall at the joint follows, not only two', three.updates.length === 2 && three.updates.every(u => u.c.includes(120) && u.c.includes(30)), JSON.stringify(three.updates));
+
+    check('a wall moved by both ends is carried, and nothing follows', planJoinedMove(chain, 'a', [0, 0, 100, 0], [10, 10, 110, 10]) === null);
+    check('a wall not moved is not a move', planJoinedMove(chain, 'a', [0, 0, 100, 0], [0, 0, 100, 0]) === null);
+    check('a wall with no neighbour at that end moves alone', planJoinedMove([{ id: 'a', c: [0, 0, 100, 0] }], 'a', [0, 0, 100, 0], [0, 0, 100, 40]).updates.length === 0);
+
+    // The picture in the request: two walls end to end, then joined.
+    const apart = [{ id: 'a', c: [0, 0, 100, 0] }, { id: 'b', c: [130, 0, 300, 0] }];
+    const snap = planJoinedMove(apart, 'a', [0, 0, 100, 0], [0, 0, 112, 0], { reach: 40 });
+    check('an end let go near another end joins it', snap.snapped && JSON.stringify(snap.c) === JSON.stringify([0, 0, 130, 0]), JSON.stringify(snap));
+    check('and what is joined is left where it was', snap.updates.length === 0);
+    const far = planJoinedMove(apart, 'a', [0, 0, 100, 0], [0, 0, 104, 0], { reach: 10 });
+    check('an end let go further off than the reach is left where it was let go', !far.snapped && far.c[2] === 104, JSON.stringify(far));
+    const held = planJoinedMove(apart, 'a', [0, 0, 100, 0], [0, 0, 112, 0], { reach: 0 });
+    check('with no reach (Shift held) it is not joined', !held.snapped && held.c[2] === 112);
+
+    // Joined, then moved: both follow.
+    const joined = [{ id: 'a', c: [0, 0, 130, 0] }, { id: 'b', c: [130, 0, 300, 0] }];
+    const lift = planJoinedMove(joined, 'b', [130, 0, 300, 0], [130, -90, 300, 0]);
+    check('once joined, moving the middle moves both sides of it', JSON.stringify(lift.c) === JSON.stringify([130, -90, 300, 0]) && JSON.stringify(lift.updates[0].c) === JSON.stringify([0, 0, 130, -90]), JSON.stringify(lift));
+
+    // A joint dropped on a third wall's end joins that too, and takes the walls with it.
+    const three_ = [{ id: 'a', c: [0, 0, 100, 0] }, { id: 'b', c: [100, 0, 200, 0] }, { id: 'c', c: [140, 60, 300, 300] }];
+    const onto = planJoinedMove(three_, 'a', [0, 0, 100, 0], [0, 0, 130, 50], { reach: 25 });
+    check('a joint let go near another wall end is that end, with its walls', onto.snapped && JSON.stringify(onto.c) === JSON.stringify([0, 0, 140, 60]) && JSON.stringify(onto.updates[0].c) === JSON.stringify([140, 60, 200, 0]), JSON.stringify(onto));
+
+    // It cannot be folded back on itself.
+    const fold = planJoinedMove([{ id: 'a', c: [0, 0, 100, 0] }, { id: 'z', c: [0, 0, 0, 80] }], 'a', [0, 0, 100, 0], [0, 0, 6, 0], { reach: 40 });
+    check('an end is not joined to the far end of its own wall, which would fold it flat', !fold.snapped, JSON.stringify(fold));
+
+    // A wall carried onto its own far end is gone.
+    const gone = planJoinedMove([{ id: 'a', c: [0, 0, 100, 0] }, { id: 'b', c: [100, 0, 150, 0] }], 'a', [0, 0, 100, 0], [0, 0, 150, 0]);
+    check('a wall that is carried onto its own other end is removed', JSON.stringify(gone.deletes) === JSON.stringify(['b']) && gone.updates.length === 0, JSON.stringify(gone));
+}
+
+// ------------------------------------------------------------------
+console.log('\ndrawing a wall next to others');
+{
+    const walls = [{ id: 'a', c: [0, 0, 100, 0] }];
+    check('a new wall started near the end of another starts at that end', JSON.stringify(snapNewWall(walls, [112, 8, 300, 200], 30)) === JSON.stringify([100, 0, 300, 200]));
+    check('and one that ends near it ends there', JSON.stringify(snapNewWall(walls, [300, 200, 96, -6], 30)) === JSON.stringify([300, 200, 100, 0]));
+    check('both ends can join', JSON.stringify(snapNewWall([{ id: 'a', c: [0, 0, 100, 0] }, { id: 'b', c: [300, 0, 400, 0] }], [104, 3, 296, -2], 30)) === JSON.stringify([100, 0, 300, 0]));
+    check('further off than the reach, it is left where it is', JSON.stringify(snapNewWall(walls, [160, 0, 300, 200], 30)) === JSON.stringify([160, 0, 300, 200]));
+    check('with no reach, nothing joins', JSON.stringify(snapNewWall(walls, [102, 0, 300, 200], 0)) === JSON.stringify([102, 0, 300, 200]));
+    check('a short wall is not folded flat onto one end', snapNewWall(walls, [96, 4, 104, 4], 30).join() !== '100,0,100,0');
 }
 
 // ------------------------------------------------------------------

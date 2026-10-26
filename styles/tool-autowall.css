@@ -3,14 +3,15 @@
 /* --- AUTO-WALL TOOL ----------------- */
 /* ------------------------------------ */
 
-/* The window shares the scene-motion window's bar, tabs, panel and buttons
-   (tool-parallax.css, through `cartographer-parallax-window`). Everything here
-   is what only this window has. Colours come from the --blacksmith-tool-*
-   family, so it follows Light, Dark and Glass without theme rules of its own. */
+/* The window is built from Blacksmith's tool-window components -- tabs, the segmented
+   control, sections, toggles, sliders, buttons -- which carry their own styling and follow
+   Light, Dark and Glass. What is here is only what no shared component covers: the status
+   line, the small picture, and a row of label, control and value. Colours come from the
+   --blacksmith-tool-* family. */
 
 .cartographer-autowall-window .cartographer-autowall-panel {
-    color: var(--blacksmith-tool-text);
-    font-size: 13px;
+    padding: 8px 10px 10px;
+    font-size: 0.9em;
 }
 
 .cartographer-autowall-window .cartographer-autowall-status {
@@ -20,12 +21,12 @@
 }
 
 .cartographer-autowall-window .cartographer-autowall-status[data-tone="ok"] {
-    color: var(--blacksmith-status-success, #6fd08c);
+    color: var(--blacksmith-status-success, #2e7d32);
 }
 
 .cartographer-autowall-window .cartographer-autowall-status[data-tone="note"],
 .cartographer-autowall-window .cartographer-autowall-status[data-tone="warn"] {
-    color: var(--blacksmith-status-warning, #f0b35a);
+    color: var(--blacksmith-status-warning, #b26a00);
 }
 
 .cartographer-autowall-window .cartographer-autowall-thumb {
@@ -35,11 +36,11 @@
     height: 150px;
     border: 1px solid var(--blacksmith-tool-divider);
     border-radius: 4px;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--blacksmith-tool-surface-sunken, rgba(0, 0, 0, 0.35));
 }
 
-/* Label, slider and value sit side by side; the labels share a column so the
-   sliders start at the same place, but nothing is pushed to the far edge. */
+/* Label, control and value sit side by side; the labels share a column so the controls start at
+   the same place, but nothing is pushed to the far edge. */
 .cartographer-autowall-window .cartographer-autowall-row {
     display: grid;
     grid-template-columns: 92px minmax(0, 1fr) 40px;
@@ -54,11 +55,6 @@
     text-overflow: ellipsis;
 }
 
-.cartographer-autowall-window .cartographer-autowall-row input[type="range"] {
-    width: 100%;
-    margin: 0;
-}
-
 .cartographer-autowall-window .cartographer-autowall-value {
     font-variant-numeric: tabular-nums;
     color: var(--blacksmith-tool-text-muted);
@@ -71,26 +67,6 @@
     min-width: 0;
     height: 24px;
     margin: 0;
-}
-
-.cartographer-autowall-window .cartographer-autowall-check {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0;
-}
-
-.cartographer-autowall-window .cartographer-autowall-check input {
-    margin: 0;
-}
-
-.cartographer-autowall-window .cartographer-autowall-cleanup {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 6px;
-    padding-top: 10px;
-    border-top: 1px solid var(--blacksmith-tool-divider);
 }
 
 .cartographer-autowall-window .cartographer-autowall-buttons {

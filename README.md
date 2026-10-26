@@ -16,6 +16,7 @@ Party strategic planning, temporary canvas sketching, and shared old-school mapp
 - Temporary multiplayer canvas drawings with shapes, stamps, colors, and timed cleanup.
 - A persistent party map that reveals the 5×5 grid area around a controlled token as it moves.
 - A separate resizable map view using Blacksmith's Light, Dark, and Glass Tool window themes.
+- For GMs, walls, doors and windows added to a scene by clicking them on a painted battlemap.
 
 ## Requirements
 

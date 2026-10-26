@@ -1,5 +1,5 @@
 // ==================================================================
-// ===== AUTO-WALL: FROM A CLICKED WALL TO WALL SEGMENTS ===========
+// ===== AUTO-WALL: FROM A CLICK TO WALLS, DOORS AND WINDOWS ========
 // ==================================================================
 //
 // "Map this wall": the user clicks a wall on the scene image and everything
@@ -17,6 +17,13 @@
 //   6. weld           merge the ends thinning left bunched at a junction,
 //      mergeStraight  and the points left on a line that does not turn
 //   7. snapSegments   to the grid, and to 45 degrees
+//
+// Also here, because they too are pure geometry: mapOpening (a door or window
+// read from its art), and what works on walls already on the scene --
+// findOpening (the gap two wall ends leave), openingOnWall and splitWallAt (a
+// door on a wall that runs through it, and what is left of the wall),
+// cleanupEnds and mergeWalls (joining ends, making straight runs one wall),
+// mergeStraightAt and splitSegmentAt (editing the walls of a run).
 //
 // A pixel buffer is { data, width, height } with data as RGBA bytes, which is
 // what a canvas ImageData is.
@@ -466,7 +473,7 @@ export function weld(segments, distance = 4) {
  * with a point in the middle of it. A real corner, or a third wall arriving,
  * keeps its point.
  */
-export function mergeStraight(segments, degrees = 12) {
+export function mergeStraight(segments, degrees = 12, deviation = Infinity) {
     const key = ([x, y]) => `${Math.round(x * 100)},${Math.round(y * 100)}`;
     const live = segments.map(([a, b]) => [a, b]);
     let merged = true;
@@ -491,6 +498,8 @@ export function mergeStraight(segments, degrees = 12) {
             const turn = Math.abs(((Math.atan2(second.far[1] - first.near[1], second.far[0] - first.near[0])
                 - Math.atan2(first.near[1] - first.far[1], first.near[0] - first.far[0])) * 180 / Math.PI + 540) % 360 - 180);
             if (turn > degrees) continue;
+            // The point that goes must lie near the line that replaces it, or a bend is being flattened.
+            if (distanceToSegmentWithT(first.near, first.far, second.far).distance > deviation) continue;
             live[first.index] = [first.far, second.far];
             live[second.index] = null;
             merged = true;
@@ -645,7 +654,7 @@ export function mapWall(pixels, seedX, seedY, options = {}) {
         for (let i = 0; i < simple.length - 1; i++) segments.push([simple[i], simple[i + 1]]);
     }
     // Back into the image's own pixels, and a pixel's centre rather than its corner.
-    const placed = mergeStraight(weld(segments, weldDistance))
+    const placed = mergeStraight(weld(segments, weldDistance), 12, epsilon)
         .map(([a, b]) => [[a[0] + x0 + 0.5, a[1] + y0 + 0.5], [b[0] + x0 + 0.5, b[1] + y0 + 0.5]]);
     // Straightening turns each segment about its middle, which parts ends that
     // met by a hair; one more weld, much tighter, closes them again.
@@ -790,8 +799,12 @@ export function findOpening(walls, point, { grid, minSquares = 0.4, maxSquares =
         ends.push({ wall: index, at: [wall[0], wall[1]], away: [wall[2], wall[3]] });
         ends.push({ wall: index, at: [wall[2], wall[3]], away: [wall[0], wall[1]] });
     });
+    // Only ends within reach of the click can be part of the gap, which on a big scene
+    // is a handful of the thousands: everything after works on those alone.
+    const radius = maxSquares * grid + reachSquares * grid;
+    const candidates = ends.filter(end => Math.hypot(end.at[0] - point[0], end.at[1] - point[1]) <= radius);
     // How many ends meet at each: one is a free end.
-    for (const end of ends) end.meeting = ends.filter(other => Math.hypot(other.at[0] - end.at[0], other.at[1] - end.at[1]) <= 2).length;
+    for (const end of candidates) end.meeting = ends.filter(other => Math.hypot(other.at[0] - end.at[0], other.at[1] - end.at[1]) <= 2).length;
 
     const unit = (from, to) => {
         const length = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1;
@@ -799,10 +812,10 @@ export function findOpening(walls, point, { grid, minSquares = 0.4, maxSquares =
     };
     let best = null;
     for (const free of [true, false]) {
-        for (let i = 0; i < ends.length; i++) {
-            for (let j = i + 1; j < ends.length; j++) {
-                const a = ends[i];
-                const b = ends[j];
+        for (let i = 0; i < candidates.length; i++) {
+            for (let j = i + 1; j < candidates.length; j++) {
+                const a = candidates[i];
+                const b = candidates[j];
                 if (a.wall === b.wall) continue;
                 if (free && (a.meeting > 1 || b.meeting > 1)) continue;
                 // Something already spans it: a door put there before.
@@ -934,45 +947,56 @@ export function mergeStraightAt(segments, point, degrees = 8) {
  * is how doors and windows stay what they are.
  *
  * @param {{ id: string, c: number[], key: string|null }[]} walls
- * @param {number} degrees
+ * @param {number} degrees    The most a joint may turn and still be straight.
+ * @param {number} deviation  The furthest a point a wall was made from may lie from the wall it is made into.
  * @returns {{ walls: { id: string, c: number[] }[], removed: string[], merged: number }}
  *   The walls that remain, those that went into others, and how many merges were made.
  */
-export function mergeWalls(walls, degrees = 8) {
-    const live = walls.map(wall => ({ id: wall.id, c: [...wall.c], key: wall.key }));
+export function mergeWalls(walls, degrees = 8, deviation = Infinity) {
+    // Each wall keeps the points it has been made from, oriented from its first end to its last.
+    const live = walls.map(wall => ({
+        id: wall.id, c: [...wall.c], key: wall.key,
+        path: [[wall.c[0], wall.c[1]], [wall.c[2], wall.c[3]]]
+    }));
     const removed = [];
     let merged = 0;
+    const keyOf = (x, y) => `${x},${y}`;
     let again = true;
     while (again) {
         again = false;
         const at = new Map();
-        const keyOf = (x, y) => `${x},${y}`;
+        const everything = new Map();
         live.forEach((wall, index) => {
-            if (!wall || wall.key === null) return;
+            if (!wall) return;
             for (const which of [0, 1]) {
                 const k = keyOf(wall.c[which * 2], wall.c[which * 2 + 1]);
-                at.set(k, [...(at.get(k) ?? []), { index, which }]);
-            }
-        });
-        // Every end at a point counts, door ends too: a third wall there means a junction.
-        const everything = new Map();
-        walls.forEach((wall, index) => {
-            const original = live[index];
-            if (!original) return;
-            for (const which of [0, 1]) {
-                const k = keyOf(original.c[which * 2], original.c[which * 2 + 1]);
+                // Every end at a point counts, door ends too: a third wall there means a junction.
                 everything.set(k, (everything.get(k) ?? 0) + 1);
+                if (wall.key !== null) at.set(k, [...(at.get(k) ?? []), { index, which }]);
             }
         });
         for (const [k, list] of at) {
             if (list.length !== 2 || everything.get(k) !== 2 || list[0].index === list[1].index) continue;
             const [a, b] = list.map(({ index, which }) => ({
-                index, near: [live[index].c[which * 2], live[index].c[which * 2 + 1]],
+                index, which,
+                near: [live[index].c[which * 2], live[index].c[which * 2 + 1]],
                 far: [live[index].c[(1 - which) * 2], live[index].c[(1 - which) * 2 + 1]]
             }));
             if (live[a.index].key !== live[b.index].key) continue;
             if (turnAt(a.far, a.near, b.far) > degrees) continue;
-            live[a.index].c = [a.far[0], a.far[1], b.far[0], b.far[1]];
+
+            // The walls as one line of points, from a's far end to b's far end.
+            const first = a.which === 1 ? live[a.index].path : live[a.index].path.slice().reverse();
+            const second = b.which === 0 ? live[b.index].path : live[b.index].path.slice().reverse();
+            const path = [...first, ...second.slice(1)];
+            const start = path[0];
+            const end = path[path.length - 1];
+            // Each joint may turn only a little, but joints add up: a curve made of gentle turns is
+            // not a straight wall. Every point the new wall passes through must still lie on it.
+            if (path.slice(1, -1).some(point => distanceToSegmentWithT(point, start, end).distance > deviation)) continue;
+
+            live[a.index].c = [start[0], start[1], end[0], end[1]];
+            live[a.index].path = path;
             removed.push(live[b.index].id);
             live[b.index] = null;
             merged++;
@@ -981,4 +1005,222 @@ export function mergeWalls(walls, degrees = 8) {
         }
     }
     return { walls: live.filter(Boolean).map(wall => ({ id: wall.id, c: wall.c })), removed, merged };
+}
+
+/**
+ * How many pairs of wall ends, on different walls, are further apart than
+ * `from` and no further than `to`: ends that nearly meet but are not near
+ * enough to have been joined, for telling the GM the join distance is short.
+ *
+ * @param {{ c: number[] }[]} walls
+ * @returns {number}
+ */
+export function countNearEnds(walls, from, to) {
+    const ends = walls.flatMap((wall, index) => [{ index, x: wall.c[0], y: wall.c[1] }, { index, x: wall.c[2], y: wall.c[3] }]);
+    let count = 0;
+    for (let i = 0; i < ends.length; i++) {
+        for (let j = i + 1; j < ends.length; j++) {
+            if (ends[i].index === ends[j].index) continue;
+            const distance = Math.hypot(ends[i].x - ends[j].x, ends[i].y - ends[j].y);
+            if (distance > from && distance <= to) count++;
+        }
+    }
+    return count;
+}
+
+// ------------------------------------------------------------------
+// Doors and windows on a wall that runs through them
+// ------------------------------------------------------------------
+
+/**
+ * Where a door or window goes on a wall that was drawn straight across it.
+ * The click must be on the wall, not at an end of it: a click beside a wall's
+ * end is a gap, which findOpening answers. The opening is the length the
+ * picture gave, if it ran along this wall, and otherwise one square, centred
+ * on the click; either is clamped to the wall.
+ *
+ * @param {number[][]} walls   Each as [x1, y1, x2, y2].
+ * @param {number[]} click
+ * @param {number[][]|null} candidate  The opening as the picture found it, [[x, y], [x, y]], or null.
+ * @returns {{ wall: number, segment: number[][] }|null}
+ */
+export function openingOnWall(walls, click, candidate, { grid, reachSquares = 0.6, defaultSquares = 1 } = {}) {
+    let best = null;
+    walls.forEach((wall, index) => {
+        const length = Math.hypot(wall[2] - wall[0], wall[3] - wall[1]);
+        if (length < grid * 0.5) return;
+        const { distance, t } = distanceToSegmentWithT(click, [wall[0], wall[1]], [wall[2], wall[3]]);
+        const foot = t * length;
+        if (foot < grid * 0.25 || foot > length - grid * 0.25) return;
+        if (distance > reachSquares * grid) return;
+        if (!best || distance < best.distance) best = { index, distance, foot, length, wall };
+    });
+    if (!best) return null;
+
+    const [x1, y1, x2, y2] = best.wall;
+    const ux = (x2 - x1) / best.length;
+    const uy = (y2 - y1) / best.length;
+    const along = ([x, y]) => (x - x1) * ux + (y - y1) * uy;
+    const across = ([x, y]) => Math.abs(-(x - x1) * uy + (y - y1) * ux);
+
+    let lo = best.foot - grid * defaultSquares / 2;
+    let hi = best.foot + grid * defaultSquares / 2;
+    if (candidate) {
+        const [a, b] = candidate;
+        const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const parallel = length ? Math.abs((b[0] - a[0]) * ux + (b[1] - a[1]) * uy) / length : 0;
+        // Along this wall, and on it: the picture's length is the opening's.
+        if (parallel >= Math.cos(30 * Math.PI / 180) && across(a) <= grid * 0.6 && across(b) <= grid * 0.6) {
+            lo = Math.min(along(a), along(b));
+            hi = Math.max(along(a), along(b));
+        }
+    }
+    lo = Math.max(0, lo);
+    hi = Math.min(best.length, hi);
+    if (hi - lo < grid * 0.3) return null;
+    const point = s => [Math.round(x1 + ux * s), Math.round(y1 + uy * s)];
+    return { wall: best.index, segment: [point(lo), point(hi)] };
+}
+
+/**
+ * What is left of a wall when an opening is cut out of it: the opening must lie
+ * along the wall, within tolerance, and inside it. Cut from the middle, two
+ * pieces remain; cut from one end, one; and an opening that is the whole wall
+ * leaves nothing to cut, so the wall is left alone and null returned.
+ *
+ * @param {number[]} wall     [x1, y1, x2, y2]
+ * @param {number[][]} segment  The opening, [[x, y], [x, y]].
+ * @returns {{ pieces: number[][] }|null}  The pieces, each [x1, y1, x2, y2], from the wall's start to its end.
+ */
+export function splitWallAt(wall, segment, tolerance = 2) {
+    const [x1, y1, x2, y2] = wall;
+    const length = Math.hypot(x2 - x1, y2 - y1);
+    if (!length) return null;
+    const ux = (x2 - x1) / length;
+    const uy = (y2 - y1) / length;
+    const measured = segment.map(([x, y]) => ({
+        along: (x - x1) * ux + (y - y1) * uy,
+        across: Math.abs(-(x - x1) * uy + (y - y1) * ux)
+    }));
+    if (measured.some(m => m.across > tolerance)) return null;
+    const lo = Math.min(measured[0].along, measured[1].along);
+    const hi = Math.max(measured[0].along, measured[1].along);
+    if (hi - lo < 1) return null;
+    if (lo < -tolerance || hi > length + tolerance) return null;
+    const before = lo > tolerance;
+    const after = hi < length - tolerance;
+    if (!before && !after) return null;
+    const point = s => [Math.round(x1 + ux * s), Math.round(y1 + uy * s)];
+    const pieces = [];
+    if (before) pieces.push([x1, y1, ...point(lo)]);
+    if (after) pieces.push([...point(hi), x2, y2]);
+    return { pieces };
+}
+
+// ------------------------------------------------------------------
+// Joined walls
+// ------------------------------------------------------------------
+
+/**
+ * The option an update carries to say that it is not to be followed: the
+ * walls joined to a moved end are moved by the join, and that move must not
+ * start another.
+ */
+export const SKIP_JOIN = 'cartographerSkipJoin';
+
+/**
+ * What follows from one end of a wall being moved. Walls that meet at a point
+ * are a joint, and a joint moves as one: every wall with an end where the end
+ * was has that end moved to where it went. And an end let go near the end of
+ * some other wall is that end, so the two are a joint from then on.
+ *
+ * Only a single moved end is a joint being worked on. Both ends changing is a
+ * wall carried or a group moved together, and is left as it is.
+ *
+ * @param {{ id: string, c: number[] }[]} walls  Every wall, with its coordinates as they are now.
+ * @param {string} id                            The wall being moved.
+ * @param {number[]} oldC  The wall's coordinates now.
+ * @param {number[]} newC  The coordinates it is being given.
+ * @param {{ reach?: number, tolerance?: number }} [options]  reach: how near another end an end is let go to be joined to it, in pixels, 0 for never.
+ * @returns {{ c: number[], updates: { _id: string, c: number[] }[], deletes: string[], snapped: boolean }|null}
+ */
+export function planJoinedMove(walls, id, oldC, newC, { reach = 0, tolerance = 1.5 } = {}) {
+    const moved0 = newC[0] !== oldC[0] || newC[1] !== oldC[1];
+    const moved1 = newC[2] !== oldC[2] || newC[3] !== oldC[3];
+    if (moved0 === moved1) return null;
+    const end = moved0 ? 0 : 1;
+    const from = [oldC[end * 2], oldC[end * 2 + 1]];
+    const fixed = [oldC[(1 - end) * 2], oldC[(1 - end) * 2 + 1]];
+    const near = (p, q, within) => Math.hypot(p[0] - q[0], p[1] - q[1]) <= within;
+
+    // The walls with an end where this one was. A wall with both ends there has no length to follow.
+    const joined = [];
+    for (const wall of walls) {
+        if (wall.id === id) continue;
+        const first = near([wall.c[0], wall.c[1]], from, tolerance);
+        const second = near([wall.c[2], wall.c[3]], from, tolerance);
+        if (first !== second) joined.push({ id: wall.id, c: wall.c, end: first ? 0 : 1 });
+    }
+    const moving = new Set([id, ...joined.map(wall => wall.id)]);
+
+    // Let go near another wall's end, it is that end -- unless that would fold the wall on itself.
+    let to = [newC[end * 2], newC[end * 2 + 1]];
+    let snapped = false;
+    if (reach > 0) {
+        let best = null;
+        for (const wall of walls) {
+            if (moving.has(wall.id)) continue;
+            for (const which of [0, 1]) {
+                const point = [wall.c[which * 2], wall.c[which * 2 + 1]];
+                const distance = Math.hypot(point[0] - to[0], point[1] - to[1]);
+                if (distance <= reach && !near(point, fixed, tolerance) && (!best || distance < best.distance)) best = { point, distance };
+            }
+        }
+        if (best && (best.point[0] !== to[0] || best.point[1] !== to[1])) {
+            to = best.point;
+            snapped = true;
+        }
+    }
+
+    const c = end === 0 ? [to[0], to[1], oldC[2], oldC[3]] : [oldC[0], oldC[1], to[0], to[1]];
+    const updates = [];
+    const deletes = [];
+    for (const wall of joined) {
+        const next = wall.end === 0 ? [to[0], to[1], wall.c[2], wall.c[3]] : [wall.c[0], wall.c[1], to[0], to[1]];
+        // Carried to its own other end, a wall has nothing left.
+        if (next[0] === next[2] && next[1] === next[3]) deletes.push(wall.id);
+        else updates.push({ _id: wall.id, c: next });
+    }
+    return { c, updates, deletes, snapped };
+}
+
+/**
+ * A wall being drawn: each end that is let go near the end of another wall is
+ * that end. Where both ends would land on one point the second keeps its place,
+ * so a short wall is not folded flat.
+ *
+ * @param {{ id: string, c: number[] }[]} walls  The walls already there.
+ * @param {number[]} c  The new wall's coordinates.
+ * @param {number} reach  How near, in pixels, counts as at the end.
+ * @returns {number[]}  The coordinates, with any end that joined moved onto the end it joined.
+ */
+export function snapNewWall(walls, c, reach) {
+    if (!(reach > 0)) return c;
+    const result = [...c];
+    for (const end of [0, 1]) {
+        let best = null;
+        for (const wall of walls) {
+            for (const which of [0, 1]) {
+                const point = [wall.c[which * 2], wall.c[which * 2 + 1]];
+                const distance = Math.hypot(point[0] - result[end * 2], point[1] - result[end * 2 + 1]);
+                const other = [result[(1 - end) * 2], result[(1 - end) * 2 + 1]];
+                if (distance <= reach && !(point[0] === other[0] && point[1] === other[1]) && (!best || distance < best.distance)) best = { point, distance };
+            }
+        }
+        if (best) {
+            result[end * 2] = best.point[0];
+            result[end * 2 + 1] = best.point[1];
+        }
+    }
+    return result;
 }

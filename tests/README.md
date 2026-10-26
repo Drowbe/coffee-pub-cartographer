@@ -31,6 +31,13 @@ of it looks, so **they are not a substitute for opening the map**.
 | `test-scene-motion-timing` | The shared clock behind scene motion -- position stays continuous through an ease and through a change made mid-ease -- and the rules for which groups are on. |
 | `test-scene-motion-managers` | The real parallax, tile-motion and collections managers driven through a GM's session: groups, duplicating, reordering, importing, a spinning tile's pivot, collections, and the window following the scene. |
 | `test-scene-motion-wiring` | Every scene-motion button has a handler, every field is acted on, every string exists, and no string or style goes unused. |
+| `test-autowall` | The wall tracer, on pictures painted in code: straight, chipped and slanted walls, junctions, a wall that changes material, a flood that leaks into a room, doors found at any angle and as the gap between wall ends, and joining, splitting and merging. |
+| `test-autowall-openings` | The real fitting and wall-data methods of the walls tool: where a door or window is fitted to the wall ends, and exactly what is written for a wall, a door and a window. |
+| `test-autowall-scene` | What the walls tool does to a scene's walls, against a stand-in scene: clean-up and its undo restoring every wall, adding a run, and taking a run back. |
+| `test-autowall-flow` | The whole walls tool, from the real manager source, in node against stand-ins for Foundry, the canvas and PIXI: a click, a drag, joining, shift-double-click, a door in a gap and on a wall, and Add. A smoke test of the code's own wiring. |
+| `test-autowall-window` | The walls window's HTML for every mode and tab: the controls each has, the values selected, nothing undefined, and names escaped. |
+| `test-autowall-join` | The joined-walls hook, run against a stand-in scene that fires Foundry's two update hooks: a joint followed, an end joined, a wall drawn, the setting off, Shift held, and an update the walls tool made that must not be followed. |
+| `test-autowall-wiring` | Every string, class, window action and control of the walls tool exists, and the window only calls what the manager has. |
 
 ## Why the mutation suite exists
 

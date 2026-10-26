@@ -147,6 +147,32 @@ export const registerSettings = () => {
         group: WORKFLOW_GROUPS.CONFIGURATION
     });
 
+    // Walls that meet are a joint, and a joint moves as one: see manager-walljoin.js.
+    game.settings.register(MODULE.ID, 'walls.joinEnds', {
+        name: MODULE.ID + '.walls.joinEnds-Label',
+        hint: MODULE.ID + '.walls.joinEnds-Hint',
+        scope: 'world',
+        config: true,
+        default: true,
+        type: Boolean,
+        group: WORKFLOW_GROUPS.CONFIGURATION
+    });
+
+    game.settings.register(MODULE.ID, 'walls.joinDistance', {
+        name: MODULE.ID + '.walls.joinDistance-Label',
+        hint: MODULE.ID + '.walls.joinDistance-Hint',
+        scope: 'world',
+        config: true,
+        default: 0.3,
+        type: Number,
+        range: {
+            min: 0.05,
+            max: 1,
+            step: 0.05
+        },
+        group: WORKFLOW_GROUPS.CONFIGURATION
+    });
+
     game.settings.register(MODULE.ID, 'mapping.allowPlayers', {
         name: MODULE.ID + '.mapping.allowPlayers-Label',
         hint: MODULE.ID + '.mapping.allowPlayers-Hint',

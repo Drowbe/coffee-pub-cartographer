@@ -14,7 +14,7 @@
 
 import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
-import { labBuffer, mapWall, mapOpening, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls } from './utils-autowall.js';
+import { labBuffer, mapWall, mapOpening, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls, openingOnWall, splitWallAt, countNearEnds, SKIP_JOIN } from './utils-autowall.js';
 import { AutoWallWindow } from './window-autowall.js';
 
 /** The section of Cartographer's sub-menubar these sit in; registered in manager-toolbar.js. */
@@ -31,6 +31,9 @@ const MAX_WORK_SIZE = 2400;
 const CLICK_PIXELS = 4;
 /** How near, in screen pixels, the pointer must be to the end of a wall to take hold of it. */
 const HANDLE_PIXELS = 12;
+/** Two clicks this close in time, in ms, and in screen pixels, on a wall found, are a double-click. */
+const DOUBLE_CLICK_MS = 450;
+const DOUBLE_CLICK_PIXELS = 8;
 /** How near, in grid squares, a wall end must be to an end of a door or window to be fitted to it. */
 const ATTACH_SQUARES = 1.25;
 /** The longest, in grid squares, a door or window may be. More is taken to be a flood into the wall. */
@@ -44,7 +47,7 @@ const STORE_KEY = `${MODULE.ID}.autowall.options.v2`;
 
 /** What the controls start at, and the limits they move between. */
 const DEFAULTS = {
-    mode: 'wall', tab: 'map', joinEnds: true, joinDistance: 0.25, match: 20, smoothing: 0.3, widest: 1, snap: false,
+    mode: 'wall', tab: 'map', joinEnds: true, joinDistance: 0.3, match: 20, smoothing: 0.3, widest: 1, snap: false,
     doorState: 'closed', doorSound: '', doorAnimation: '',
     windowDistance: 2, windowAttenuation: true
 };
@@ -86,7 +89,6 @@ class AutoWallManager {
         this._onPointerDown = this._onPointerDown.bind(this);
         this._onPointerUp = this._onPointerUp.bind(this);
         this._onPointerMove = this._onPointerMove.bind(this);
-        this._onDoubleClick = this._onDoubleClick.bind(this);
         this._onDragMove = this._onDragMove.bind(this);
         this._onDragEnd = this._onDragEnd.bind(this);
         this._onKeyDown = this._onKeyDown.bind(this);
@@ -135,6 +137,9 @@ class AutoWallManager {
     async start() {
         if (!game.user.isGM || !canvas?.ready || this.session) return;
         const options = readOptions();
+        // Joining ends is the module's setting, for the whole of Foundry, not only for this tool.
+        options.joinEnds = game.settings.get(MODULE.ID, 'walls.joinEnds');
+        options.joinDistance = Number(game.settings.get(MODULE.ID, 'walls.joinDistance'));
         const session = {
             seeds: [], options, mode: MODES.includes(options.mode) ? options.mode : 'wall',
             image: null, result: null, segments: []
@@ -285,7 +290,8 @@ class AutoWallManager {
             tolerance: options.match,
             stepTolerance: Math.max(3, options.match * 0.25),
             lightnessWeight: 0.5,
-            maxPixels: 600000,
+            // Room for a whole dungeon's walls joined into one; a flood that leaks is stopped by the thickness test, not by this.
+            maxPixels: 1000000,
             maxThickness: Math.max(4, options.widest * square),
             epsilon: Math.max(1.5, options.smoothing * square),
             pruneLength: options.smoothing * square * 3,
@@ -354,6 +360,7 @@ class AutoWallManager {
                 segments: [segment.map(point => this._toImage(image, point))]
             };
             session.segments = [segment];
+            session.onWall = false;
             console.info(`${MODULE.NAME}: auto-wall ${session.mode} run`, { fitted: 'the gap between two wall ends', segment, wallEnds: this._wallEnds().length });
             this._drawPreview(session);
             this._drawThumb(session);
@@ -368,8 +375,18 @@ class AutoWallManager {
         result.tooLong = result.segment ? result.length / image.scaleX > MAX_OPENING_SQUARES * grid : false;
         session.result = result;
         session.segments = [];
-        if (result.segment && !result.capped && !result.tooLong) {
-            session.segments = [this._attach(result.segment.map(point => this._toScene(image, point)))];
+        session.onWall = false;
+        const candidate = result.segment && !result.capped && !result.tooLong ? result.segment.map(point => this._toScene(image, point)) : null;
+
+        // A wall drawn straight through it: the click is on the wall, away from its ends, and the
+        // opening goes there, to be cut out of the wall when it is added.
+        const plain = canvas.scene.walls.contents.filter(wall => this._mergeKey(wall) !== null);
+        const onWall = openingOnWall(plain.map(wall => [...wall.c]), session.seeds[0], candidate, { grid });
+        if (onWall) {
+            session.segments = [onWall.segment];
+            session.onWall = true;
+        } else if (candidate) {
+            session.segments = [this._attach(candidate)];
         }
         console.info(`${MODULE.NAME}: auto-wall ${session.mode} run`, {
             seeds: session.seeds.map(seed => seed.map(Math.round)), count: result.count, capped: result.capped,
@@ -488,8 +505,8 @@ class AutoWallManager {
 
     _reportResult(session) {
         const { result } = session;
-        if (result.capped) return this._setStatus(this._localize('capped'), 'warn');
         if (session.mode !== 'wall') return this._reportOpening(session);
+        if (result.capped) return this._setStatus(this._localize('capped'), 'warn');
         if (result.tooThick) return this._setStatus(this._localize('tooThick'), 'warn');
         const count = session.segments.length;
         // Found, and then lost: to snapping, or to being too short to be a wall.
@@ -501,6 +518,9 @@ class AutoWallManager {
         const { result } = session;
         const kind = this._localize(session.mode === 'door' ? 'kindDoor' : 'kindWindow');
         if (!this._wallEnds().length) return this._setStatus(this._localize('noWalls'), 'warn');
+        // Placed on a wall, it does not matter what the picture made of the click.
+        if (session.onWall && session.segments.length) return this._setStatus(this._localize('placedOnWall', { kind }), 'ok');
+        if (result.capped) return this._setStatus(this._localize('capped'), 'warn');
         if (result.tooLong) return this._setStatus(this._localize('tooLong'), 'warn');
         if (!session.segments.length) return this._setStatus(this._localize('nothing'), 'warn');
         const attached = this._attachedEnds(session.segments[0]);
@@ -665,9 +685,11 @@ class AutoWallManager {
     _onControl(event) {
         const session = this.session;
         const input = event.target;
-        if (!session || !input.name) return;
+        // The mode radios have their own handler; only a setting is written down here.
+        if (!session || !input.name || input.name.startsWith('autowall-')) return;
         session.options[input.name] = input.type === 'checkbox' ? input.checked : input.type === 'range' ? Number(input.value) : input.value;
         writeOptions(session.options);
+        if (input.name === 'joinEnds' || input.name === 'joinDistance') void game.settings.set(MODULE.ID, `walls.${input.name}`, session.options[input.name]);
         this._showValue(input.name);
         if (input.name === 'snap') {
             if (!session.result || session.mode !== 'wall') return;
@@ -717,13 +739,21 @@ class AutoWallManager {
         const { updates: joinedUpdates, joined, skipped } = cleanupEnds(walls, this.session.options.joinDistance * grid);
         const joinedCoords = new Map(joinedUpdates.map(({ id, c }) => [id, c]));
         // ...then walls that run on in a straight line are made one.
+        // A joint turning a few degrees is straight, but a curve is made of such joints: no point
+        // may end up further than this from the wall it was merged into.
+        const deviation = Math.max(2, grid * 0.03);
         const { walls: kept, removed, merged } = mergeWalls(
-            documents.map(wall => ({ id: wall.id, c: joinedCoords.get(wall.id) ?? [...wall.c], key: this._mergeKey(wall) }))
+            documents.map(wall => ({ id: wall.id, c: joinedCoords.get(wall.id) ?? [...wall.c], key: this._mergeKey(wall) })),
+            8, deviation
         );
+        // Ends that nearly meet but are beyond the join distance: say so, so the GM can raise it.
+        const reach = this.session.options.joinDistance * grid;
+        const near = countNearEnds(kept, reach, grid);
+        const nearNote = near ? ` ${this._localize('cleanupNear', { count: near })}` : '';
         const originals = new Map(documents.map(wall => [wall.id, wall]));
         const updates = kept.filter(wall => wall.c.some((value, index) => value !== originals.get(wall.id).c[index]));
         if (!updates.length && !removed.length) {
-            this._setCleanupStatus(this._localize('cleanupNothing'));
+            this._setCleanupStatus(`${this._localize('cleanupNothing')}${nearNote}`);
             return;
         }
 
@@ -733,12 +763,12 @@ class AutoWallManager {
             moved: updates.map(({ id }) => ({ _id: id, c: [...originals.get(id).c] })),
             removed: removed.map(id => originals.get(id).toObject())
         };
-        if (updates.length) await scene.updateEmbeddedDocuments('Wall', updates.map(({ id, c }) => ({ _id: id, c })));
+        if (updates.length) await scene.updateEmbeddedDocuments('Wall', updates.map(({ id, c }) => ({ _id: id, c })), { [SKIP_JOIN]: true });
         if (removed.length) await scene.deleteEmbeddedDocuments('Wall', removed);
         this._cleanupUndo = undo;
         this._endsCache = null;
         const text = this._localize('cleanupDone', { joined, merged });
-        this._setCleanupStatus(skipped ? `${text} ${this._localize('cleanupSkipped', { skipped })}` : text);
+        this._setCleanupStatus(`${text}${skipped ? ` ${this._localize('cleanupSkipped', { skipped })}` : ''}${nearNote}`);
         void this.window?.render();
     }
 
@@ -765,10 +795,10 @@ class AutoWallManager {
         if (!this.canUndoCleanup() || !scene) return;
         const { moved, removed } = this._cleanupUndo;
         // The walls that were merged away come back as they were, with their ids...
-        if (removed.length) await scene.createEmbeddedDocuments('Wall', removed, { keepId: true });
+        if (removed.length) await scene.createEmbeddedDocuments('Wall', removed, { keepId: true, [SKIP_JOIN]: true });
         // ...and the rest go back to where they stood.
         const present = moved.filter(wall => scene.walls.has(wall._id));
-        if (present.length) await scene.updateEmbeddedDocuments('Wall', present);
+        if (present.length) await scene.updateEmbeddedDocuments('Wall', present, { [SKIP_JOIN]: true });
         this._cleanupUndo = null;
         this._endsCache = null;
         this._setCleanupStatus(this._localize('cleanupUndone', { count: present.length + removed.length }));
@@ -786,7 +816,6 @@ class AutoWallManager {
         view.addEventListener('pointerdown', this._onPointerDown, true);
         view.addEventListener('pointerup', this._onPointerUp, true);
         view.addEventListener('pointermove', this._onPointerMove, true);
-        view.addEventListener('dblclick', this._onDoubleClick, true);
         document.addEventListener('keydown', this._onKeyDown, true);
         this._listening = view;
     }
@@ -797,7 +826,6 @@ class AutoWallManager {
             view.removeEventListener('pointerdown', this._onPointerDown, true);
             view.removeEventListener('pointerup', this._onPointerUp, true);
             view.removeEventListener('pointermove', this._onPointerMove, true);
-            view.removeEventListener('dblclick', this._onDoubleClick, true);
         }
         document.removeEventListener('pointermove', this._onDragMove, true);
         document.removeEventListener('pointerup', this._onDragEnd, true);
@@ -898,6 +926,8 @@ class AutoWallManager {
         if (at && session.mode === 'wall' && session.options.joinEnds) {
             session.segments = mergeStraightAt(session.segments, at) ?? session.segments;
         }
+        // Where it was dropped decides what it is: on a wall that runs through, or fitted to wall ends.
+        if (session.mode !== 'wall' && session.segments.length) session.onWall = !!this._splitFor(session.segments[0]);
         this._drawSegments(session);
         this._reportResult(session);
     }
@@ -912,22 +942,43 @@ class AutoWallManager {
         if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > CLICK_PIXELS) return;
         const point = this._scenePoint(event);
         if (!point) return;
-        // A shift-click on a wall already found is the first half of putting a point in it.
-        if (event.shiftKey && session.mode === 'wall' && splitSegmentAt(session.segments, point, HANDLE_PIXELS / (canvas.stage?.scale?.x || 1))) return;
+        // A click on a wall already found is not a new wall to find: that wall is there. Two of
+        // them, quickly, put a point in it where it was clicked.
+        if (session.mode === 'wall' && this._onFoundWall(point)) {
+            const last = this._lastClick;
+            const now = performance.now();
+            if (last && now - last.time <= DOUBLE_CLICK_MS && Math.hypot(event.clientX - last.x, event.clientY - last.y) <= DOUBLE_CLICK_PIXELS) {
+                this._lastClick = null;
+                this._splitAt(point);
+            } else {
+                this._lastClick = { time: now, x: event.clientX, y: event.clientY };
+            }
+            return;
+        }
+        this._lastClick = null;
         // Shift adds to the wall being mapped; a plain click starts a new one.
         if (event.shiftKey && session.seeds.length) session.seeds.push(point);
         else session.seeds = [point];
         this._schedule();
     }
 
-    /** Shift-double-click on a wall found puts a point in it, where it was clicked. */
-    _onDoubleClick(event) {
+    /** Whether a point is on one of the walls found, and so not a click on the map. */
+    _onFoundWall(point) {
+        const reach = HANDLE_PIXELS / (canvas.stage?.scale?.x || 1);
+        return this.session.segments.some(([a, b]) => {
+            const dx = b[0] - a[0];
+            const dy = b[1] - a[1];
+            const lengthSq = dx * dx + dy * dy;
+            const t = lengthSq ? Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / lengthSq)) : 0;
+            return Math.hypot(point[0] - (a[0] + t * dx), point[1] - (a[1] + t * dy)) <= reach;
+        });
+    }
+
+    /** Put a point in the wall at a click, where the walls found are cut in two. */
+    _splitAt(point) {
         const session = this.session;
-        if (!event.shiftKey || !session || session.mode !== 'wall' || !session.segments.length) return;
-        const point = this._scenePoint(event);
-        const split = point ? splitSegmentAt(session.segments, point, HANDLE_PIXELS / (canvas.stage?.scale?.x || 1)) : null;
+        const split = splitSegmentAt(session.segments, point, HANDLE_PIXELS / (canvas.stage?.scale?.x || 1));
         if (!split) return;
-        this._swallow(event);
         session.segments = split.segments;
         this._drawSegments(session);
         this._reportResult(session);
@@ -935,6 +986,8 @@ class AutoWallManager {
 
     _onKeyDown(event) {
         if (!this.session || event.target?.closest?.('input, textarea, select, [contenteditable]')) return;
+        // Enter on a focused button presses that button; it is not also Add.
+        if (event.key === 'Enter' && event.target?.closest?.('button')) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();
@@ -977,15 +1030,50 @@ class AutoWallManager {
         return data;
     }
 
+    /**
+     * The wall an opening lies along, with what is left of it once the opening is cut out, or
+     * null when the opening is in a gap or on no wall. Only plain walls are cut: a door or a
+     * window is not a wall to put another into.
+     */
+    _splitFor(segment) {
+        for (const wall of canvas.scene.walls.contents) {
+            if (this._mergeKey(wall) === null) continue;
+            const cut = splitWallAt([...wall.c], segment);
+            if (cut) return { wall, pieces: cut.pieces };
+        }
+        return null;
+    }
+
     async accept() {
         const session = this.session;
-        if (!session?.result || session.result.capped || session.result.tooThick || session.result.tooLong) return;
+        if (!session?.result) return;
+        // A flood that leaked, or ran too long to be an opening, is never written -- unless the
+        // opening was placed on a wall, which owes nothing to the picture.
+        const { capped, tooThick, tooLong } = session.result;
+        if ((capped || tooThick || tooLong) && !session.onWall) return;
         const segments = session.segments;
         if (!segments?.length) return;
         const run = Date.now();
         const data = segments.map(([a, b]) => this._wallData(session, [a[0], a[1], b[0], b[1]], run));
+
+        // An opening on a wall that runs through it is cut out of that wall: the wall is cut short
+        // to what is before the opening, and what is after it is a wall of its own. The door
+        // remembers the wall as it was, so taking the run back puts it back whole.
+        const cut = session.mode === 'wall' ? null : this._splitFor(segments[0]);
+        if (cut) {
+            const original = cut.wall;
+            data[0].flags[MODULE.ID][FLAG].splitFrom = { id: original.id, c: [...original.c] };
+            if (cut.pieces.length === 2) {
+                const tail = original.toObject();
+                delete tail._id;
+                tail.c = cut.pieces[1];
+                tail.flags = { ...tail.flags, [MODULE.ID]: { ...(tail.flags?.[MODULE.ID] ?? {}), [FLAG]: { run, kind: 'wall' } } };
+                data.push(tail);
+            }
+        }
         try {
-            await canvas.scene.createEmbeddedDocuments('Wall', data);
+            await canvas.scene.createEmbeddedDocuments('Wall', data, { [SKIP_JOIN]: true });
+            if (cut) await canvas.scene.updateEmbeddedDocuments('Wall', [{ _id: cut.wall.id, c: cut.pieces[0] }], { [SKIP_JOIN]: true });
         } catch (error) {
             console.error(`${MODULE.NAME}: could not add the walls`, error);
             ui.notifications.error(this._localize('failed'));
@@ -998,6 +1086,7 @@ class AutoWallManager {
         session.seeds = [];
         session.result = null;
         session.segments = [];
+        session.onWall = false;
         this._endsCache = null;
         this._clearPreview();
         this._setStatus(this._localize(mode === 'wall' ? 'afterWalls' : HINTS[mode]));
@@ -1012,7 +1101,13 @@ class AutoWallManager {
             return;
         }
         const latest = Math.max(...mine.map(wall => wall.getFlag(MODULE.ID, FLAG).run));
-        const ids = mine.filter(wall => wall.getFlag(MODULE.ID, FLAG).run === latest).map(wall => wall.id);
+        const run = mine.filter(wall => wall.getFlag(MODULE.ID, FLAG).run === latest);
+        const ids = run.map(wall => wall.id);
+        // A wall an opening was cut out of is made whole again before what was added is taken away.
+        const restores = run.map(wall => wall.getFlag(MODULE.ID, FLAG).splitFrom)
+            .filter(from => from && canvas.scene.walls.has(from.id))
+            .map(from => ({ _id: from.id, c: from.c }));
+        if (restores.length) await canvas.scene.updateEmbeddedDocuments('Wall', restores, { [SKIP_JOIN]: true });
         await canvas.scene.deleteEmbeddedDocuments('Wall', ids);
         ui.notifications.info(this._localize('undone', { count: ids.length }));
     }

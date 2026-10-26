@@ -33,6 +33,8 @@ a corridor they walked without showing them the room beyond the door they never 
   scrolling tiles, and collections that switch a scene's look in one click.
 - [Routes](userguides/userguide-routes.md) -- drawing a journey on a map, its length and travel time,
   and following it with the scene-motion odometer.
+- [Walls, doors and windows](userguides/userguide-walls.md) -- clicking a painted map's walls, doors
+  and windows to put them on the scene.
 
 ## Working on it
 
@@ -40,6 +42,8 @@ a corridor they walked without showing them the room beyond the door they never 
   synchronised across clients, and cleaned up.
 - [Scene motion architecture](architecture/architecture-scene-motion.md) -- the shared clock that
   keeps every client in step, where the layers draw, and how the window is built.
+- [Walls, doors and windows architecture](architecture/architecture-autowall.md) -- how a click on
+  the scene image becomes walls, and how doors and windows are found.
 - [Known issues](known-issues.md) -- defects we have not fixed yet.
 
 ## Requirements
