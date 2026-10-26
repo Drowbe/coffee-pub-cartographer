@@ -211,10 +211,11 @@ odometer counts, using the same shared clock, speed and ease as the scenery -- s
 and the animated scene are two views of one journey ("on the map" and "zoomed in on the road").
 The geometry is done: `routesManager.pointAt(id, distance)` gives the point and heading.
 Done: progress lives on the journey, on the map scene, as effort; the animated scene is a view that
-drives it; terrain slows the party and the scenery. The marker is built: a Blacksmith pin per journey, moved with
-`pins.setLivePosition`, which Blacksmith is adding (agreed: a pin with a live position cannot be
-dragged; no heading in v1). **When Blacksmith releases it, raise Cartographer's minimum Blacksmith
-version** in `module.json`. Controls from the map are built (Play/Stop, speed, pace, reset per journey,
+drives it; terrain slows the party and the scenery. The marker is built: one Blacksmith pin per map, moved with
+`pins.setLivePosition` (its `draggable` option lets the GM pick it up mid-trip; no heading in v1),
+which shipped in Blacksmith 14.4.1 -- Cartographer's minimum Blacksmith version. **When Cartographer
+adopts Blacksmith's shared Tool window controls** (`blacksmith-tool-*`, unreleased), raise the minimum
+again to the Blacksmith release that ships them. Controls from the map are built (Play/Stop, speed, pace, reset per journey,
 and the sub-menubar's Play), driving following animated scenes through `commitScene`. Not yet: a
 journey driven only from the map does not follow the world clock (an animated scene that follows
 the clock carries that to its journey); worth adding as a switch on the journey.
