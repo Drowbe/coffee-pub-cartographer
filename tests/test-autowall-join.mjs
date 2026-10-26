@@ -6,10 +6,12 @@
 // joins it, that the follow-up is not itself followed, and that a setting turns it off.
 // It does not show that Foundry calls the hooks as this does.
 import fs from 'node:fs';
-import { planJoinedMove, snapNewWall, SKIP_JOIN } from '../scripts/utils-autowall.js';
+import { planJoinedMove, snapNewWall, splitSegmentAt, SKIP_JOIN } from '../scripts/utils-autowall.js';
 
 const src = fs.readFileSync('scripts/manager-walljoin.js', 'utf8');
-const body = src.slice(src.indexOf('class WallJoinManager'), src.indexOf('export const wallJoinManager')).replace(/^export /gm, '');
+// The constants above the class, read from the source so the test uses the module's own numbers.
+const constants = src.slice(0, src.indexOf('class WallJoinManager')).match(/^const [A-Z_]+ = [\d.]+;$/gm)?.join('\n') ?? '';
+const body = constants + '\n' + src.slice(src.indexOf('class WallJoinManager'), src.indexOf('export const wallJoinManager')).replace(/^export /gm, '');
 const MODULE = { ID: 'coffee-pub-cartographer', NAME: 'CARTOGRAPHER' };
 
 let failures = 0;
@@ -20,18 +22,20 @@ const check = (label, ok, detail = '') => {
 };
 
 /** A scene whose walls change, and which runs Foundry's two hooks around every update it is given. */
-function world({ joinEnds = true, joinDistance = 0.3, isGM = true, shift = false } = {}) {
+function world({ joinEnds = true, joinDistance = 0.3, isGM = true, shift = false, wallsLayer = true } = {}) {
     const hooks = {};
     const log = [];
     const settings = { 'walls.joinEnds': joinEnds, 'walls.joinDistance': joinDistance };
     const game = {
         user: { isGM, id: 'gm' },
+        i18n: { localize: key => key },
         settings: { get: (_module, key) => settings[key] },
         keyboard: { downKeys: new Set(shift ? ['ShiftLeft'] : []) }
     };
-    const scene = { grid: { size: 100 }, list: [] };
+    const scene = { grid: { size: 100 }, list: [], calls: [] };
     scene.walls = { get contents() { return scene.list; } };
-    const make = (id, c) => { const doc = { id, c: [...c], parent: scene }; return doc; };
+    const make = (id, c) => { const doc = { id, c: [...c], parent: scene, flags: {}, toObject() { return { _id: this.id, c: [...this.c], door: this.door ?? 0, flags: { ...this.flags } }; } }; return doc; };
+    let created = 0;
     // Foundry's own sequence for one wall update: preUpdate, apply, update.
     scene.updateEmbeddedDocuments = async (_type, updates, options = {}) => {
         log.push(['update', updates.map(u => u._id), options[SKIP_JOIN] ? 'skip' : 'plain']);
@@ -43,9 +47,17 @@ function world({ joinEnds = true, joinDistance = 0.3, isGM = true, shift = false
             await hooks.updateWall?.(doc, changes, options, 'gm');
         }
     };
+    scene.createEmbeddedDocuments = async (_type, data, options = {}) => {
+        log.push(['create', data.map(d => d.c.join(',')), options[SKIP_JOIN] ? 'skip' : 'plain']);
+        for (const item of data) { const doc = make(`n${++created}`, item.c); doc.door = item.door ?? 0; scene.list.push(doc); }
+    };
     scene.deleteEmbeddedDocuments = async (_type, ids) => { log.push(['delete', ids]); scene.list = scene.list.filter(w => !ids.includes(w.id)); };
     const Hooks = { on: (name, fn) => { hooks[name] = fn; } };
-    const manager = new Function('game', 'Hooks', 'MODULE', 'planJoinedMove', 'snapNewWall', 'SKIP_JOIN', `${body}\nreturn new WallJoinManager();`)(game, Hooks, MODULE, planJoinedMove, snapNewWall, SKIP_JOIN);
+    const view = { addEventListener() {}, removeEventListener() {}, getBoundingClientRect: () => ({ left: 0, top: 0 }) };
+    const canvas = { scene, walls: { active: wallsLayer }, app: { view, stage: { toLocal: p => p } }, stage: { scale: { x: 1 } } };
+    const ui = { notifications: { info() {} } };
+    const PIXI = { Point: function (x, y) { return { x, y }; } };
+    const manager = new Function('game', 'Hooks', 'MODULE', 'planJoinedMove', 'snapNewWall', 'splitSegmentAt', 'SKIP_JOIN', 'canvas', 'ui', 'PIXI', `${body}\nreturn new WallJoinManager();`)(game, Hooks, MODULE, planJoinedMove, snapNewWall, splitSegmentAt, SKIP_JOIN, canvas, ui, PIXI);
     manager.initialize();
     // Drawing a wall: preCreate, which may change what is made, then it is there.
     const draw = (id, c, options = {}) => {
@@ -54,7 +66,7 @@ function world({ joinEnds = true, joinDistance = 0.3, isGM = true, shift = false
         scene.list.push(doc);
         return doc;
     };
-    return { scene, log, make, draw, coords: () => Object.fromEntries(scene.list.map(w => [w.id, w.c.join(',')])) };
+    return { scene, log, make, draw, manager, coords: () => Object.fromEntries(scene.list.map(w => [w.id, w.c.join(',')])) };
 }
 
 console.log('dragging a wall end in Foundry');
@@ -103,6 +115,52 @@ console.log('\ndrawing a new wall');
     const own = world();
     own.scene.list.push(own.make('a', [0, 0, 100, 0]));
     check('walls the walls tool makes are exactly where it put them', own.draw('n', [112, 8, 300, 200], { [SKIP_JOIN]: true }).c.join() === '112,8,300,200');
+}
+
+console.log('\nCtrl-click cuts a wall in two');
+{
+    const ctrlClick = async (w, x, y, extra = {}) => {
+        w.manager._onDown({ button: 0, ctrlKey: true, clientX: x, clientY: y, ...extra.down });
+        return w.manager._onUp({ button: 0, clientX: x, clientY: y, ...extra.up });
+    };
+    const w = world();
+    w.scene.list.push(w.make('a', [0, 0, 1000, 0]));
+    check('a Ctrl-click on a wall cuts it where it was clicked', await ctrlClick(w, 400, 4) === true && w.coords().a === '0,0,400,0', JSON.stringify(w.coords()));
+    check('what is after the cut is a wall of its own', Object.values(w.coords()).includes('400,0,1000,0'), JSON.stringify(w.coords()));
+    check('and neither is followed as a joint', w.log.every(l => l[2] === 'skip'), JSON.stringify(w.log));
+
+    const door = world();
+    door.scene.list.push(door.make('d', [0, 0, 1000, 0]));
+    door.scene.list[0].door = 1;
+    await ctrlClick(door, 500, 0);
+    check('a door is cut like any wall, and the copy is a door too', door.scene.list.length === 2 && door.scene.list.every(x => x.door === 1));
+
+    const miss = world();
+    miss.scene.list.push(miss.make('a', [0, 0, 1000, 0]));
+    check('a click off the wall cuts nothing', await ctrlClick(miss, 400, 80) === false && miss.scene.list.length === 1);
+    check('a click at an end cuts nothing, a point is already there', await ctrlClick(miss, 2, 0) === false && miss.scene.list.length === 1);
+
+    const plain = world();
+    plain.scene.list.push(plain.make('a', [0, 0, 1000, 0]));
+    plain.manager._onDown({ button: 0, ctrlKey: false, clientX: 400, clientY: 0 });
+    check('without Ctrl a click is only a click', plain.manager._onUp({ button: 0, clientX: 400, clientY: 0 }) === null && plain.scene.list.length === 1);
+
+    const dragged = world();
+    dragged.scene.list.push(dragged.make('a', [0, 0, 1000, 0]));
+    check('a Ctrl-drag, which draws a chain in Foundry, is not a click', await ctrlClick(dragged, 400, 0, { up: { clientX: 460 } }) === null && dragged.scene.list.length === 1);
+
+    const elsewhere = world({ wallsLayer: false });
+    elsewhere.scene.list.push(elsewhere.make('a', [0, 0, 1000, 0]));
+    check('off the Walls layer, Ctrl-click is Foundry\'s own', await ctrlClick(elsewhere, 400, 0) === null && elsewhere.scene.list.length === 1);
+
+    const busy = world();
+    busy.scene.list.push(busy.make('a', [0, 0, 1000, 0]));
+    busy.manager.suspended = true;
+    check('while the walls tool has a run, it cuts its own walls and this stands aside', await ctrlClick(busy, 400, 0) === null && busy.scene.list.length === 1);
+
+    const player = world({ isGM: false });
+    player.scene.list.push(player.make('a', [0, 0, 1000, 0]));
+    check('for a player there is nothing', player.scene.list.length === 1);
 }
 
 console.log('\nwhen it does nothing');

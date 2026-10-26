@@ -16,6 +16,7 @@ import { MODULE } from './const.js';
 import { cartographerToolbar } from './manager-toolbar.js';
 import { labBuffer, mapWall, mapOpening, findOpening, cleanupEnds, splitSegmentAt, mergeStraightAt, mergeWalls, openingOnWall, splitWallAt, countNearEnds, SKIP_JOIN } from './utils-autowall.js';
 import { AutoWallWindow } from './window-autowall.js';
+import { wallJoinManager } from './manager-walljoin.js';
 
 /** The section of Cartographer's sub-menubar these sit in; registered in manager-toolbar.js. */
 const GROUP = 'Walls';
@@ -31,9 +32,6 @@ const MAX_WORK_SIZE = 2400;
 const CLICK_PIXELS = 4;
 /** How near, in screen pixels, the pointer must be to the end of a wall to take hold of it. */
 const HANDLE_PIXELS = 12;
-/** Two clicks this close in time, in ms, and in screen pixels, on a wall found, are a double-click. */
-const DOUBLE_CLICK_MS = 450;
-const DOUBLE_CLICK_PIXELS = 8;
 /** How near, in grid squares, a wall end must be to an end of a door or window to be fitted to it. */
 const ATTACH_SQUARES = 1.25;
 /** The longest, in grid squares, a door or window may be. More is taken to be a flood into the wall. */
@@ -148,6 +146,8 @@ class AutoWallManager {
         this._status = null;
         this._refreshButtons();
         this._cleanupStatus = null;
+        // This tool cuts the walls it has found itself; the module's Ctrl-click on scene walls stands aside.
+        wallJoinManager.suspended = true;
         await this._openWindow();
         if (this.session !== session) return;
         this._setStatus(this._localize('loading'));
@@ -173,6 +173,7 @@ class AutoWallManager {
         this._timer = null;
         this._unlisten();
         this._clearPreview();
+        wallJoinManager.suspended = false;
         // Closing the window reaches onWindowClosed, which finds it already let go.
         const window = this.window;
         this.window = null;
@@ -942,20 +943,12 @@ class AutoWallManager {
         if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > CLICK_PIXELS) return;
         const point = this._scenePoint(event);
         if (!point) return;
-        // A click on a wall already found is not a new wall to find: that wall is there. Two of
-        // them, quickly, put a point in it where it was clicked.
+        // A click on a wall already found is not a new wall to find: that wall is there. With Ctrl
+        // held it puts a point in the wall, where it was clicked.
         if (session.mode === 'wall' && this._onFoundWall(point)) {
-            const last = this._lastClick;
-            const now = performance.now();
-            if (last && now - last.time <= DOUBLE_CLICK_MS && Math.hypot(event.clientX - last.x, event.clientY - last.y) <= DOUBLE_CLICK_PIXELS) {
-                this._lastClick = null;
-                this._splitAt(point);
-            } else {
-                this._lastClick = { time: now, x: event.clientX, y: event.clientY };
-            }
+            if (event.ctrlKey || event.metaKey) this._splitAt(point);
             return;
         }
-        this._lastClick = null;
         // Shift adds to the wall being mapped; a plain click starts a new one.
         if (event.shiftKey && session.seeds.length) session.seeds.push(point);
         else session.seeds = [point];

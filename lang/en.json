@@ -606,7 +606,7 @@
 		"autowall.barMap": "Map walls, doors and windows: click on the map and they are drawn",
 		"autowall.barUndo": "Remove the walls added by the last Map a Wall",
 		"autowall.title": "Walls, Doors and Windows",
-		"autowall.hint": "Click a wall on the map. Shift-click more of the same wall if it changes material. Drag a dot to move an end; double-click a wall to put a point in it.",
+		"autowall.hint": "Click a wall on the map. Shift-click more of the same wall if it changes material. Drag a dot to move an end; Ctrl-click a wall to put a point in it.",
 		"autowall.loading": "Reading the map image...",
 		"autowall.working": "Working...",
 		"autowall.result": "{count} wall segments found.",
@@ -681,7 +681,8 @@
 		"autowall.resultTitle": "Result",
 		"autowall.settingsTitle": "Settings",
 		"autowall.joining": "Joining",
-		"autowall.cleanupTitle": "Clean up"
+		"autowall.cleanupTitle": "Clean up",
+		"walls.splitDone": "Wall cut in two."
 	}
 }
 

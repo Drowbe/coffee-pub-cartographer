@@ -122,9 +122,9 @@ The segments of a run are held in scene pixels in the session, and the preview d
 end is a handle: dragging moves it and every end at the same point. With joining on, a dropped end
 snaps to a nearby end on the scene or in the run, and two segments left meeting on a straight line are
 merged -- only at the point just dropped, so a point put in deliberately elsewhere is not undone.
-A click on a wall already found is not a new wall to find, so the tool recognises a double-click
-itself, from two such clicks close in time and place, rather than relying on the browser's
-double-click event, and cuts the segment in two at the click. Changing a setting or clicking again works the
+A click on a wall already found is not a new wall to find, and with Ctrl or Command held it cuts the
+segment in two at the click. It is not a double-click: on a wall on the scene Foundry takes the
+double-click to open the wall's settings. Changing a setting or clicking again works the
 walls out afresh and discards the edits, because the edits are on the result and not on the settings.
 
 ## Clean up
@@ -156,6 +156,13 @@ it lands on; the hook rewrites the update's own coordinates for that and keeps t
 `updateWall` hook, which moves the other walls. A drawn wall is snapped in `preCreateWall` by
 `snapNewWall`.
 
+The same file cuts a wall in two on Ctrl-click, for walls already on the scene. It watches the canvas
+without taking the click, so Foundry still selects the wall, and acts on release when the pointer
+has not moved, so a Ctrl-drag, which Foundry uses to draw a chain, is left alone. It acts only on the
+Walls layer, only for the GM, and not while the walls tool has a run of its own, which cuts the walls
+it has found. The new wall is a copy of the old, made first, so a failure leaves an overlap rather
+than a gap.
+
 Two rules keep it from fighting itself. Updates the walls tool makes carry an option,
 `SKIP_JOIN`, that both hooks ignore, so a clean-up that joins ends, or a door cutting a wall, is not
 followed by joins of its own; and the follow-up update the hook makes carries it too, so it is not
@@ -181,7 +188,7 @@ already uses to place an end off the grid, also holds the joining back.
   methods and checks the controls, the selected values and the escaping.
 - `tests/test-autowall-flow.mjs` runs the whole manager class in node, from its source, against
   stand-ins for Foundry, the canvas and PIXI, and drives it as the GM does: a click, a drag, a join,
-  a double-click, a door in a gap and on a wall, Add.
+  a Ctrl-click, a door in a gap and on a wall, Add.
 
 None of them runs Foundry. They do not show that Foundry accepts the data written, that the
 preview lines up with the map, or how any of it looks.

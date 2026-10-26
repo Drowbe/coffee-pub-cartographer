@@ -55,7 +55,7 @@ running, apart from the first stages, which were walked on the author's own map.
 window opening, moving and remembering its place; a door fitted into the gap between two wall ends,
 including the second door that first chose a wrong end; a window written with Proximity and a
 two-square threshold and accepted by Foundry; door sound and animation values accepted; Join nearest
-endpoints, shift-double-click, Clean up and Undo clean up; and a scene with several levels. Touches
+endpoints, Ctrl-click to cut a wall, Clean up and Undo clean up; and a scene with several levels. Touches
 `scripts/manager-autowall.js`, `scripts/window-autowall.js`. Verified when each has been done on a
 real scene and the console shows nothing but the tool's own `auto-wall` lines.
 

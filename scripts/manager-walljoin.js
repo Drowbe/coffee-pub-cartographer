@@ -14,12 +14,22 @@
 // joint back with it. The geometry is in utils-autowall.js (planJoinedMove).
 
 import { MODULE } from './const.js';
-import { planJoinedMove, snapNewWall, SKIP_JOIN } from './utils-autowall.js';
+import { planJoinedMove, snapNewWall, splitSegmentAt, SKIP_JOIN } from './utils-autowall.js';
+
+/** How far, in screen pixels, a click may move and still be a click. */
+const CLICK_PIXELS = 4;
+/** How near, in screen pixels, a click must be to a wall to be on it. */
+const WALL_PIXELS = 12;
 
 class WallJoinManager {
     constructor() {
         /** What follows each wall being moved, by its id, between the two hooks. Kept here, not in the options, so nothing depends on Foundry handing them back. */
         this._pending = new Map();
+        /** Set while the walls tool has its own run going, which cuts the walls it has found itself. */
+        this.suspended = false;
+        this._press = null;
+        this._onDown = this._onDown.bind(this);
+        this._onUp = this._onUp.bind(this);
     }
 
     initialize() {
@@ -27,6 +37,82 @@ class WallJoinManager {
         Hooks.on('preUpdateWall', (document, changes, options, userId) => this._plan(document, changes, options, userId));
         Hooks.on('updateWall', (document, _changes, options, userId) => void this._follow(document, options, userId));
         Hooks.on('preCreateWall', (document, data, options, userId) => this._snapNew(document, data, options, userId));
+        // Ctrl-click on a wall cuts it in two. The canvas is rebuilt with each scene, so listen to each.
+        Hooks.on('canvasReady', () => this._listen());
+        Hooks.on('canvasTearDown', () => this._unlisten());
+        this._listen();
+    }
+
+    _listen() {
+        const view = canvas?.app?.view;
+        if (!view || this._listening === view) return;
+        this._unlisten();
+        // Watched, not taken: Foundry still sees the click, which only selects the wall.
+        view.addEventListener('pointerdown', this._onDown, true);
+        view.addEventListener('pointerup', this._onUp, true);
+        this._listening = view;
+    }
+
+    _unlisten() {
+        this._listening?.removeEventListener('pointerdown', this._onDown, true);
+        this._listening?.removeEventListener('pointerup', this._onUp, true);
+        this._listening = null;
+        this._press = null;
+    }
+
+    _onDown(event) {
+        this._press = event.button === 0 && (event.ctrlKey || event.metaKey) ? { x: event.clientX, y: event.clientY } : null;
+    }
+
+    /** A Ctrl-click, with the pointer where it went down, on the Walls layer: cut the wall under it. */
+    _onUp(event) {
+        const press = this._press;
+        this._press = null;
+        if (!press || event.button !== 0 || this.suspended || !canvas.walls?.active) return null;
+        if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > CLICK_PIXELS) return null;
+        const rect = canvas.app.view.getBoundingClientRect();
+        const point = canvas.app.stage.toLocal(new PIXI.Point(event.clientX - rect.left, event.clientY - rect.top));
+        if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+        return this.splitWallAt([point.x, point.y]);
+    }
+
+    /**
+     * Cut the wall nearest a point in two, there. The new wall is a copy of the old, so it is the
+     * same kind of wall; nothing is done near an end, where there is already a point. The two are a
+     * joint afterwards, and Clean up walls will make them one again if they run straight on.
+     */
+    async splitWallAt(point) {
+        const scene = canvas.scene;
+        if (!game.user.isGM || !scene) return false;
+        const reach = WALL_PIXELS / (canvas.stage?.scale?.x || 1);
+        let best = null;
+        for (const wall of scene.walls.contents) {
+            const [x1, y1, x2, y2] = wall.c;
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const lengthSq = dx * dx + dy * dy;
+            const t = lengthSq ? Math.max(0, Math.min(1, ((point[0] - x1) * dx + (point[1] - y1) * dy) / lengthSq)) : 0;
+            const distance = Math.hypot(point[0] - (x1 + t * dx), point[1] - (y1 + t * dy));
+            if (distance <= reach && (!best || distance < best.distance)) best = { wall, distance };
+        }
+        if (!best) return false;
+        const [x1, y1, x2, y2] = best.wall.c;
+        const cut = splitSegmentAt([[[x1, y1], [x2, y2]]], point, reach);
+        if (!cut) return false;
+        const [at] = [cut.at];
+        const tail = best.wall.toObject();
+        delete tail._id;
+        tail.c = [at[0], at[1], x2, y2];
+        try {
+            // The new wall first, so if the second step fails there is an overlap and not a gap.
+            await scene.createEmbeddedDocuments('Wall', [tail], { [SKIP_JOIN]: true });
+            await scene.updateEmbeddedDocuments('Wall', [{ _id: best.wall.id, c: [x1, y1, at[0], at[1]] }], { [SKIP_JOIN]: true });
+        } catch (error) {
+            console.error(`${MODULE.NAME}: could not cut the wall`, error);
+            return false;
+        }
+        ui.notifications.info(game.i18n.localize(`${MODULE.ID}.walls.splitDone`));
+        return true;
     }
 
     /** Whether it is on, and how near another end an end must be let go to join it, in grid squares. */

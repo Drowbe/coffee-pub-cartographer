@@ -57,9 +57,10 @@ Moving a slider works the walls out again from your last click.
 
 ### Adjust before adding
 
-Every yellow dot can be dragged. Dragging an end moves every end that met it. **Double-click** on a
-wall puts a new point in it where you clicked, and the point can then be dragged. A single click on a
-wall that has been found does nothing, since that wall is already there. With **Join nearest
+Every yellow dot can be dragged. Dragging an end moves every end that met it. **Ctrl-click** on a
+wall (Command-click on a Mac) puts a new point in it where you clicked, and the point can then be
+dragged. A plain click on a wall that has been found does nothing, since that wall is already there.
+With **Join nearest
 endpoints** on (see Options), an end let go near another wall end snaps onto it, and if the two then
 run on in a straight line they become one wall.
 
@@ -102,6 +103,18 @@ settings are:
   default is two squares, as Foundry's own window tool uses.
 - **Fade with distance** -- Foundry's attenuation setting for the window, on by default as it is
   for Foundry's own windows.
+
+## Cutting a wall in two
+
+On the scene itself, with the **Walls** layer of Foundry's controls active, **Ctrl-click** (Command-click
+on a Mac) a wall to cut it in two where you clicked. The new wall is a copy of the old, so it is the
+same kind of wall, and the two meet at the new point; drag that point, or either wall, as you like.
+Nothing is cut near an end of a wall, where there is already a point. **Clean up walls** makes two
+cut walls into one again if they still run straight on. Foundry's own double-click is left alone: it
+opens the wall's settings.
+
+While the walls tool has a run going, Ctrl-click cuts the walls it has found instead, as above. Foundry
+uses Ctrl only when dragging out a chain of new walls, so a Ctrl-drag still does that.
 
 ## Joined walls in Foundry
 

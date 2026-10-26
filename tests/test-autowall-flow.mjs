@@ -1,6 +1,6 @@
 // The whole walls tool, end to end, in node: the real manager class, taken from its source
 // with Foundry, the canvas, PIXI and the window replaced by stand-ins, then driven the way
-// the GM drives it -- a click, a mode change, a drag, a shift-double-click, Add.
+// the GM drives it -- a click, a mode change, a drag, a Ctrl-click, Add.
 //
 // This is a smoke test of the code's own wiring: a method that calls one that does not
 // exist, a variable that was never defined, a step that throws. The stand-ins accept
@@ -84,7 +84,7 @@ function makeCanvas(scene) {
 
 let canvas;
 const injected = { MODULE, CONST, game, ui, foundry, CONFIG, PIXI, performance, Hooks: { on: () => 1 }, document: documentStand,
-    cartographerToolbar: { registerTool() {} }, AutoWallWindow: { open: async () => ({ element: null, render: async () => {}, close: async () => {} }) },
+    cartographerToolbar: { registerTool() {} }, wallJoinManager: { suspended: false }, AutoWallWindow: { open: async () => ({ element: null, render: async () => {}, close: async () => {} }) },
     ...utils };
 const names = Object.keys(injected);
 const build = () => new Function('canvas', ...names, `${body}\nreturn autoWallManager;`)(canvas, ...names.map(name => injected[name]));
@@ -151,16 +151,18 @@ console.log('click a wall, adjust it, add it');
     manager._onDragEnd(event(end[0] - 10, end[1] + 30));
     check('and let go', manager._drag === null);
 
-    // Double-click puts a point in a wall; one click on a wall already found changes nothing.
+    // Ctrl-click puts a point in a wall; a plain click on a wall already found changes nothing.
     const before = session.segments.length;
     const seeds = JSON.stringify(session.seeds);
     const click = (x, y, extra = {}) => { manager._onPointerDown(event(x, y, extra)); manager._onPointerUp(event(x, y, extra)); };
     click(300, 45);
     check('a click on a wall that was found is not a new wall to find', session.segments.length === before && JSON.stringify(session.seeds) === seeds);
-    click(300, 45);
-    check('a double-click puts a point in a wall', session.segments.length === before + 1, `${before} -> ${session.segments.length}`);
-    click(300, 45);
-    check('and a third click starts nothing', session.segments.length === before + 1);
+    click(300, 45, { ctrlKey: true });
+    check('Ctrl-click puts a point in a wall', session.segments.length === before + 1, `${before} -> ${session.segments.length}`);
+    click(300, 45, { ctrlKey: true });
+    check('and where a point is already, a second does nothing more', session.segments.length === before + 1);
+    click(250, 45, { metaKey: true });
+    check('Command does the same on a Mac', session.segments.length === before + 2, `${session.segments.length}`);
     // Far from any wall found, a click is a new wall to find.
     click(60, 170);
     check('a click on the map, off the walls, is a new click to find a wall from', JSON.stringify(session.seeds) === JSON.stringify([[60, 170]]), JSON.stringify(session.seeds));
@@ -168,7 +170,7 @@ console.log('click a wall, adjust it, add it');
     clearTimeout(manager._timer);
 
     await manager.accept();
-    check('Add writes the walls', canvas.scene.list.length === before + 1, `${canvas.scene.list.length} walls`);
+    check('Add writes the walls', canvas.scene.list.length === before + 2, `${canvas.scene.list.length} walls`);
     check('and the run is ready for the next', session.segments.length === 0 && session.result === null);
     check('with a note to the GM', notices.some(([kind, text]) => kind === 'info' && /autowall.added/.test(text)));
 }
