@@ -10,7 +10,7 @@ import {
     STAMPS, STAMP_CATEGORIES, TONES, buildStamp, stampPalette, stampSvg, drawStamp, stampDrawingData,
     isProceduralStamp, isStamp, stampById, parseColor, makeRng, stampSquares
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, polygonShape, distanceToPolyline, insidePolygon, drawingHit, keptGroup, WALL_KINDS, wallKindById, wallKindData, wallKindSvg, isDoorKind, fitOpeningToWall, WALL_MATERIALS, wallMaterialById, wallMaterialSvg, wallLineDrawings, offsetPath, pointsAlong, MAX_WALL_DECOR, boxSegments, ellipseSegments } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, polygonShape, distanceToPolyline, insidePolygon, drawingHit, keptGroup, WALL_KINDS, wallKindById, wallKindData, wallKindSvg, isDoorKind, fitOpeningToWall, WALL_MATERIALS, wallMaterialById, wallMaterialSvg, wallLineDrawings, offsetPath, pointsAlong, MAX_WALL_DECOR, boxSegments, ellipseSegments, wallThickness } from '../scripts/utils-drawing.js';
 import { TERRAINS, terrainById, terrainPalette, smoothPath, buildTerrain, terrainSvg, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
 let failures = 0;
@@ -276,18 +276,25 @@ console.log('\nwhat a wall is made of');
         check(`${material.id}: the same seed gives the same wall`, JSON.stringify(docs) === JSON.stringify(draw(material.id)));
         const long = draw(material.id, [0, 0, 60000, 0]);
         check(`${material.id}: a very long stroke is held to a sensible number of Drawings`, long.length <= MAX_WALL_DECOR * 2 + 30, String(long.length));
-        check(`${material.id}: it is its own colour, not the kind's`, docs.some(d => d.strokeColor === material.color || d.fillColor === material.color));
+        check(`${material.id}: it is its own colours, not the kind's, and several of them`, !docs.some(d => d.strokeColor === '#d8cfa8' || d.fillColor === '#d8cfa8') && new Set(docs.map(d => d.fillType === 1 ? d.fillColor : d.strokeColor)).size >= 3);
         const bent = draw(material.id, [0, 0, 300, 0, 300, 300]);
         check(`${material.id}: it follows a corner`, bent.length > 6);
     }
-    check('stone has joints across it, and the joints are not evenly spaced', (() => { const joints = draw('stone').filter(d => d.strokeColor === '#4d4a45'); const xs = joints.map(d => d.x).sort((a, b) => a - b); const gaps = xs.slice(1).map((x, i) => x - xs[i]); return joints.length >= 6 && new Set(gaps.map(g => Math.round(g))).size > 2; })());
+    const blocks = docs => docs.filter(d => d.fillType === 1 && d.shape.points.length === 8);
+    check('stone is a wall of separate stones, in several greys, no two of one length', (() => { const stones = blocks(draw('stone', [0, 0, 1000, 0], { weight: 20 })); const lengths = new Set(stones.map(d => d.shape.width)); const tones = new Set(stones.map(d => d.fillColor)); return stones.length >= 20 && lengths.size > 6 && tones.size >= 3; })());
+    check('and a thick one has two rows of them, a thin one a single row', new Set(blocks(draw('stone', [0, 0, 1000, 0], { weight: 20 })).map(d => d.y)).size === 2 && new Set(blocks(draw('stone', [0, 0, 1000, 0], { weight: 12 })).map(d => d.y)).size === 1);
     check('a different seed lays the stones differently', JSON.stringify(draw('stone', undefined, { seed: 1 })) !== JSON.stringify(draw('stone', undefined, { seed: 2 })));
-    check('brick joints alternate from one side of the mortar to the other', (() => { const joints = draw('brick').filter(d => d.strokeColor === '#e0d2c0' && d.shape.height > 3); return joints.length >= 6 && new Set(joints.map(d => d.y)).size === 2; })());
-    check('wood has seams along it, and the ends of planks', (() => { const docs = draw('wood'); return docs.filter(d => d.strokeColor === '#5b3c20').length >= 5; })());
-    check('a fence has two rails and a post every half square', (() => { const docs = draw('fence'); const posts = docs.filter(d => d.fillType === 1 && d.fillColor === '#a47a4a'); return docs.filter(d => d.strokeColor === wallMaterialById('fence').color).length === 2 && posts.length >= 20 && posts.length <= 22; })());
-    check('a fence is thinner than a wall: no wide dark casing', draw('fence').every(d => d.strokeWidth < 10));
-    check('iron bars are bars across a thin rail', (() => { const docs = draw('iron'); return docs.filter(d => d.strokeColor === '#8a929b').length >= 10 && docs.some(d => d.strokeColor === wallMaterialById('iron').color && d.strokeWidth <= 5); })());
-    check('a hedge is wider than the line, with leaves along it', (() => { const docs = draw('hedge'); return docs.some(d => d.strokeWidth === 16) && docs.filter(d => d.fillType === 1 && ['#5aa04a', '#4f9a3c'].includes(d.fillColor)).length >= 10; })());
+    check('brick is courses of red bricks on pale mortar, one course above another', (() => { const bricks = blocks(draw('brick', [0, 0, 1000, 0], { weight: 33 })); return bricks.length >= 60 && new Set(bricks.map(d => d.y)).size >= 3 && bricks.every(d => parseColor(d.fillColor)[0] > parseColor(d.fillColor)[1] * 1.5); })());
+    check('and each course is shifted from the one below it', (() => { const bricks = blocks(draw('brick', [0, 0, 1000, 0], { weight: 33 })); const rows = [...new Set(bricks.map(d => d.y))].sort((a, b) => a - b); const xs = row => new Set(bricks.filter(d => d.y === row).map(d => d.x)); const shared = [...xs(rows[0])].filter(x => xs(rows[1]).has(x)); return rows.length >= 3 && shared.length <= 2; })());
+    check('wood is planks side by side in several browns, three across on a thick wall', (() => { const planks = blocks(draw('wood', [0, 0, 1000, 0], { weight: 33 })); return new Set(planks.map(d => d.y)).size === 3 && new Set(planks.map(d => d.fillColor)).size >= 3 && planks.length >= 15; })());
+    check('a fence is two rails and a post to each half square, with a gap between to see through', (() => { const docs = draw('fence', [0, 0, 1000, 0], { weight: 20 }); const posts = docs.filter(d => d.fillType === 1 && d.fillColor === '#c9a46a'); return docs.filter(d => d.strokeColor === '#b08650').length === 2 && posts.length >= 20 && posts.length <= 24 && docs.every(d => d.strokeWidth < 20); })());
+    check('a fence is thinner than the wall it stands for', draw('fence', [0, 0, 1000, 0], { weight: 20 }).every(d => d.strokeWidth < 20));
+    check('iron bars are bars across two thin rails, with a post on every half square', (() => { const docs = draw('iron', [0, 0, 1000, 0], { weight: 20 }); return docs.filter(d => d.strokeColor === '#d3dae2').length >= 40 && docs.filter(d => d.strokeColor === '#454b53').length === 2 && docs.filter(d => d.fillColor === '#59606a').length >= 20; })());
+    check('a hedge is wider than a wall, a dark mass with clumps of leaves in several greens', (() => { const docs = draw('hedge', [0, 0, 1000, 0], { weight: 20 }); const leaves = docs.filter(d => d.fillType === 1 && ['#3f8a36', '#4f9a3c', '#5aa84a', '#357a2e'].includes(d.fillColor)); return docs.some(d => d.strokeWidth === 30) && leaves.length >= 30 && new Set(leaves.map(d => d.fillColor)).size >= 3; })());
+    check('a corner is laid leg by leg, so the stones of a room are square at the corners', (() => { const stones = blocks(draw('stone', [0, 0, 400, 0, 400, 300], { weight: 20 })); return stones.some(d => d.shape.width > d.shape.height) && stones.some(d => d.shape.height > d.shape.width); })());
+    check('wall thickness is a part of a grid square: an eighth, a fifth and a third', wallThickness('thin', 100) === 13 && wallThickness('medium', 100) === 20 && wallThickness('thick', 100) === 33);
+    check('so a bigger grid gets a thicker wall, and a small one is never under 8 pixels', wallThickness('medium', 200) === 40 && wallThickness('thin', 20) === 8 && wallThickness('medium', 150) === 30);
+    check('an unknown thickness is medium', wallThickness('huge', 100) === 20 && wallThickness(undefined, 100) === 20);
     check('a thin line weight still shows the pattern: stone, brick and wood are never under 8 pixels', ['stone', 'brick', 'wood'].every(id => draw(id, [0, 0, 400, 0], { weight: 2 }).some(d => d.strokeWidth >= 8)));
 }
 

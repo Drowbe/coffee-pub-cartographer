@@ -172,8 +172,13 @@ playable at once. Click a kind, then press, drag and let go on the map:
 - **Door** and **Secret door** -- doors, drawn **Closed**, **Open** or **Locked** as you choose.
 - **Window** -- sight and light pass close up and fade over two squares; movement and sound are stopped.
 
-What a wall **looks like** is a separate choice, **Material**: **Plain**, **Stone** (blocks), **Brick** (courses),
-**Wood** (planks), a **Fence** (rails and posts), **Iron bars** and a **Hedge**. A fence and iron bars suit an invisible
+**Thickness** -- thin, medium or thick -- is a part of a grid square (an eighth, a fifth and a third), so a wall is
+the same on any map; the brush's line weight does not apply to walls.
+
+What a wall **looks like** is a separate choice, **Material**: **Plain**, **Stone** (rows of separate grey stones), **Brick** (red bricks in
+courses on pale mortar), **Wood** (planks in several browns), a **Fence** (two rails and stout posts, open between),
+**Iron bars** (silver bars on black rails, with a post every half square) and a **Hedge** (a dark mass with clumps
+of leaves and the odd berry). A fence and iron bars suit an invisible
 wall, which stops movement and lets sight through, and a hedge a terrain wall, so picking one from a plain wall chooses
 that kind too; change the kind afterwards if you want. A door or a window is always drawn as itself. A long
 stroke of a patterned material spaces its pattern out rather than adding without limit.
@@ -198,8 +203,7 @@ buttons.
 
 **Snap to the grid** puts wall ends on the points Foundry's own wall tool snaps to; turn it off to
 place them exactly. Walls follow the same **Join Walls Where They Meet** setting as the walls
-tool, so a wall let go near another's end joins it. The line is a Foundry Drawing, at the
-weight you choose, and is kept: unlike a sketch, a wall does not clear itself. **Undo** takes back the
+tool, so a wall let go near another's end joins it. The line is a Foundry Drawing, and is kept: unlike a sketch, a wall does not clear itself. **Undo** takes back the
 walls and their line together.
 
 ## What everyone else sees

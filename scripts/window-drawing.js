@@ -50,6 +50,12 @@ const DOOR_STATES = [
     { id: 'open', icon: 'fa-solid fa-door-open', labelKey: 'doorOpen' },
     { id: 'locked', icon: 'fa-solid fa-lock', labelKey: 'doorLocked' }
 ];
+/** How thick a wall is, as part of a grid square. */
+const THICKNESSES = [
+    { id: 'thin', icon: 'fa-solid fa-minus', labelKey: 'weightThin' },
+    { id: 'medium', icon: 'fa-solid fa-grip-lines', labelKey: 'weightMedium' },
+    { id: 'thick', icon: 'fa-solid fa-bars', labelKey: 'weightThick' }
+];
 const WEIGHTS = [
     { id: '3', icon: 'fa-solid fa-minus', labelKey: 'weightThin' },
     { id: '6', icon: 'fa-solid fa-grip-lines', labelKey: 'weightMedium' },
@@ -96,6 +102,7 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         'drawing-mode': (_event, target, app) => app.manager.chooseMode(target.dataset.mode),
         'drawing-wall': (_event, target, app) => app.manager.chooseWall(target.dataset.kind),
         'drawing-wall-material': (_event, target, app) => app.manager.chooseMaterial(target.dataset.material),
+        'drawing-wall-thickness': (_event, target, app) => app.manager.setWallOption('thickness', target.dataset.thickness),
         'drawing-wall-door': (_event, target, app) => app.manager.setWallOption('door', target.dataset.door),
         'drawing-wall-shape': (_event, target, app) => app.manager.setWallOption('shape', target.dataset.shape),
         'drawing-weight': (_event, target, app) => app.manager.setBrushSettings({ size: Number(target.dataset.size) }, true),
@@ -310,7 +317,7 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         const door = isDoorKind(state.wallKind) ? this._segmented('drawing-wall-door', localize('doorState'), DOOR_STATES, state.wallDoor, 'door') : '';
         const how = (opening ? this._hint(localize('wallOpeningHint')) : this._segmented('drawing-wall-shape', localize('wallShape'), TOOLS, state.wallShape, 'shape'))
             + door
-            + this._segmented('drawing-weight', localize('weight'), WEIGHTS, state.brushSettings.size, 'size')
+            + this._segmented('drawing-wall-thickness', localize('wallThickness'), THICKNESSES, state.wallThickness, 'thickness')
             + this._toggles(this._toggle('wallSnap', localize('wallSnap'), state.wallSnap, { hint: localize('wallSnapHint') }))
             + this._hint(localize('wallHint'));
         const tiles = WALL_KINDS.map(kind => {

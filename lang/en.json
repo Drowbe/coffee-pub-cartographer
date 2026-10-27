@@ -153,6 +153,7 @@
 	"drawingTools.materialIron": "Iron bars",
 	"drawingTools.materialHedge": "Hedge",
 	"drawingTools.materialHint": "What the wall is drawn as; the kind above is what it does. A fence or iron bars suit an invisible wall, which stops movement and lets sight through, and a hedge a terrain wall; picking one from a plain wall chooses that kind for you, and you can change it after.",
+	"drawingTools.wallThickness": "Thickness",
 	"drawingTools.wallOpeningHint": "A door or a window is two points: press where it starts and let go where it ends. Drawn along a wall, it is fitted onto it, and the wall is cut around it. Undo makes the wall whole again.",
 	"drawingTools.patchSize": "Patch size",
 	"drawingTools.patchHint": "Click a patch, then click the map to put one down, or drag to scatter several. A patch fades at its edges, so it hints at ground rather than filling the map.",

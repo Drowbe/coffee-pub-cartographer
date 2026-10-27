@@ -6,7 +6,7 @@ import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
 import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor, stampSquares } from './utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings } from './utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness } from './utils-drawing.js';
 import { SKIP_JOIN } from './utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
 
@@ -66,6 +66,7 @@ class DrawingTool {
             wallSnap: true, // wall mode: put wall ends on Foundry's wall snap points
             wallKind: 'wall', // wall mode: what is drawn: 'wall', 'invisible', 'terrain', 'ethereal', 'door', 'secret', 'window'
             wallDoor: 'closed', // wall mode: the state a door is drawn in: 'closed', 'open', 'locked'
+            wallThickness: 'medium', // wall mode: how thick, as part of a grid square: 'thin', 'medium', 'thick'
             wallMaterial: 'plain', // wall mode: what the wall is drawn as: 'plain', 'stone', 'brick', 'wood', 'fence', 'iron', 'hedge'
             symbolSize: 'medium', // 'small', 'medium', 'large' - controls square bounding box size
             lineStyle: 'solid', // 'solid', 'dotted', 'dashed'
@@ -161,6 +162,7 @@ class DrawingTool {
         if (wallKindById(savedWallOptions?.kind)) this.state.wallKind = savedWallOptions.kind;
         if (['closed', 'open', 'locked'].includes(savedWallOptions?.door)) this.state.wallDoor = savedWallOptions.door;
         if (wallMaterialById(savedWallOptions?.material)) this.state.wallMaterial = savedWallOptions.material;
+        if (['thin', 'medium', 'thick'].includes(savedWallOptions?.thickness)) this.state.wallThickness = savedWallOptions.thickness;
         if (['small', 'medium', 'large'].includes(savedSymbolSize)) {
             this.state.symbolSize = savedSymbolSize;
         }
@@ -4648,7 +4650,8 @@ class DrawingTool {
         // laid over a darker, wider line, so it shows on a pale map as well as a dark one.
         const path = segmentsPath(segments);
         const none = CONST.DRAWING_FILL_TYPES.NONE;
-        const weight = this.state.brushSettings.size;
+        // How thick a wall is drawn is a part of a grid square, so it suits any map; not the brush's pixels.
+        const weight = wallThickness(this.state.wallThickness, grid);
         const solid = CONST.DRAWING_FILL_TYPES.SOLID;
         const color = wallKindById(kind).color;
         // The line over the walls: dark under and coloured over, with round ends and corners, and what a material
@@ -5143,9 +5146,10 @@ class DrawingTool {
         else if (name === 'kind' && wallKindById(value)) this.state.wallKind = value;
         else if (name === 'door' && ['closed', 'open', 'locked'].includes(value)) this.state.wallDoor = value;
         else if (name === 'material' && wallMaterialById(value)) this.state.wallMaterial = value;
+        else if (name === 'thickness' && ['thin', 'medium', 'thick'].includes(value)) this.state.wallThickness = value;
         else return;
         game.settings.set(MODULE.ID, 'toolbar.wallOptions', {
-            shape: this.state.wallShape, snap: this.state.wallSnap, kind: this.state.wallKind, door: this.state.wallDoor, material: this.state.wallMaterial
+            shape: this.state.wallShape, snap: this.state.wallSnap, kind: this.state.wallKind, door: this.state.wallDoor, material: this.state.wallMaterial, thickness: this.state.wallThickness
         });
         this.notifyChange();
     }

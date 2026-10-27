@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import {
     stampSquares, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness } from '../scripts/utils-drawing.js';
 import { SKIP_JOIN } from '../scripts/utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
@@ -175,14 +175,14 @@ console.log('\na wall stroke');
     check('one wall is written, with its line, the dark line under it, and a disc at each end of both', walls.length === 1 && walls[0][1].length === 1 && lines.length === 1 && lines[0][1].length === 6);
     check('the wall is where the snap put it', walls[0][1][0].c.join() === '0,0,400,0');
     check('the wall and the line carry the same group flag', walls[0][1][0].flags[MODULE.ID].drawnWall.id === lines[0][1][3].flags[MODULE.ID].drawnWall.id);
-    check('the line is the colour of the kind, at the brush\'s width', lines[0][1][3].strokeColor === wallKindById('wall').color && lines[0][1][3].strokeWidth === 6 && lines[0][1][3].strokeAlpha === 1);
+    check('the line is the colour of the kind, at the brush\'s width', lines[0][1][3].strokeColor === wallKindById('wall').color && lines[0][1][3].strokeWidth === wallThickness('medium', 100) && lines[0][1][3].strokeAlpha === 1);
     check('a plain wall is written as Foundry\'s defaults: no sense fields at all', !('door' in walls[0][1][0]) && !('light' in walls[0][1][0]) && !('threshold' in walls[0][1][0]));
     check('the line is open: no fill', [lines[0][1][0], lines[0][1][3]].every(d => d.fillType === 0));
     check('the line runs along the wall', [lines[0][1][0], lines[0][1][3]].every(d => d.shape.points.join() === '0,0,400,0' && d.x === 0 && d.y === 0));
-    check('under the line is a darker, wider one, so the wall shows on any map', lines[0][1][0].strokeColor === WALL_CASING && lines[0][1][0].strokeWidth === 10 && lines[0][1][0].sort < lines[0][1][3].sort);
+    check('under the line is a darker, wider one, so the wall shows on any map', lines[0][1][0].strokeColor === WALL_CASING && lines[0][1][0].strokeWidth === wallThickness('medium', 100) + 4 && lines[0][1][0].sort < lines[0][1][3].sort);
     const discs = lines[0][1].filter(d => d.fillType === 1);
     check('the ends are round: a dark disc and a coloured one at each end', discs.length === 4 && discs.filter(d => d.fillColor === WALL_CASING).length === 2 && discs.filter(d => d.fillColor === wallKindById('wall').color).length === 2);
-    check('the discs are as wide as the lines they cap', discs.filter(d => d.fillColor === WALL_CASING).every(d => d.shape.width >= 10 && d.shape.width <= 11) && discs.filter(d => d.fillColor !== WALL_CASING).every(d => d.shape.width >= 6 && d.shape.width <= 7));
+    check('the discs are as wide as the lines they cap', discs.filter(d => d.fillColor === WALL_CASING).every(d => d.shape.width >= 24 && d.shape.width <= 25) && discs.filter(d => d.fillColor !== WALL_CASING).every(d => d.shape.width >= 20 && d.shape.width <= 21));
     check('the discs sit on the ends of the wall', [0, 400].every(x => discs.some(d => Math.abs(d.x + d.shape.width / 2 - x) <= 1)));
     check('dark below, colour above: every dark thing sorts under every coloured one', Math.max(...lines[0][1].filter(d => d.sort === 0).map(d => d.sort)) < Math.min(...lines[0][1].filter(d => d.sort === 1).map(d => d.sort)) && lines[0][1].filter(d => d.sort === 0).length === 3);
     check('both carry the same group flag, so the eraser takes both', lines[0][1].every(d => d.flags[MODULE.ID].drawnWall.id === lines[0][1][0].flags[MODULE.ID].drawnWall.id));
@@ -346,7 +346,7 @@ console.log('\nmaterials');
     check('a plain wall is as it was: six Drawings', plain.drawn.length === 6);
     for (const material of ['stone', 'brick', 'wood', 'fence', 'iron', 'hedge']) {
         const { drawn, wall } = await strokeWith(material);
-        check(`${material}: drawn as that, with more than a plain line`, drawn.length > 6 && drawn.some(d => d.strokeColor === wallMaterialById(material).color || d.fillColor === wallMaterialById(material).color));
+        check(`${material}: drawn as that, with more than a plain line`, drawn.length > 6 && !drawn.some(d => d.strokeColor === wallKindById('wall').color || d.fillColor === wallKindById('wall').color));
         check(`${material}: the Drawings and the wall remember the material`, drawn.every(d => d.flags[MODULE.ID].drawnWall.material === material) && wall.flags[MODULE.ID].drawnWall.material === material);
     }
     {
@@ -429,7 +429,7 @@ console.log('\nthe marks on a door and a window');
     check('a wall has no mark: just its lines and discs', plain.length === 6);
     check('a door has a leaf over its line', door.length === 7 && door.at(-1).sort === 2 && door.at(-1).fillType === 1 && door.at(-1).strokeColor === wallKindById('door').color && door.at(-1).fillColor === WALL_CASING);
     check('the leaf is across the middle, wider than the line, and not the whole door', (() => { const leaf = door.at(-1); return leaf.shape.width < 100 && leaf.shape.width > 40 && leaf.shape.height > 6 && Math.abs(leaf.x + leaf.shape.width / 2 - 50) < 2; })());
-    check('a secret door has the leaf and a dot', secret.length === 8 && secret.at(-2).fillType === 1 && secret.at(-1).fillColor === wallKindById('secret').color && secret.at(-1).shape.width < 15);
+    check('a secret door has the leaf and a dot', secret.length === 8 && secret.at(-2).fillType === 1 && secret.at(-1).fillColor === wallKindById('secret').color && secret.at(-1).shape.width < 20);
     check('a window has a white pane down it', window_.length === 7 && window_.at(-1).strokeColor === '#ffffff' && window_.at(-1).fillType === 0 && window_.at(-1).sort === 2);
     check('the marks carry the group flag, so the eraser takes them too', [door, secret, window_].every(list => list.every(d => d.flags[MODULE.ID].drawnWall.id === list[0].flags[MODULE.ID].drawnWall.id)));
     check('an opening too short to hold a mark has none', openingMarks('door', [[0, 0], [10, 0]], { weight: 6, color: '#0f0', casing: '#000' }).length === 0);

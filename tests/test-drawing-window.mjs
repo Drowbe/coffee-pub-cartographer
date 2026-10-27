@@ -51,7 +51,7 @@ const tool = (overrides = {}) => Object.assign(new FakeTool(), {
     state: {
         active: false, drawingMode: 'sketch', stampStyle: 'tree', symbolSize: 'medium', lineStyle: 'solid', timedEraseEnabled: false,
         brushSettings: { size: 6, color: 'rgba(186, 60, 49, 0.7)', type: 'pen' },
-        stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 }, wallShape: 'line', wallSnap: true, wallKind: 'wall', wallDoor: 'closed', wallMaterial: 'plain'
+        stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 }, wallShape: 'line', wallSnap: true, wallKind: 'wall', wallDoor: 'closed', wallMaterial: 'plain', wallThickness: 'medium'
     },
     canMakeWalls: () => isGM, canKeepOnScene: () => isGM, canUndo: () => true,
     canSetScene: () => isGM, sceneState: () => ({ tokenVision: true, globalLight: false, darkness: 0.25 })
@@ -144,7 +144,7 @@ console.log('\nthe tabs stay put, and the controls come first');
     check('the switches are in a grid, all four together', /cartographer-drawing-toggles">(?:(?!<\/div>)[\s\S])*name="natural"(?:(?!<\/div>\s*<label class="cartographer-drawing-row")[\s\S])*name="keep"/.test(body) && count(body, /cartographer-drawing-toggles/g) === 1 && count(body, /blacksmith-toggle-row/g) === 4);
     const walls = build(tool(), 'walls')._buildBody();
     const wat = text => walls.indexOf(text);
-    check('on the Walls tab how they are drawn is first, above the kinds and the materials', wat('data-shape="sketch"') > 0 && wat('data-shape="sketch"') < wat('data-action="drawing-wall"') && wat('name="wallSnap"') < wat('data-action="drawing-wall"') && wat('name="drawing-weight"') < wat('data-action="drawing-wall"') && wat('data-action="drawing-wall"') < wat('data-action="drawing-wall-material"'));
+    check('on the Walls tab how they are drawn is first, above the kinds and the materials', wat('data-shape="sketch"') > 0 && wat('data-shape="sketch"') < wat('data-action="drawing-wall"') && wat('name="wallSnap"') < wat('data-action="drawing-wall"') && wat('name="drawing-wall-thickness"') < wat('data-action="drawing-wall"') && wat('data-action="drawing-wall"') < wat('data-action="drawing-wall-material"'));
     check('the walls are drawn the way drawings are: sketch, line, box and ellipse, in the same order', (() => { const ids = [...walls.matchAll(/name="drawing-wall-shape" value="(\w+)"/g)].map(m => m[1]); return ids.join() === 'sketch,line,box,ellipse'; })());
     check('and the shape chosen is the one checked', /value="box"[^>]*data-shape="box" checked/.test(build(tool({ state: { ...tool().state, wallShape: 'box' } }), 'walls')._buildBody()));
     const door = build(tool({ state: { ...tool().state, wallKind: 'door' } }), 'walls')._buildBody();
@@ -162,7 +162,8 @@ console.log('\nthe Walls tab');
     check('no kind is active until wall is the tool', count(body, /is-active" data-action="drawing-wall" /g) === 0);
     const drawing = build(tool({ state: { ...tool().state, drawingMode: 'wall', wallKind: 'window' } }), 'walls')._buildBody();
     check('when it is, the kind chosen is active', count(drawing, /cartographer-stamp is-active/g) === 1 && /is-active" data-action="drawing-wall" data-kind="window"/.test(drawing));
-    check('the shape, snap and weight are there', has(body, 'data-shape="line"') && has(body, 'data-shape="sketch"') && has(body, 'name="wallSnap"') && has(body, 'data-action="drawing-weight"'));
+    check('the shape, snap and weight are there', has(body, 'data-shape="line"') && has(body, 'data-shape="sketch"') && has(body, 'name="wallSnap"') && has(body, 'data-action="drawing-wall-thickness"'));
+    check('the thickness is thin, medium and thick, the chosen one checked', ['thin', 'medium', 'thick'].every(t => has(body, `data-thickness="${t}"`)) && /value="medium"[^>]*data-thickness="medium" checked/.test(body) && /value="thick"[^>]*data-thickness="thick" checked/.test(build(tool({ state: { ...tool().state, wallThickness: 'thick' } }), 'walls')._buildBody()));
     for (const kind of ['door', 'secret', 'window']) {
         const opening = build(tool({ state: { ...tool().state, wallKind: kind } }), 'walls')._buildBody();
         check(`${kind}: no shape to choose, since it is two points, and it says so`, !has(opening, 'data-shape=') && has(opening, lang['drawingTools.wallOpeningHint'].slice(0, 30)) && has(opening, 'name="wallSnap"'));

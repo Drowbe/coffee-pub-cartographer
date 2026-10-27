@@ -469,16 +469,56 @@ const pathLength = path => {
 };
 
 /**
- * The Drawings that make a wall stroke show on the map: a dark line, the wall in its colour over it, and
- * round ends and corners, with what a material adds -- the blocks of stone, the courses of brick, the
- * posts of a fence. All of one group, dark below and coloured above (the sort says which).
+ * How thick a wall is drawn, as a part of a grid square, so a wall is the same on any map: thin, medium
+ * and thick are a eighth, a fifth and a third of a square.
+ */
+export const WALL_THICKNESS = { thin: 0.125, medium: 0.2, thick: 0.33 };
+
+/** A wall's thickness in pixels on a grid of this size, never under 8 so a pattern has room to show. */
+export function wallThickness(thickness, grid = 100) {
+    return Math.max(8, Math.round((Number(grid) || 100) * (WALL_THICKNESS[thickness] ?? WALL_THICKNESS.medium)));
+}
+
+/** A filled polygon Drawing, for the blocks of a wall. `edge` outlines it when given. */
+function blockDrawing(points, { fill, alpha = 1, edge = null, edgeWidth = 1, flags = {}, solid = 1, sort = 2 }) {
+    return {
+        ...polygonShape(points),
+        bezierFactor: 0, sort,
+        fillType: solid, fillColor: fill, fillAlpha: alpha,
+        strokeWidth: edge ? edgeWidth : 0, strokeColor: edge ?? fill, strokeAlpha: edge ? 1 : 0,
+        flags
+    };
+}
+
+/** The straight pieces of a line, each with its length and direction. */
+function legsOf(path) {
+    const legs = [];
+    for (let i = 0; i < path.length - 2; i += 2) {
+        const dx = path[i + 2] - path[i];
+        const dy = path[i + 3] - path[i + 1];
+        const length = Math.hypot(dx, dy);
+        if (length > 0.5) legs.push({ x: path[i], y: path[i + 1], length, ux: dx / length, uy: dy / length });
+    }
+    return legs;
+}
+
+/** A rectangle on a leg: from `a` to `b` along it, from `lo` to `hi` across it (measured from the line), as flat points. */
+function onLeg(leg, a, b, lo, hi) {
+    const at = (along, across) => [leg.x + leg.ux * along - leg.uy * across, leg.y + leg.uy * along + leg.ux * across];
+    return [...at(a, lo), ...at(b, lo), ...at(b, hi), ...at(a, hi)];
+}
+
+/**
+ * The Drawings that make a wall stroke show on the map: a dark line, the wall over it, round ends and
+ * corners, and what a material is made of -- the stones, the bricks, the planks, the bars, the leaves --
+ * laid down leg by leg, so a corner is a corner. All of one group, dark below and coloured above.
  *
  * @param {object} what
  * @param {number[]} what.path  The stroke, flat [x, y, ...] in scene pixels.
  * @param {string} [what.material]  A WALL_MATERIALS id; `plain` is the kind's own colour.
  * @param {string} what.color  The kind's colour, for a plain wall.
  * @param {string} what.casing  The dark line under a plain wall.
- * @param {number} what.weight  The line weight chosen.
+ * @param {number} what.weight  How thick the wall is, in pixels (see wallThickness).
  * @param {number} [what.grid]  The grid size, for how far apart posts stand.
  * @param {number} [what.seed]
  * @param {object} what.flags
@@ -488,87 +528,119 @@ const pathLength = path => {
 export function wallLineDrawings({ path, material = 'plain', color, casing, weight, grid = 100, seed = 1, flags = {}, solid = 1, none = 0 }) {
     const info = MATERIAL_BY_ID.get(material) ?? MATERIAL_BY_ID.get('plain');
     const rand = seeded(seed);
-    const docs = [];
+    const pick = list => list[Math.floor(rand() * list.length)];
     const line = (pts, width, fill, alpha, sort) => strokeDrawingData(pts, { color: fill, alpha, width, flags, none, sort });
     const disc = (x, y, radius, fill, sort, alpha = 1) => discDrawingData(x, y, radius, { color: fill, alpha, flags, solid, sort });
+    const block = (pts, fill, sort = 2, edge = null) => blockDrawing(pts, { fill, edge, flags, solid, sort });
     const ends = (radius, fill, sort) => {
         const out = [];
         for (let i = 0; i < path.length; i += 2) out.push(disc(path[i], path[i + 1], radius, fill, sort));
         return out;
     };
+    const total = pathLength(path);
+    const legs = legsOf(path);
+    const w = Math.max(weight, 8);
     // Spaced so a long stroke does not carry more than the cap.
-    const spaced = (step, first) => pointsAlong(path, Math.max(step, pathLength(path) / MAX_WALL_DECOR), first);
+    const spaced = (step, first) => pointsAlong(path, Math.max(step, total / MAX_WALL_DECOR), first);
+    const cross = (p, width, fill, alpha, sort, half = w / 2) => line([p.x - p.nx * half, p.y - p.ny * half, p.x + p.nx * half, p.y + p.ny * half], width, fill, alpha, sort);
 
     if (info.id === 'plain') {
         return [
-            line(path, weight + 4, casing, 1, 0), ...ends(weight / 2 + 2, casing, 0),
-            line(path, weight, color, 1, 1), ...ends(weight / 2, color, 1)
+            line(path, w + 4, casing, 1, 0), ...ends(w / 2 + 2, casing, 0),
+            line(path, w, color, 1, 1), ...ends(w / 2, color, 1)
         ];
     }
 
-    // The walls of stone, brick and wood are never thinner than their pattern needs.
-    const w = Math.max(weight, 8);
     const edge = info.edge;
     const body = info.color;
+    const docs = [];
+    // Rows of blocks along every leg: each row a band across the wall, each block a length along it, the
+    // joints of one row falling in the middle of the blocks of the next.
+    const courses = (rows, blockLength, tones, inset, stagger = true) => {
+        const length = Math.max(blockLength, total / (MAX_WALL_DECOR / rows));
+        legs.forEach(leg => {
+            for (let row = 0; row < rows; row++) {
+                const lo = -w / 2 + (w / rows) * row + inset;
+                const hi = -w / 2 + (w / rows) * (row + 1) - inset;
+                let at = stagger && row % 2 ? -length * (0.3 + rand() * 0.4) : 0;
+                while (at < leg.length) {
+                    const size = length * (0.75 + rand() * 0.5);
+                    const a = Math.max(0, at) + inset;
+                    const b = Math.min(leg.length, at + size) - inset;
+                    if (b - a > 1.5) docs.push(block(onLeg(leg, a, b, lo, hi), pick(tones), 2));
+                    at += size;
+                }
+            }
+        });
+    };
+
     switch (info.id) {
         case 'stone': {
-            docs.push(line(path, w + 4, edge, 1, 0), ...ends(w / 2 + 2, edge, 0), line(path, w, body, 1, 1), ...ends(w / 2, body, 1));
-            docs.push(line(path, w * 0.4, '#bdbab2', 0.55, 2));
-            // Blocks: a joint across the wall every so often, never twice the same.
-            let at = w * 0.9;
-            const total = pathLength(path);
-            const stones = Math.max(w * 1.5, total / MAX_WALL_DECOR);
-            while (at < total) {
-                const [p] = pointsAlong(path, total, at);
-                if (p) docs.push(line([p.x - p.nx * w * 0.5, p.y - p.ny * w * 0.5, p.x + p.nx * w * 0.5, p.y + p.ny * w * 0.5], 1.5, '#4d4a45', 0.75, 3));
-                at += stones * (0.7 + rand() * 0.7);
-            }
+            // Rubble: a dark joint line, and two rows of grey stones, no two alike.
+            docs.push(line(path, w + 4, edge, 1, 0), ...ends(w / 2 + 2, edge, 0), line(path, w, '#6a6862', 1, 1), ...ends(w / 2, '#6a6862', 1));
+            courses(w >= 16 ? 2 : 1, w * 0.95, ['#b4b2aa', '#a4a29a', '#bdbbb3', '#98968e', '#aeaca4'], 1.2);
             break;
         }
         case 'brick': {
-            docs.push(line(path, w + 4, edge, 1, 0), ...ends(w / 2 + 2, edge, 0), line(path, w, body, 1, 1), ...ends(w / 2, body, 1));
-            // The mortar between two courses, and the joints of each, staggered.
-            docs.push(line(path, 1.5, '#e0d2c0', 0.85, 2));
-            spaced(w * 1.1, w * 0.55).forEach((p, index) => {
-                const from = index % 2 ? 0 : -w / 2;
-                const to = index % 2 ? w / 2 : 0;
-                docs.push(line([p.x + p.nx * from, p.y + p.ny * from, p.x + p.nx * to, p.y + p.ny * to], 1.5, '#e0d2c0', 0.85, 3));
-            });
+            // Courses of red brick on pale mortar, each course shifted from the one below it.
+            docs.push(line(path, w + 4, edge, 1, 0), ...ends(w / 2 + 2, edge, 0), line(path, w, '#dccfb8', 1, 1), ...ends(w / 2, '#dccfb8', 1));
+            courses(Math.max(2, Math.round(w / 8)), w * 0.62, ['#a8553d', '#b5614a', '#9c4b35', '#ad5a41', '#a1503a'], 1, true);
             break;
         }
         case 'wood': {
-            docs.push(line(path, w + 4, edge, 1, 0), ...ends(w / 2 + 2, edge, 0), line(path, w, body, 1, 1), ...ends(w / 2, body, 1));
-            // The seams between planks, and the ends of them.
-            for (const side of [-0.22, 0.22]) docs.push(line(offsetPath(path, w * side), 1.5, '#5b3c20', 0.8, 2));
-            spaced(w * 3, w * 1.5).forEach(p => docs.push(line([p.x - p.nx * w * 0.5, p.y - p.ny * w * 0.5, p.x + p.nx * w * 0.5, p.y + p.ny * w * 0.5], 1.5, '#5b3c20', 0.8, 3)));
+            // Planks laid side by side, in three browns, with the ends of boards and a knot here and there.
+            docs.push(line(path, w + 4, edge, 1, 0), ...ends(w / 2 + 2, edge, 0), line(path, w, '#4d3320', 1, 1), ...ends(w / 2, '#4d3320', 1));
+            const strips = w >= 20 ? 3 : 2;
+            const tones = ['#9a6c3b', '#85592f', '#a8793f', '#7a5230'];
+            legs.forEach(leg => {
+                for (let strip = 0; strip < strips; strip++) {
+                    const lo = -w / 2 + (w / strips) * strip + 1;
+                    const hi = -w / 2 + (w / strips) * (strip + 1) - 1;
+                    // Boards a few widths long, end to end.
+                    let at = 0;
+                    while (at < leg.length) {
+                        const size = Math.max(w * 2.2, total / (MAX_WALL_DECOR / strips / 2)) * (1 + rand());
+                        const a = at + 0.8;
+                        const b = Math.min(leg.length, at + size) - 0.8;
+                        if (b - a > 1.5) docs.push(block(onLeg(leg, a, b, lo, hi), pick(tones), 2));
+                        at += size;
+                    }
+                }
+            });
+            spaced(w * 1.6, w * 0.4).forEach(p => { if (rand() < 0.45) docs.push(disc(p.x + p.nx * (rand() - 0.5) * w * 0.6, p.y + p.ny * (rand() - 0.5) * w * 0.6, Math.max(1.5, w * 0.07), '#3d2a1a', 3, 0.85)); });
             break;
         }
         case 'fence': {
-            // Two rails, with a post at every half square.
-            const rail = Math.max(2, w * 0.22);
-            for (const side of [-0.28, 0.28]) {
-                docs.push(line(offsetPath(path, w * side), rail + 2, edge, 1, 0), line(offsetPath(path, w * side), rail, body, 1, 1));
+            // Open: two thin rails and a stout post at every half square, with the gap between to see through.
+            const rail = Math.max(3, w * 0.2);
+            for (const side of [-0.3, 0.3]) {
+                docs.push(line(offsetPath(path, w * side), rail + 3, edge, 1, 0), line(offsetPath(path, w * side), rail, '#b08650', 1, 1));
             }
-            const post = Math.max(4, w * 0.5);
-            for (const p of pointsAlong(path, Math.max(grid * 0.5, pathLength(path) / MAX_WALL_DECOR), grid * 0.25)) {
-                docs.push(disc(p.x, p.y, post + 1.5, edge, 1), disc(p.x, p.y, post, '#a47a4a', 2));
-            }
-            for (let i = 0; i < path.length; i += 2) if (i === 0 || i === path.length - 2) docs.push(disc(path[i], path[i + 1], post + 1.5, edge, 1), disc(path[i], path[i + 1], post, '#a47a4a', 2));
+            const post = Math.max(4, w * 0.28);
+            const stand = [...pointsAlong(path, Math.max(grid * 0.5, total / (MAX_WALL_DECOR / 3)), grid * 0.25)];
+            [{ x: path[0], y: path[1] }, { x: path[path.length - 2], y: path[path.length - 1] }, ...stand].forEach(p => {
+                docs.push(disc(p.x, p.y, post + 2, edge, 1), disc(p.x, p.y, post, '#c9a46a', 2), disc(p.x - post * 0.2, p.y - post * 0.2, post * 0.4, '#e0c18a', 3, 0.8));
+            });
             break;
         }
         case 'iron': {
-            // Rails with bars across them and a post at each end.
-            docs.push(line(path, Math.max(3, w * 0.4) + 2, edge, 1, 0), line(path, Math.max(3, w * 0.4), body, 1, 1));
-            spaced(Math.max(w * 1.4, 12), w * 0.6).forEach(p => docs.push(line([p.x - p.nx * w * 0.5, p.y - p.ny * w * 0.5, p.x + p.nx * w * 0.5, p.y + p.ny * w * 0.5], 2, '#8a929b', 1, 2)));
-            for (let i = 0; i < path.length; i += 2) if (i === 0 || i === path.length - 2) docs.push(disc(path[i], path[i + 1], w * 0.5 + 1.5, edge, 1), disc(path[i], path[i + 1], w * 0.5, '#7d848c', 2));
+            // A black rail, bars standing across it in silver, and a ball on every post.
+            const rail = Math.max(4, w * 0.3);
+            for (const side of [-0.42, 0.42]) docs.push(line(offsetPath(path, w * side), rail * 0.6 + 2, edge, 1, 0), line(offsetPath(path, w * side), rail * 0.6, '#454b53', 1, 1));
+            spaced(Math.max(w * 0.5, 7), w * 0.25).forEach(p => docs.push(cross(p, 2.4, '#d3dae2', 1, 2, w * 0.46)));
+            const post = Math.max(4, w * 0.3);
+            const posts = [{ x: path[0], y: path[1] }, { x: path[path.length - 2], y: path[path.length - 1] }, ...pointsAlong(path, Math.max(grid * 0.5, total / (MAX_WALL_DECOR / 4)), grid * 0.25)];
+            posts.forEach(p => docs.push(disc(p.x, p.y, post + 1.5, edge, 3), disc(p.x, p.y, post, '#59606a', 4), disc(p.x - post * 0.25, p.y - post * 0.25, post * 0.38, '#b9c1ca', 5, 0.9)));
             break;
         }
         case 'hedge': {
-            docs.push(line(path, w * 1.2 + 4, edge, 1, 0), ...ends(w * 0.6 + 2, edge, 0), line(path, w * 1.2, body, 1, 1), ...ends(w * 0.6, body, 1));
-            // Leaves: a scatter of rounder, lighter clumps along it.
-            spaced(Math.max(w * 0.9, 12), w * 0.3).forEach((p, index) => {
-                const side = (rand() - 0.5) * w * 0.7;
-                docs.push(disc(p.x + p.nx * side, p.y + p.ny * side, w * (0.28 + rand() * 0.16), index % 2 ? '#5aa04a' : '#4f9a3c', 2, 0.95));
+            // Wider than a wall, and soft: a dark mass, and clumps of leaves in three greens, with the odd berry.
+            const hw = w * 1.5;
+            docs.push(line(path, hw + 4, edge, 1, 0), ...ends(hw / 2 + 2, edge, 0), line(path, hw, '#2f6a2a', 1, 1), ...ends(hw / 2, '#2f6a2a', 1));
+            spaced(Math.max(w * 0.55, 8), w * 0.2).forEach(p => {
+                const across = (rand() - 0.5) * hw * 0.55;
+                docs.push(disc(p.x + p.nx * across, p.y + p.ny * across, w * (0.4 + rand() * 0.3), pick(['#3f8a36', '#4f9a3c', '#5aa84a', '#357a2e']), 2, 0.95));
+                if (rand() < 0.12) docs.push(disc(p.x + p.nx * across * 1.2, p.y + p.ny * across * 1.2, Math.max(1.8, w * 0.1), '#c0392b', 3));
             });
             break;
         }
@@ -578,19 +650,46 @@ export function wallLineDrawings({ path, material = 'plain', color, casing, weig
     return docs;
 }
 
-/** A material as a small SVG for the window: a length of wall in it. */
+/** A material as a small SVG for the window: a length of wall in it, drawn as it is on the map. */
 export function wallMaterialSvg(material) {
     const info = MATERIAL_BY_ID.get(material) ?? MATERIAL_BY_ID.get('plain');
-    const band = (fill, edge, thickness = 14) => `<rect x="8" y="${20 - thickness / 2 - 2}" width="84" height="${thickness + 4}" rx="${(thickness + 4) / 2}" fill="${edge}"/><rect x="10" y="${20 - thickness / 2}" width="80" height="${thickness}" rx="${thickness / 2}" fill="${fill}"/>`;
+    const rr = (x, y, width, height, fill, radius = 1.2) => `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}" fill="${fill}"/>`;
+    const band = (fill, edge, top = 11, height = 18) => rr(8, top - 2, 84, height + 4, edge, 8) + rr(10, top, 80, height, fill, 7);
     let body;
     switch (info.id) {
-        case 'stone': body = band(info.color, info.edge) + [24, 38, 50, 66, 78].map(x => `<path d="M${x} 13.5V26.5" stroke="#4d4a45" stroke-width="1.6"/>`).join('') + '<path d="M12 20H88" stroke="#bdbab2" stroke-opacity="0.55" stroke-width="4" stroke-linecap="round"/>'; break;
-        case 'brick': body = band(info.color, info.edge) + '<path d="M12 20H88" stroke="#e0d2c0" stroke-opacity="0.85" stroke-width="1.6"/>' + [20, 32, 44, 56, 68, 80].map((x, i) => `<path d="M${x} ${i % 2 ? 20 : 13.5}V${i % 2 ? 26.5 : 20}" stroke="#e0d2c0" stroke-opacity="0.85" stroke-width="1.6"/>`).join(''); break;
-        case 'wood': body = band(info.color, info.edge) + '<path d="M12 17H88M12 23H88" stroke="#5b3c20" stroke-opacity="0.8" stroke-width="1.5"/>' + [30, 56, 80].map(x => `<path d="M${x} 13.5V26.5" stroke="#5b3c20" stroke-width="1.5"/>`).join(''); break;
-        case 'fence': body = `<path d="M10 16.5H90M10 23.5H90" stroke="${info.edge}" stroke-width="5" stroke-linecap="round"/><path d="M10 16.5H90M10 23.5H90" stroke="${info.color}" stroke-width="3" stroke-linecap="round"/>` + [16, 50, 84].map(x => `<circle cx="${x}" cy="20" r="6.5" fill="${info.edge}"/><circle cx="${x}" cy="20" r="5" fill="#a47a4a"/>`).join(''); break;
-        case 'iron': body = `<path d="M10 20H90" stroke="${info.edge}" stroke-width="6" stroke-linecap="round"/><path d="M10 20H90" stroke="${info.color}" stroke-width="4" stroke-linecap="round"/>` + [20, 30, 40, 50, 60, 70, 80].map(x => `<path d="M${x} 13V27" stroke="#8a929b" stroke-width="2.2"/>`).join('') + [10, 90].map(x => `<circle cx="${x}" cy="20" r="6" fill="${info.edge}"/><circle cx="${x}" cy="20" r="4.6" fill="#7d848c"/>`).join(''); break;
-        case 'hedge': body = band(info.color, info.edge, 17) + [18, 30, 42, 54, 66, 78].map((x, i) => `<circle cx="${x}" cy="${i % 2 ? 17 : 23}" r="6" fill="${i % 2 ? '#5aa04a' : '#4f9a3c'}"/>`).join(''); break;
-        default: body = band(info.color, '#1c1c1c', 8);
+        case 'stone': {
+            const tones = ['#b4b2aa', '#a4a29a', '#bdbbb3', '#98968e'];
+            const row = (y, xs) => xs.map(([x, width], i) => rr(x, y, width, 7.4, tones[(i + Math.round(y)) % 4], 1.6)).join('');
+            body = band('#6a6862', info.edge) + row(12, [[11, 14], [26, 19], [46, 12], [59, 18], [78, 11]]) + row(20.4, [[11, 9], [21, 17], [39, 13], [53, 16], [70, 19]]);
+            break;
+        }
+        case 'brick': {
+            const tones = ['#a8553d', '#b5614a', '#9c4b35', '#ad5a41'];
+            const row = (y, offset) => Array.from({ length: 7 }, (_, i) => rr(10 + offset + i * 12, y, 11, 4.2, tones[(i + Math.round(y)) % 4], 0.6)).join('');
+            body = band('#dccfb8', info.edge) + row(11.5, 0) + row(16, -6) + row(20.5, 0) + row(25, -6);
+            break;
+        }
+        case 'wood': {
+            const strip = (y, tone, cuts) => rr(10, y, 80, 5.6, tone, 0.5) + cuts.map(x => `<path d="M${x} ${y}v5.6" stroke="#3d2a1a" stroke-width="0.9"/>`).join('');
+            body = band('#4d3320', info.edge) + strip(11.6, '#9a6c3b', [34, 70]) + strip(17.4, '#85592f', [22, 56]) + strip(23.2, '#a8793f', [44, 82]) + '<circle cx="62" cy="20" r="1.6" fill="#3d2a1a"/>';
+            break;
+        }
+        case 'fence': {
+            body = [14.5, 25.5].map(y => `<path d="M8 ${y}H92" stroke="${info.edge}" stroke-width="6.5" stroke-linecap="round"/><path d="M8 ${y}H92" stroke="#b08650" stroke-width="3.6" stroke-linecap="round"/>`).join('')
+                + [14, 50, 86].map(x => `<circle cx="${x}" cy="20" r="8" fill="${info.edge}"/><circle cx="${x}" cy="20" r="6" fill="#c9a46a"/><circle cx="${x - 1.6}" cy="18.4" r="2.4" fill="#e0c18a" fill-opacity="0.8"/>`).join('');
+            break;
+        }
+        case 'iron': {
+            body = [11.5, 28.5].map(y => `<path d="M8 ${y}H92" stroke="${info.edge}" stroke-width="4.4" stroke-linecap="round"/><path d="M8 ${y}H92" stroke="#454b53" stroke-width="2.4" stroke-linecap="round"/>`).join('')
+                + Array.from({ length: 12 }, (_, i) => `<path d="M${22 + i * 5.2} 10.5V29.5" stroke="#d3dae2" stroke-width="1.7"/>`).join('')
+                + [14, 86].map(x => `<circle cx="${x}" cy="20" r="8.2" fill="${info.edge}"/><circle cx="${x}" cy="20" r="6.6" fill="#59606a"/><circle cx="${x - 1.8}" cy="18.2" r="2.6" fill="#b9c1ca" fill-opacity="0.9"/>`).join('');
+            break;
+        }
+        case 'hedge': {
+            body = band('#2f6a2a', info.edge, 7, 26) + [[16, 17, 6.5, '#3f8a36'], [28, 25, 6, '#5aa84a'], [40, 16, 7, '#4f9a3c'], [52, 24, 6.5, '#357a2e'], [64, 17, 6.5, '#5aa84a'], [76, 24, 6, '#3f8a36'], [86, 18, 5.5, '#4f9a3c']].map(([x, y, r, fill]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${fill}"/>`).join('') + '<circle cx="46" cy="22" r="1.5" fill="#c0392b"/><circle cx="72" cy="20" r="1.5" fill="#c0392b"/>';
+            break;
+        }
+        default: body = band(info.color, '#1c1c1c', 16, 8);
     }
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40" aria-hidden="true">${body}</svg>`;
 }
