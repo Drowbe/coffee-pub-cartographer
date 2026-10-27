@@ -6,7 +6,7 @@ import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
 import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor, stampSquares } from './utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks } from './utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings } from './utils-drawing.js';
 import { SKIP_JOIN } from './utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
 
@@ -62,10 +62,11 @@ class DrawingTool {
                 terrain: 'dirt', // terrain mode: the kind of path laid (utils-terrain.js)
                 pathWidth: 1 // terrain mode: how wide a path is, in grid squares
             },
-            wallShape: 'line', // wall mode: 'line' (one straight wall) or 'sketch' (freehand, simplified to walls)
+            wallShape: 'line', // wall mode, as for drawing: 'sketch' (freehand, simplified to walls), 'line' (one straight wall), 'box' (a room), 'ellipse'
             wallSnap: true, // wall mode: put wall ends on Foundry's wall snap points
             wallKind: 'wall', // wall mode: what is drawn: 'wall', 'invisible', 'terrain', 'ethereal', 'door', 'secret', 'window'
             wallDoor: 'closed', // wall mode: the state a door is drawn in: 'closed', 'open', 'locked'
+            wallMaterial: 'plain', // wall mode: what the wall is drawn as: 'plain', 'stone', 'brick', 'wood', 'fence', 'iron', 'hedge'
             symbolSize: 'medium', // 'small', 'medium', 'large' - controls square bounding box size
             lineStyle: 'solid', // 'solid', 'dotted', 'dashed'
             brushSettings: {
@@ -155,10 +156,11 @@ class DrawingTool {
             if (typeof savedStampOptions?.[name] === typeof this.state.stamp[name]) this.state.stamp[name] = savedStampOptions[name];
         }
         const savedWallOptions = game.settings.get(MODULE.ID, 'toolbar.wallOptions');
-        if (['line', 'sketch'].includes(savedWallOptions?.shape)) this.state.wallShape = savedWallOptions.shape;
+        if (['line', 'sketch', 'box', 'ellipse'].includes(savedWallOptions?.shape)) this.state.wallShape = savedWallOptions.shape;
         if (typeof savedWallOptions?.snap === 'boolean') this.state.wallSnap = savedWallOptions.snap;
         if (wallKindById(savedWallOptions?.kind)) this.state.wallKind = savedWallOptions.kind;
         if (['closed', 'open', 'locked'].includes(savedWallOptions?.door)) this.state.wallDoor = savedWallOptions.door;
+        if (wallMaterialById(savedWallOptions?.material)) this.state.wallMaterial = savedWallOptions.material;
         if (['small', 'medium', 'large'].includes(savedSymbolSize)) {
             this.state.symbolSize = savedSymbolSize;
         }
@@ -2053,6 +2055,17 @@ class DrawingTool {
                 this._previewGraphics = null;
             }
             
+            // A box of walls is a room: four walls, and the line over them
+            if (this.state.drawingMode === 'wall') {
+                const start = this.state.boxStartPoint;
+                this.state.isDrawing = false;
+                this.state.boxStartPoint = null;
+                this.state.lastMousePosition = null;
+                this.state.currentDrawing = null;
+                await this.createWallStroke([[start.x, start.y], [worldCoords.x, worldCoords.y]]);
+                return;
+            }
+
             // Calculate box dimensions
             const startX = this.state.boxStartPoint.x;
             const startY = this.state.boxStartPoint.y;
@@ -2351,6 +2364,15 @@ class DrawingTool {
                 this.services.canvasLayer.removeChild(this._previewGraphics);
                 this._previewGraphics.destroy();
                 this._previewGraphics = null;
+            }
+            if (this.state.drawingMode === 'wall') {
+                const start = this.state.ellipseStartPoint;
+                this.state.isDrawing = false;
+                this.state.ellipseStartPoint = null;
+                this.state.lastMousePosition = null;
+                this.state.currentDrawing = null;
+                await this.createWallStroke([[start.x, start.y], [worldCoords.x, worldCoords.y]]);
+                return;
             }
             const startX = this.state.ellipseStartPoint.x;
             const startY = this.state.ellipseStartPoint.y;
@@ -3533,7 +3555,7 @@ class DrawingTool {
         const mode = this.state.drawingMode;
         if (mode === 'terrain') return 'sketch';
         // A door or a window is two points, whatever shape is chosen for the walls.
-        if (mode === 'wall') return this.state.wallShape === 'sketch' && !isOpeningKind(this.state.wallKind) ? 'sketch' : 'line';
+        if (mode === 'wall') return !isOpeningKind(this.state.wallKind) && ['sketch', 'box', 'ellipse'].includes(this.state.wallShape) ? this.state.wallShape : 'line';
         return mode;
     }
 
@@ -4186,9 +4208,10 @@ class DrawingTool {
             const options = this.state.stamp;
             this._roll = {
                 seed: 1 + Math.floor(Math.random() * 2147483646),
-                rotation: options.rotate && stamp && !stamp.legacy ? Math.random() * Math.PI * 2 : 0,
-                mirror: options.rotate && Math.random() < 0.5,
-                jitter: options.jitter ? 0.85 + Math.random() * 0.3 : 1
+                // A crop stands as it is, and as big as the others: a field is a lattice, and a turn or a size would spoil it.
+                rotation: options.rotate && stamp && !stamp.legacy && !stamp.lattice ? Math.random() * Math.PI * 2 : 0,
+                mirror: options.rotate && !stamp?.lattice && Math.random() < 0.5,
+                jitter: options.jitter && !stamp?.lattice ? 0.85 + Math.random() * 0.3 : 1
             };
         }
         return this._roll;
@@ -4245,8 +4268,9 @@ class DrawingTool {
     /** How far apart a drag puts stamps down. Ground is painted: dabs close enough to run together. */
     _scatterStep(kind) {
         const stamp = stampById(kind);
-        const apart = stamp.category === 'ground' ? 0.2 : 0.6;
-        return Math.max(6, this._stampPixels(kind) * this.state.stamp.spacing * apart);
+        // A crop goes on a lattice, one to a cell, so a drag samples twice a cell and the repeats are dropped.
+        const apart = stamp.lattice ? 0.5 : stamp.category === 'ground' ? 0.2 : 0.6;
+        return Math.max(6, this._stampPixels(kind) * (stamp.lattice ? 1 : this.state.stamp.spacing) * apart);
     }
 
     _scatterTo(event) {
@@ -4255,7 +4279,7 @@ class DrawingTool {
         if (!point || !stroke) return;
         const kind = this.state.stampStyle;
         const step = this._scatterStep(kind);
-        const loose = stampById(kind).category === 'ground' ? 0.1 : 0.3;
+        const loose = stampById(kind).lattice ? 0 : stampById(kind).category === 'ground' ? 0.1 : 0.3;
         this.removePreviewSymbol();
         // Every step along the way gets one, so a fast drag leaves no gaps.
         let distance = Math.hypot(point.x - stroke.x, point.y - stroke.y);
@@ -4288,6 +4312,18 @@ class DrawingTool {
     _placeStamp(kind, x, y) {
         const stamp = stampById(kind);
         if (!stamp || stamp.legacy) return;
+        // A crop is put on the nearest point of a lattice as wide as itself, one plant to a point, so a drag lays rows.
+        if (stamp.lattice) {
+            const cell = this._stampPixels(kind);
+            x = Math.round(x / cell) * cell;
+            y = Math.round(y / cell) * cell;
+            if (this._scatter) {
+                this._scatter.cells ??= new Set();
+                const key = `${x},${y}`;
+                if (this._scatter.cells.has(key)) return;
+                this._scatter.cells.add(key);
+            }
+        }
         const roll = this._takeRoll();
         const size = this._stampPixels(kind) * roll.jitter;
         const tint = this._stampTint(kind);
@@ -4520,6 +4556,21 @@ class DrawingTool {
         return [target.x, target.y];
     }
 
+    /**
+     * Choose what a wall is drawn as -- stone, brick, a fence -- from the window, and start. From a plain
+     * wall the kind that suits it comes with it: a fence stops movement and nothing else.
+     */
+    chooseMaterial(id) {
+        const material = wallMaterialById(id);
+        if (!this.canMakeWalls() || !material) return;
+        this.setWallOption('material', id);
+        if (material.suggests && this.state.wallKind === 'wall') this.setWallOption('kind', material.suggests);
+        this.setDrawingMode('wall');
+        this.updateModeButtons();
+        this.startFromWindow();
+        this.notifyChange();
+    }
+
     /** Choose a kind of wall from the window, and start drawing it. */
     chooseWall(kind) {
         if (!this.canMakeWalls() || !wallKindById(kind)) return;
@@ -4553,6 +4604,7 @@ class DrawingTool {
         let segments = wallStrokeSegments({
             // A door or a window is two points, the first and the last, however it was drawn.
             shape: opening ? 'line' : this.state.wallShape,
+            grid,
             points,
             snap: point => this._wallSnap(point),
             epsilon: Math.max(2, grid * 0.12),
@@ -4573,8 +4625,10 @@ class DrawingTool {
         if (!segments.length) return;
 
         const group = foundry.utils.randomID();
-        const wallFlags = { [MODULE.ID]: { drawnWall: { id: group, kind, ...(cut ? { cutFrom: { id: cut.wall.id, c: [...cut.wall.c] } } : {}) } } };
-        const flags = { [MODULE.ID]: { drawnWall: { id: group, kind } } };
+        // A door or a window is drawn as itself; any other wall in the material chosen.
+        const material = opening ? 'plain' : (wallMaterialById(this.state.wallMaterial)?.id ?? 'plain');
+        const wallFlags = { [MODULE.ID]: { drawnWall: { id: group, kind, material, ...(cut ? { cutFrom: { id: cut.wall.id, c: [...cut.wall.c] } } : {}) } } };
+        const flags = { [MODULE.ID]: { drawnWall: { id: group, kind, material } } };
         const levels = scene.levels?.size > 1 && canvas.level?.id ? { levels: [canvas.level.id] } : {};
         // What each kind of wall is made of -- what it stops, what it lets through -- as Foundry's own tools make it.
         const made = wallKindData(kind, {
@@ -4597,16 +4651,10 @@ class DrawingTool {
         const weight = this.state.brushSettings.size;
         const solid = CONST.DRAWING_FILL_TYPES.SOLID;
         const color = wallKindById(kind).color;
-        // A disc at every end and corner, dark under and coloured over, so ends are round and corners meet.
-        const joints = [];
-        for (let i = 0; i < path.length; i += 2) joints.push([path[i], path[i + 1]]);
-        const discs = (radius, fill, sort) => joints.map(([x, y]) => discDrawingData(x, y, radius, { color: fill, alpha: 1, flags, solid, sort }));
+        // The line over the walls: dark under and coloured over, with round ends and corners, and what a material
+        // adds. A door has its leaf, a secret door its dot, a window its pane: what the button shows.
         const drawn = [
-            strokeDrawingData(path, { color: WALL_CASING, alpha: 1, width: weight + 4, flags, none, sort: 0 }),
-            ...discs(weight / 2 + 2, WALL_CASING, 0),
-            strokeDrawingData(path, { color, alpha: 1, width: weight, flags, none, sort: 1 }),
-            ...discs(weight / 2, color, 1),
-            // A door has its leaf, a secret door its dot, a window its pane: what the button shows.
+            ...wallLineDrawings({ path, material, color, casing: WALL_CASING, weight, grid, seed: Math.floor(Math.random() * 2147483646) + 1, flags, solid, none }),
             ...(opening ? openingMarks(kind, segments[0], { weight, color, casing: WALL_CASING, flags, solid, none, sort: 2 }) : [])
         ];
         const options = cut ? { [SKIP_JOIN]: true } : {};
@@ -4952,6 +5000,12 @@ class DrawingTool {
     /** The button went down on the map in the window's way of drawing: begin whatever the tool draws. */
     _windowPointerDown(event) {
         if (!this.state.active) return false;
+        // A right-click stops drawing. It is only noted here, and not swallowed, so a right-drag still pans:
+        // whether it was a click is known when the button comes up.
+        if (event.button === 2) {
+            this._rightPressed = this.state.isDrawing || this._erasing ? null : { x: event.clientX, y: event.clientY };
+            return false;
+        }
         // Only the left button draws. The others, and Ctrl and Alt, are Foundry's to pan, select and open menus with.
         if (event.button !== 0 || event.ctrlKey || event.altKey || event.metaKey) return false;
         if (!this.canUserDraw()) return false;
@@ -5002,6 +5056,13 @@ class DrawingTool {
 
     _windowPointerUp(event) {
         if (!this.state.active) return false;
+        // The right button came up where it went down: a click, not a drag to pan with, so drawing stops.
+        if (event.button === 2) {
+            const pressed = this._rightPressed;
+            this._rightPressed = null;
+            if (pressed && !this.state.isDrawing && !this._erasing && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < 5) this.stopFromWindow();
+            return false;
+        }
         this._endScatter();
         try { canvas.app.view.releasePointerCapture?.(event.pointerId); } catch (error) { /* it was not held */ }
         if (this._erasing) {
@@ -5077,13 +5138,14 @@ class DrawingTool {
 
     /** Change one of the wall options: shape ('line' or 'sketch') and snap. */
     setWallOption(name, value) {
-        if (name === 'shape') this.state.wallShape = value === 'sketch' ? 'sketch' : 'line';
+        if (name === 'shape') this.state.wallShape = ['sketch', 'box', 'ellipse'].includes(value) ? value : 'line';
         else if (name === 'snap') this.state.wallSnap = !!value;
         else if (name === 'kind' && wallKindById(value)) this.state.wallKind = value;
         else if (name === 'door' && ['closed', 'open', 'locked'].includes(value)) this.state.wallDoor = value;
+        else if (name === 'material' && wallMaterialById(value)) this.state.wallMaterial = value;
         else return;
         game.settings.set(MODULE.ID, 'toolbar.wallOptions', {
-            shape: this.state.wallShape, snap: this.state.wallSnap, kind: this.state.wallKind, door: this.state.wallDoor
+            shape: this.state.wallShape, snap: this.state.wallSnap, kind: this.state.wallKind, door: this.state.wallDoor, material: this.state.wallMaterial
         });
         this.notifyChange();
     }

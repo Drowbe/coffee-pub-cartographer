@@ -22,6 +22,10 @@ always draw.
 
 ## The drawing tools window
 
+The tabs stay at the top of the window when it scrolls. On every tab a control sits **above what it controls** -- the
+stamp options above the stamps, a path's width above the paths, the size above the patches and fields, how walls
+are drawn above the kinds and materials -- and the switches are laid out in a grid.
+
 Click **Drawing Tools** (the pen and ruler) among Foundry's own scene controls down the left of the
 canvas -- with the drawing tools, or with the token tools if you have no drawing tools -- or click **Tools** in
 the **Drawing Tools** section of the Cartographer bar, or choose **Drawing Tools** from the Cartographer
@@ -31,8 +35,9 @@ two follow each other: choose a tool in one and the other shows it.
 
 Picking a tool or a stamp in the window starts drawing at once, and in the window a stroke is plain
 **press, drag, release** with the left button -- nothing is drawn until you press. Right-drag still
-pans the map, and Ctrl or Alt leave the click to Foundry. A click with no drag draws nothing. **Stop
-drawing** in the window's footer, or closing the window, puts the map back to normal. The draw hotkey
+pans the map, and Ctrl or Alt leave the click to Foundry. A click with no drag draws nothing. A **right-click**
+(without dragging, and not in the middle of a stroke) stops drawing, as do **Stop drawing** in the window's
+footer and closing the window, and puts the map back to normal. The draw hotkey
 below is separate and works as it always did. **Undo** in the footer takes back the last thing you drew, wall or stamp kept on the scene
 included.
 
@@ -81,6 +86,9 @@ the colour you choose and are never the same twice:
 - **Plants** -- a shrub, a tuft of grass and flowers.
 - **Rocks** -- a rock and a pile of boulders.
 - **Features** -- a stump, a log, a pond and a campfire.
+- **Furniture** -- a table, a round table, a chair, a bed, a cabinet and a workbench.
+- **Storage** -- a box, a crate, a barrel, a chest and a crate of apples.
+- **Kitchen and produce** -- a stove, a cauldron, pumpkins and melons.
 - **Markers** -- the plus, X, dot, arrows and square the tool has always had.
 
 Click a stamp, then click the map to put one down, or **drag to scatter** several along the stroke.
@@ -143,6 +151,15 @@ The **Utilities** tab holds the things that are not drawing.
 - **Scene** (GM) -- **Token vision**, **Global illumination** and **Darkness** for the scene you are
   on, for working a map without leaving the window. These change the scene for everyone.
 
+### Fields and crops
+
+Also on the Terrain tab: **corn**, **wheat**, **cabbage**, a **pumpkin patch** and **carrots**. A crop is one plant on its
+own bed of soil, and it **goes on a lattice** as wide as itself, one plant to a point, so when you hold the
+button and drag, the plants fall into **rows** and fill the field you sweep over, none doubled and none
+missing. A crop is never turned or sized at random, so the rows stay straight. **Size** sets how far
+apart the plants are (three quarters of a square at Medium). A kept field is a plant's worth of Drawings for
+every plant, so a big field is a lot of them; Undo takes the whole stroke back.
+
 ## Draw walls
 
 The **Walls** tab, which only the GM has, draws real walls with a line over them, so a quick map is
@@ -155,16 +172,25 @@ playable at once. Click a kind, then press, drag and let go on the map:
 - **Door** and **Secret door** -- doors, drawn **Closed**, **Open** or **Locked** as you choose.
 - **Window** -- sight and light pass close up and fade over two squares; movement and sound are stopped.
 
+What a wall **looks like** is a separate choice, **Material**: **Plain**, **Stone** (blocks), **Brick** (courses),
+**Wood** (planks), a **Fence** (rails and posts), **Iron bars** and a **Hedge**. A fence and iron bars suit an invisible
+wall, which stops movement and lets sight through, and a hedge a terrain wall, so picking one from a plain wall chooses
+that kind too; change the kind afterwards if you want. A door or a window is always drawn as itself. A long
+stroke of a patterned material spaces its pattern out rather than adding without limit.
+
 Each kind is written the way Foundry's own wall tools write it, and the line over it is a colour of its
 own, with a dark edge so it shows on a pale map and round ends and corners, so you can tell the kinds apart. The walls themselves
 are Foundry's, and show, as any wall does, when the Walls controls are selected.
 
-- **Straight** -- one wall, from where you press to where you let go.
-- **Freehand** -- the stroke is straightened into a run of walls, and closed into a ring if it ends
-  near where it began.
+Walls are drawn with the same four shapes as everything else:
+
+- **Sketch** -- the stroke is straightened into a run of walls, and closed into a ring if it ends near where it began.
+- **Line** -- one wall, from where you press to where you let go.
+- **Box** -- a room: four walls, corner to corner of the box you drag.
+- **Ellipse** -- a ring of straight walls round the box you drag, with enough sides to look round.
 
 A **door**, **secret door** or **window** is always two points -- press where it starts and let go where
-it ends -- so there is no shape to choose for them. Draw one **along a wall** and it is fitted onto the wall,
+it ends -- so there is no shape to choose for them, and a box or ellipse of them is not drawn. Draw one **along a wall** and it is fitted onto the wall,
 and the wall is cut around it, so what is before it and what is after it stay walls. A door that covers a whole
 wall replaces it. **Undo** makes the wall whole again. (Erasing a door leaves the gap; Undo is how to put the
 wall back.) A door has its leaf drawn across it, a secret door a dot as well, and a window a pane, as on the

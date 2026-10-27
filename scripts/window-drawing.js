@@ -15,7 +15,7 @@
 import { MODULE } from './const.js';
 import { STAMPS, STAMP_CATEGORIES, stampSvg, parseColor } from './utils-stamps.js';
 import { TERRAINS, terrainSvg } from './utils-terrain.js';
-import { WALL_KINDS, wallKindSvg, isDoorKind, isOpeningKind } from './utils-drawing.js';
+import { WALL_KINDS, wallKindSvg, isDoorKind, isOpeningKind, WALL_MATERIALS, wallMaterialSvg } from './utils-drawing.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -29,8 +29,8 @@ const TABS = [
     { id: 'walls', icon: 'fa-solid fa-border-none', labelKey: 'tabWalls', gmOnly: true },
     { id: 'utilities', icon: 'fa-solid fa-screwdriver-wrench', labelKey: 'tabUtilities' }
 ];
-/** The stamps that are ground, not things standing on it: they are shown with the paths. */
-const TERRAIN_CATEGORY = 'ground';
+/** The stamps that are ground and what grows on it, not things standing on it: they are shown with the paths. */
+const TERRAIN_CATEGORIES = ['ground', 'fields'];
 /** How wide a path is, in grid squares. */
 const PATH_WIDTHS = [
     { id: '0.5', icon: 'fa-solid fa-minus', labelKey: 'widthNarrow' },
@@ -49,10 +49,6 @@ const DOOR_STATES = [
     { id: 'closed', icon: 'fa-solid fa-door-closed', labelKey: 'doorClosed' },
     { id: 'open', icon: 'fa-solid fa-door-open', labelKey: 'doorOpen' },
     { id: 'locked', icon: 'fa-solid fa-lock', labelKey: 'doorLocked' }
-];
-const WALL_SHAPES = [
-    { id: 'line', icon: 'fa-solid fa-slash-forward', labelKey: 'wallStraight' },
-    { id: 'sketch', icon: 'fa-solid fa-pen', labelKey: 'wallFreehand' }
 ];
 const WEIGHTS = [
     { id: '3', icon: 'fa-solid fa-minus', labelKey: 'weightThin' },
@@ -99,6 +95,7 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         'drawing-tab': (_event, target, app) => app.setTab(target.dataset.tab),
         'drawing-mode': (_event, target, app) => app.manager.chooseMode(target.dataset.mode),
         'drawing-wall': (_event, target, app) => app.manager.chooseWall(target.dataset.kind),
+        'drawing-wall-material': (_event, target, app) => app.manager.chooseMaterial(target.dataset.material),
         'drawing-wall-door': (_event, target, app) => app.manager.setWallOption('door', target.dataset.door),
         'drawing-wall-shape': (_event, target, app) => app.manager.setWallOption('shape', target.dataset.shape),
         'drawing-weight': (_event, target, app) => app.manager.setBrushSettings({ size: Number(target.dataset.size) }, true),
@@ -168,8 +165,10 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         return {
             appId: this.id,
             bodyContent: this._buildBody(),
-            // The tabs are the top of the window, so there is no bar above them.
-            showToolBar: false,
+            // The tabs are in the window's bar, above the body, so they stay put when the body scrolls.
+            showToolBar: true,
+            toolBarLeft: this._buildTabs(this._currentTab()),
+            toolBarRight: '',
             showToolFooter: true,
             toolFooterLeft: this._buildFooterLeft(),
             toolFooterRight: this._buildFooterRight()
@@ -228,6 +227,11 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
             </label>`;
     }
 
+    /** Switches laid out in a grid, each label in a column of one width so the switches line up. */
+    _toggles(...switches) {
+        return `<div class="cartographer-drawing-toggles">${switches.join('')}</div>`;
+    }
+
     /** A range, with its label beside it. The track, thumb and value readout are all Blacksmith's. */
     _slider(name, label, hint, { min, max, step, value }) {
         return `<label class="cartographer-drawing-row" title="${this._escape(hint)}">
@@ -252,11 +256,14 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         return `<nav class="blacksmith-tool-tabs is-fill" role="tablist">${buttons}</nav>`;
     }
 
+    /** The tab showing: the one asked for, if this user has it. */
+    _currentTab() {
+        return this._tabs().some(entry => entry.id === this.tab) ? this.tab : 'draw';
+    }
+
     _buildBody() {
-        const tab = this._tabs().some(entry => entry.id === this.tab) ? this.tab : 'draw';
-        const content = { walls: () => this._buildWalls(), stamps: () => this._buildStamps(), terrain: () => this._buildTerrain(), utilities: () => this._buildUtilities(), draw: () => this._buildDraw() }[tab]();
-        return `${this._buildTabs(tab)}
-            <div class="blacksmith-tool-stack cartographer-drawing-panel">${content}</div>`;
+        const content = { walls: () => this._buildWalls(), stamps: () => this._buildStamps(), terrain: () => this._buildTerrain(), utilities: () => this._buildUtilities(), draw: () => this._buildDraw() }[this._currentTab()]();
+        return `<div class="blacksmith-tool-stack cartographer-drawing-panel">${content}</div>`;
     }
 
     /** The brush colour as [r, g, b], to tell which swatch it is. */
@@ -297,25 +304,32 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
     _buildWalls() {
         const localize = key => this._localize(key);
         const { state } = this.manager;
+        const opening = isOpeningKind(state.wallKind);
+        // How they are drawn comes first, since it applies to the kinds and materials below. The shapes are the
+        // drawing tools' own; a door or a window is two points, so it has none to choose.
+        const door = isDoorKind(state.wallKind) ? this._segmented('drawing-wall-door', localize('doorState'), DOOR_STATES, state.wallDoor, 'door') : '';
+        const how = (opening ? this._hint(localize('wallOpeningHint')) : this._segmented('drawing-wall-shape', localize('wallShape'), TOOLS, state.wallShape, 'shape'))
+            + door
+            + this._segmented('drawing-weight', localize('weight'), WEIGHTS, state.brushSettings.size, 'size')
+            + this._toggles(this._toggle('wallSnap', localize('wallSnap'), state.wallSnap, { hint: localize('wallSnapHint') }))
+            + this._hint(localize('wallHint'));
         const tiles = WALL_KINDS.map(kind => {
             const active = state.drawingMode === 'wall' && state.wallKind === kind.id;
             const label = this._escape(localize(kind.labelKey));
             return `<button type="button" class="cartographer-stamp${active ? ' is-active' : ''}" data-action="drawing-wall" data-kind="${kind.id}" data-tooltip="${label}" aria-label="${label}" aria-pressed="${active}">
                 <span class="cartographer-stamp-art">${wallKindSvg(kind.id)}</span><span class="cartographer-stamp-name">${label}</span></button>`;
         }).join('');
-        const door = isDoorKind(state.wallKind)
-            ? this._segmented('drawing-wall-door', localize('doorState'), DOOR_STATES, state.wallDoor, 'door')
-            : '';
-        // A door or a window is two points, so there is no shape to choose.
-        const how = (isOpeningKind(state.wallKind)
-            ? this._hint(localize('wallOpeningHint'))
-            : this._segmented('drawing-wall-shape', localize('wallShape'), WALL_SHAPES, state.wallShape, 'shape'))
-            + this._toggle('wallSnap', localize('wallSnap'), state.wallSnap, { hint: localize('wallSnapHint') })
-            + door
-            + this._segmented('drawing-weight', localize('weight'), WEIGHTS, state.brushSettings.size, 'size')
-            + this._hint(localize('wallHint'));
-        return this._section('fa-solid fa-border-none', localize('wallKind'), `<div class="cartographer-stamp-grid">${tiles}</div>`)
-            + this._section('fa-solid fa-pen-ruler', localize('wallHow'), how);
+        // What it is drawn as. A door and a window are always drawn as themselves.
+        const materials = opening ? '' : this._section('fa-solid fa-brush', localize('wallMaterial'),
+            `<div class="cartographer-stamp-grid">${WALL_MATERIALS.map(material => {
+                const active = state.wallMaterial === material.id;
+                const label = this._escape(localize(material.labelKey));
+                return `<button type="button" class="cartographer-stamp${active ? ' is-active' : ''}" data-action="drawing-wall-material" data-material="${material.id}" data-tooltip="${label}" aria-label="${label}" aria-pressed="${active}">
+                    <span class="cartographer-stamp-art">${wallMaterialSvg(material.id)}</span><span class="cartographer-stamp-name">${label}</span></button>`;
+            }).join('')}</div>` + this._hint(localize('materialHint')));
+        return this._section('fa-solid fa-pen-ruler', localize('wallHow'), how)
+            + this._section('fa-solid fa-border-none', localize('wallKind'), `<div class="cartographer-stamp-grid">${tiles}</div>`)
+            + materials;
     }
 
     /** The Utilities tab: erasing, and how the scene is seen. */
@@ -331,12 +345,13 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         if (gm) clear.push(this._button({ action: 'drawing-clear-all', icon: 'fa-solid fa-trash-can', label: localize('clearAllHint'), text: localize('clearAll') }));
         sections += this._section('fa-solid fa-broom', localize('tidy'),
             `<div class="cartographer-drawing-buttons">${clear.join('')}</div>`
-            + this._toggle('timedErase', localize('timedErase'), state.timedEraseEnabled, { hint: localize('timedEraseHint') }));
+            + this._toggles(this._toggle('timedErase', localize('timedErase'), state.timedEraseEnabled, { hint: localize('timedEraseHint') })));
         if (this.manager.canSetScene()) {
             const scene = this.manager.sceneState();
             sections += this._section('fa-solid fa-lightbulb', localize('scene'),
-                this._toggle('tokenVision', localize('sceneVision'), scene.tokenVision, { hint: localize('sceneVisionHint') })
-                + this._toggle('globalLight', localize('sceneGlobalLight'), scene.globalLight, { hint: localize('sceneGlobalLightHint') })
+                this._toggles(
+                    this._toggle('tokenVision', localize('sceneVision'), scene.tokenVision, { hint: localize('sceneVisionHint') }),
+                    this._toggle('globalLight', localize('sceneGlobalLight'), scene.globalLight, { hint: localize('sceneGlobalLightHint') }))
                 + this._slider('darkness', localize('sceneDarkness'), localize('sceneDarknessHint'), { min: 0, max: 1, step: 0.05, value: scene.darkness })
                 + this._hint(localize('sceneHint')));
         }
@@ -358,25 +373,26 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         const localize = key => this._localize(key);
         const { state } = this.manager;
         const tint = state.brushSettings.color;
-        let sections = '';
+        const canKeep = this.manager.canKeepOnScene();
+        // The options come first: they apply to every stamp below them.
+        const options = this._segmented('drawing-size', localize('size'), SIZES, state.symbolSize, 'size')
+            + this._toggles(
+                this._toggle('natural', localize('natural'), state.stamp.natural, { hint: localize('naturalHint') }),
+                this._toggle('rotate', localize('rotate'), state.stamp.rotate, { hint: localize('rotateHint') }),
+                this._toggle('jitter', localize('jitter'), state.stamp.jitter, { hint: localize('jitterHint') }),
+                this._toggle('keep', localize('keep'), state.stamp.keep && canKeep, { hint: localize(canKeep ? 'keepHint' : 'keepDenied'), disabled: !canKeep }))
+            + this._slider('spacing', localize('spacing'), localize('spacingHint'), { min: 0.5, max: 3, step: 0.25, value: state.stamp.spacing })
+            + this._hint(localize('stampHint'));
+        let sections = this._section('fa-solid fa-sliders', localize('options'), options);
         for (const category of STAMP_CATEGORIES) {
-            // Ground patches are terrain, and are on the Terrain tab.
-            if (category.id === TERRAIN_CATEGORY) continue;
+            // Ground patches and fields are terrain, and are on the Terrain tab.
+            if (TERRAIN_CATEGORIES.includes(category.id)) continue;
             const stamps = STAMPS.filter(stamp => stamp.category === category.id);
             if (!stamps.length) continue;
-            const icon = { trees: 'fa-solid fa-tree', plants: 'fa-solid fa-seedling', ground: 'fa-solid fa-circle-half-stroke', rocks: 'fa-solid fa-mountain', features: 'fa-solid fa-campground', markers: 'fa-solid fa-location-dot' }[category.id];
+            const icon = { trees: 'fa-solid fa-tree', plants: 'fa-solid fa-seedling', ground: 'fa-solid fa-circle-half-stroke', fields: 'fa-solid fa-wheat-awn', furniture: 'fa-solid fa-chair', storage: 'fa-solid fa-box', kitchen: 'fa-solid fa-utensils', rocks: 'fa-solid fa-mountain', features: 'fa-solid fa-campground', markers: 'fa-solid fa-location-dot' }[category.id];
             sections += this._section(icon, localize(category.labelKey),
                 `<div class="cartographer-stamp-grid">${stamps.map(stamp => this._buildStamp(stamp, tint)).join('')}</div>`);
         }
-        const canKeep = this.manager.canKeepOnScene();
-        const options = this._segmented('drawing-size', localize('size'), SIZES, state.symbolSize, 'size')
-            + this._toggle('natural', localize('natural'), state.stamp.natural, { hint: localize('naturalHint') })
-            + this._toggle('rotate', localize('rotate'), state.stamp.rotate, { hint: localize('rotateHint') })
-            + this._toggle('jitter', localize('jitter'), state.stamp.jitter, { hint: localize('jitterHint') })
-            + this._slider('spacing', localize('spacing'), localize('spacingHint'), { min: 0.5, max: 3, step: 0.25, value: state.stamp.spacing })
-            + this._toggle('keep', localize('keep'), state.stamp.keep && canKeep, { hint: localize(canKeep ? 'keepHint' : 'keepDenied'), disabled: !canKeep })
-            + this._hint(localize('stampHint'));
-        sections += this._section('fa-solid fa-sliders', localize('options'), options);
         return sections;
     }
 
@@ -392,17 +408,23 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         }).join('');
         // Keeping on the scene is for everything on this tab, so it is first, where it is seen.
         const canKeep = this.manager.canKeepOnScene();
-        const options = this._toggle('keep', localize('keep'), state.stamp.keep && canKeep, { hint: localize(canKeep ? 'keepHint' : 'keepDenied'), disabled: !canKeep });
-        // How wide a path is belongs with the paths.
-        const pathOptions = this._segmented('drawing-path-width', localize('pathWidth'), PATH_WIDTHS, state.stamp.pathWidth, 'width')
+        const options = this._toggles(this._toggle('keep', localize('keep'), state.stamp.keep && canKeep, { hint: localize(canKeep ? 'keepHint' : 'keepDenied'), disabled: !canKeep }));
+        // Each control is above what it controls: the width above the paths, the size above the patches and fields.
+        const paths = this._segmented('drawing-path-width', localize('pathWidth'), PATH_WIDTHS, state.stamp.pathWidth, 'width')
+            + `<div class="cartographer-stamp-grid">${tiles}</div>`
             + this._hint(localize('terrainHint'));
-        // Patches of ground are stamps -- click to place one, drag to scatter -- that live here with the paths.
-        const patches = STAMPS.filter(stamp => stamp.category === TERRAIN_CATEGORY);
-        const patchOptions = this._segmented('drawing-size', localize('patchSize'), SIZES, state.symbolSize, 'size') + this._hint(localize('patchHint'));
+        const grounds = TERRAIN_CATEGORIES.map(id => {
+            const category = STAMP_CATEGORIES.find(entry => entry.id === id);
+            const stamps = STAMPS.filter(stamp => stamp.category === id);
+            const icon = id === 'fields' ? 'fa-solid fa-wheat-awn' : 'fa-solid fa-circle-half-stroke';
+            return this._section(icon, localize(category.labelKey), `<div class="cartographer-stamp-grid">${stamps.map(stamp => this._buildStamp(stamp, state.brushSettings.color)).join('')}</div>`);
+        }).join('');
+        const size = this._segmented('drawing-size', localize('patchSize'), SIZES, state.symbolSize, 'size')
+            + this._hint(localize('patchHint')) + this._hint(localize('fieldHint'));
         return this._section('fa-solid fa-sliders', localize('options'), options)
-            + this._section('fa-solid fa-road', localize('terrain'), `<div class="cartographer-stamp-grid">${tiles}</div>` + pathOptions)
-            + this._section('fa-solid fa-circle-half-stroke', localize('categoryGround'),
-                `<div class="cartographer-stamp-grid">${patches.map(stamp => this._buildStamp(stamp, state.brushSettings.color)).join('')}</div>` + patchOptions);
+            + this._section('fa-solid fa-road', localize('terrain'), paths)
+            + this._section('fa-solid fa-up-right-and-down-left-from-center', localize('size'), size)
+            + grounds;
     }
 
     // ==================================================================

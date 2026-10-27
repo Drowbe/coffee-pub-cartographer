@@ -10,7 +10,7 @@ import {
     STAMPS, STAMP_CATEGORIES, TONES, buildStamp, stampPalette, stampSvg, drawStamp, stampDrawingData,
     isProceduralStamp, isStamp, stampById, parseColor, makeRng, stampSquares
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, polygonShape, distanceToPolyline, insidePolygon, drawingHit, keptGroup, WALL_KINDS, wallKindById, wallKindData, wallKindSvg, isDoorKind, fitOpeningToWall } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, polygonShape, distanceToPolyline, insidePolygon, drawingHit, keptGroup, WALL_KINDS, wallKindById, wallKindData, wallKindSvg, isDoorKind, fitOpeningToWall, WALL_MATERIALS, wallMaterialById, wallMaterialSvg, wallLineDrawings, offsetPath, pointsAlong, MAX_WALL_DECOR, boxSegments, ellipseSegments } from '../scripts/utils-drawing.js';
 import { TERRAINS, terrainById, terrainPalette, smoothPath, buildTerrain, terrainSvg, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
 let failures = 0;
@@ -159,6 +159,29 @@ console.log('\nfinding what is under the eraser');
     check('anything else is not', keptGroup({}, m) === null && keptGroup(undefined, m) === null && keptGroup({ other: { stamp: { id: 'a' } } }, m) === null && keptGroup({ [m]: { autoWall: { run: 1 } } }, m) === null);
 }
 
+console.log('\nclutter and crops');
+{
+    const want = {
+        furniture: ['table', 'round-table', 'chair', 'bed', 'cabinet', 'workbench'],
+        storage: ['box', 'crate', 'barrel', 'chest', 'apple-crate'],
+        kitchen: ['stove', 'cauldron', 'pumpkins', 'melons'],
+        fields: ['crop-corn', 'crop-wheat', 'crop-cabbage', 'crop-pumpkin', 'crop-carrots']
+    };
+    for (const [category, ids] of Object.entries(want)) {
+        check(`${category}: ${ids.join(', ')} are all there, in that category`, ids.every(id => stampById(id)?.category === category && isProceduralStamp(id)));
+        check(`${category} is a listed category`, STAMP_CATEGORIES.some(c => c.id === category));
+    }
+    check('everything asked for is among them', ['table', 'chair', 'box', 'crate', 'barrel', 'chest', 'bed', 'cabinet', 'stove', 'workbench', 'cauldron', 'pumpkins', 'apple-crate', 'melons'].every(id => isProceduralStamp(id)));
+    check('every crop is on a lattice, and nothing else is', STAMPS.filter(s => s.category === 'fields').every(s => s.lattice === true) && STAMPS.filter(s => s.category !== 'fields').every(s => !s.lattice));
+    check('every crop is a plant on a soil bed: soft soil layers under it', STAMPS.filter(s => s.category === 'fields').every(s => { const p = buildStamp(s.id, { seed: 2 }); return p[0].tone === 'dark' && p[0].alpha < 0.25 && p[1].tone === 'base' && p.length > 4; }));
+    check('furniture stands on the floor with a shadow', ['table', 'bed', 'chest', 'barrel', 'stove'].every(id => buildStamp(id, { seed: 1 }).some(p => p.shadow)));
+    check('a bed is longer than it is wide, and a table wider than it is deep', (() => { const extent = id => { const pts = buildStamp(id, { seed: 1 }).flatMap(p => p.pts); const xs = pts.filter((_, i) => i % 2 === 0); const ys = pts.filter((_, i) => i % 2); return [Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)]; }; const [bw, bh] = extent('bed'); const [tw, th] = extent('table'); return bh > bw * 1.4 && tw > th * 1.4; })());
+    check('a round table and a barrel are round', ['round-table', 'barrel'].every(id => { const p = buildStamp(id, { seed: 1 })[0].pts; const xs = p.filter((_, i) => i % 2 === 0); const ys = p.filter((_, i) => i % 2); return Math.abs((Math.max(...xs) - Math.min(...xs)) - (Math.max(...ys) - Math.min(...ys))) < 0.02; }));
+    check('furniture and crates are sized for a room: a chair under a table, a bed as long as two squares', stampById('chair').squares < stampById('table').squares && stampById('bed').squares === 2);
+    check('crops are small: a plant is under a square at Medium', STAMPS.filter(s => s.category === 'fields').every(s => s.squares < 1));
+    check('the pumpkin patch keeps its pumpkin orange in the fruit tone, not the soil tone', buildStamp('crop-pumpkin', { seed: 1 }).some(p => p.tone === 'accent2'));
+}
+
 console.log('\nstamp sizes, in grid squares');
 {
     check('a tree is 1, 3 and 6 squares across', stampSquares('tree', 'small') === 1 && stampSquares('tree', 'medium') === 3 && stampSquares('tree', 'large') === 6);
@@ -166,7 +189,7 @@ console.log('\nstamp sizes, in grid squares');
     check('medium is the default, and an unknown size is medium', stampSquares('tree') === 3 && stampSquares('tree', 'huge') === 3);
     check('every stamp but the markers has a size in squares', STAMPS.filter(s => !s.legacy).every(s => s.squares > 0) && STAMPS.filter(s => s.legacy).every(s => stampSquares(s.id) === null && s.scale === 1));
     check('a tree is bigger than a shrub, a shrub than a tuft of grass, and a pond bigger than a tree', stampById('tree').squares > stampById('shrub').squares && stampById('shrub').squares > stampById('grass').squares && stampById('pond').squares > stampById('tree').squares);
-    check('a small tree is a square, so it is a character\'s size, and nothing is smaller than a third of one', STAMPS.filter(s => !s.legacy).every(s => stampSquares(s.id, 'small') >= 0.3));
+    check('a small tree is a square, so it is a character\'s size, and nothing is smaller than a fifth of one', STAMPS.filter(s => !s.legacy).every(s => stampSquares(s.id, 'small') >= 0.2));
 }
 
 console.log('\nterrain paths');
@@ -198,6 +221,74 @@ console.log('\nterrain paths');
     check('written to the scene, a path is lines stroked at its width and the texture over them', docs.length > 3 && docs[1].fillType === 0 && docs[1].strokeWidth === 80 && docs[3].fillType === 1);
     check('and every Drawing has something to show and a whole-number size', docs.every(d => ((d.fillType !== 0 && d.fillAlpha > 0) || (d.strokeWidth > 0 && d.strokeAlpha > 0)) && Number.isInteger(d.shape.width) && Number.isInteger(d.shape.height)));
     check('the scene allowance is smaller than the canvas one', MAX_TEXTURE.scene < MAX_TEXTURE.canvas);
+}
+
+console.log('\nwalls in the drawing shapes: a box and an ellipse');
+{
+    const box = boxSegments([100, 100], [500, 300]);
+    check('a box is four walls, one after another, and back to the start', box.length === 4 && box.every((seg, i) => seg[1].join() === box[(i + 1) % 4][0].join()));
+    check('and they are its four sides', JSON.stringify(box.flat().map(p => p.join())) === JSON.stringify(['100,100', '500,100', '500,100', '500,300', '500,300', '100,300', '100,300', '100,100']));
+    check('whichever corner it was dragged from', boxSegments([500, 300], [100, 100]).length === 4 && boxSegments([500, 100], [100, 300]).length === 4);
+    check('a box with no width or no height is nothing', boxSegments([100, 100], [100, 300]).length === 0 && boxSegments([100, 100], [300, 101]).length === 0);
+    const ring = ellipseSegments([0, 0], [800, 400]);
+    check('an ellipse is a ring of walls, one after another and back to the start', ring.length >= 12 && ring.every((seg, i) => seg[1].join() === ring[(i + 1) % ring.length][0].join()));
+    check('it fills its box', (() => { const xs = ring.flatMap(s => s.map(p => p[0])); const ys = ring.flatMap(s => s.map(p => p[1])); return Math.abs(Math.min(...xs)) < 1 && Math.abs(Math.max(...xs) - 800) < 1 && Math.abs(Math.min(...ys)) < 1 && Math.abs(Math.max(...ys) - 400) < 1; })());
+    check('it is round: every point is on the ellipse', ring.flatMap(s => s).every(([x, y]) => Math.abs(((x - 400) / 400) ** 2 + ((y - 200) / 200) ** 2 - 1) < 1e-9));
+    check('a bigger one has more sides, a small one never fewer than twelve, a vast one no more than forty-eight', ellipseSegments([0, 0], [4000, 4000]).length > ring.length && ellipseSegments([0, 0], [60, 60]).length === 12 && ellipseSegments([0, 0], [40000, 40000]).length === 48);
+    check('an ellipse with no width or no height is nothing', ellipseSegments([0, 0], [0, 200]).length === 0);
+    const snap = p => [Math.round(p[0] / 100) * 100, Math.round(p[1] / 100) * 100];
+    const walls = wallStrokeSegments({ shape: 'box', points: [[14, 9], [388, 193], [496, 297]], snap });
+    check('a box stroke is the box between its first and last points, snapped', walls.length === 4 && walls[0][0].join() === '0,0' && walls[1][1].join() === '500,300');
+    check('the corners are shared, so it is one closed ring', walls.every((seg, i) => seg[1].join() === walls[(i + 1) % 4][0].join()));
+    check('an ellipse stroke is a ring, snapped', (() => { const r = wallStrokeSegments({ shape: 'ellipse', points: [[0, 0], [800, 600]], snap, grid: 100 }); return r.length >= 12 && r.every(([a, b]) => a.concat(b).every(v => v % 100 === 0)) && r.every(([a, b]) => a.join() !== b.join()); })());
+    check('a box too small to hold a wall after snapping makes nothing', wallStrokeSegments({ shape: 'box', points: [[10, 10], [40, 40]], snap }).length === 0);
+    check('a line and a sketch are as they were', wallStrokeSegments({ shape: 'line', points: [[0, 0], [400, 0]] }).length === 1 && wallStrokeSegments({ shape: 'sketch', points: [[0, 0], [100, 0], [200, 2], [300, 0]], epsilon: 8 }).length >= 1);
+}
+
+console.log('\nwhat a wall is made of');
+{
+    const flags = { m: { drawnWall: { id: 'g' } } };
+    const draw = (material, path = [0, 0, 1000, 0], extra = {}) => wallLineDrawings({ path, material, color: '#d8cfa8', casing: '#1c1c1c', weight: 10, grid: 100, seed: 3, flags, ...extra });
+    check('the materials are plain, stone, brick, wood, a fence, iron bars and a hedge', ['plain', 'stone', 'brick', 'wood', 'fence', 'iron', 'hedge'].every(id => wallMaterialById(id)) && WALL_MATERIALS.length === 7);
+    check('every material has an id, an icon, a label and a colour', WALL_MATERIALS.every(m => m.id && m.icon && m.labelKey && /^#[0-9a-f]{6}$/i.test(m.color)));
+    check('a fence, iron bars and a hedge suggest the kind that suits them, and the rest suggest none', wallMaterialById('fence').suggests === 'invisible' && wallMaterialById('iron').suggests === 'invisible' && wallMaterialById('hedge').suggests === 'terrain' && ['plain', 'stone', 'brick', 'wood'].every(id => !wallMaterialById(id).suggests));
+    check('every suggestion is a kind of wall there is', WALL_MATERIALS.every(m => !m.suggests || wallKindById(m.suggests)));
+    for (const material of WALL_MATERIALS) {
+        const svg = wallMaterialSvg(material.id);
+        check(`${material.id}: a picture, no undefined or NaN`, svg.startsWith('<svg') && !/undefined|NaN/.test(svg));
+    }
+    check('an unknown material is drawn plain', wallMaterialById('nonsense') === null && wallMaterialSvg('nonsense') === wallMaterialSvg('plain'));
+
+    check('a line moved sideways stays parallel, by the distance asked', (() => { const o = offsetPath([0, 0, 100, 0, 200, 0], 5); return o.join() === '0,5,100,5,200,5'; })());
+    check('and bends with the line', (() => { const o = offsetPath([0, 0, 100, 0, 100, 100], 5); return Math.hypot(o[2] - 100, o[3]) > 4; })());
+    const along = pointsAlong([0, 0, 100, 0], 25, 12.5);
+    check('points along a line are evenly spaced, with the normal to it', along.length === 4 && along.map(p => p.x).join() === '12.5,37.5,62.5,87.5' && along.every(p => p.nx === -0 || Math.abs(p.nx) < 1e-9) && along.every(p => p.ny === 1));
+    check('along a bend they follow it', (() => { const p = pointsAlong([0, 0, 100, 0, 100, 100], 50, 25); return p.length === 4 && p[1].x === 75 && p[3].y === 75 || (p[2].x === 100 && p[2].y === 25); })());
+    check('no step, no points', pointsAlong([0, 0, 100, 0], 0).length === 0 && pointsAlong([0, 0], 10).length === 0);
+
+    const plain = draw('plain', [0, 0, 100, 0]);
+    check('a plain wall is a dark line, a disc at each end, its colour over it, and a disc at each end', plain.length === 6 && plain[0].strokeColor === '#1c1c1c' && plain[0].strokeWidth === 14 && plain[3].strokeColor === '#d8cfa8' && plain[3].strokeWidth === 10);
+    check('dark sorts under colour', plain.filter(d => d.sort === 0).length === 3 && plain.filter(d => d.sort === 1).length === 3);
+    for (const material of WALL_MATERIALS.filter(m => m.id !== 'plain')) {
+        const docs = draw(material.id);
+        check(`${material.id}: more than a plain line, all one group`, docs.length > 6 && docs.every(d => d.flags.m.drawnWall.id === 'g'));
+        check(`${material.id}: every Drawing has something to show, and a whole-number size`, docs.every(d => ((d.fillType !== 0 && d.fillAlpha > 0) || (d.strokeWidth > 0 && d.strokeAlpha > 0)) && Number.isInteger(d.shape.width) && Number.isInteger(d.shape.height) && d.shape.points.length >= 2));
+        check(`${material.id}: the same seed gives the same wall`, JSON.stringify(docs) === JSON.stringify(draw(material.id)));
+        const long = draw(material.id, [0, 0, 60000, 0]);
+        check(`${material.id}: a very long stroke is held to a sensible number of Drawings`, long.length <= MAX_WALL_DECOR * 2 + 30, String(long.length));
+        check(`${material.id}: it is its own colour, not the kind's`, docs.some(d => d.strokeColor === material.color || d.fillColor === material.color));
+        const bent = draw(material.id, [0, 0, 300, 0, 300, 300]);
+        check(`${material.id}: it follows a corner`, bent.length > 6);
+    }
+    check('stone has joints across it, and the joints are not evenly spaced', (() => { const joints = draw('stone').filter(d => d.strokeColor === '#4d4a45'); const xs = joints.map(d => d.x).sort((a, b) => a - b); const gaps = xs.slice(1).map((x, i) => x - xs[i]); return joints.length >= 6 && new Set(gaps.map(g => Math.round(g))).size > 2; })());
+    check('a different seed lays the stones differently', JSON.stringify(draw('stone', undefined, { seed: 1 })) !== JSON.stringify(draw('stone', undefined, { seed: 2 })));
+    check('brick joints alternate from one side of the mortar to the other', (() => { const joints = draw('brick').filter(d => d.strokeColor === '#e0d2c0' && d.shape.height > 3); return joints.length >= 6 && new Set(joints.map(d => d.y)).size === 2; })());
+    check('wood has seams along it, and the ends of planks', (() => { const docs = draw('wood'); return docs.filter(d => d.strokeColor === '#5b3c20').length >= 5; })());
+    check('a fence has two rails and a post every half square', (() => { const docs = draw('fence'); const posts = docs.filter(d => d.fillType === 1 && d.fillColor === '#a47a4a'); return docs.filter(d => d.strokeColor === wallMaterialById('fence').color).length === 2 && posts.length >= 20 && posts.length <= 22; })());
+    check('a fence is thinner than a wall: no wide dark casing', draw('fence').every(d => d.strokeWidth < 10));
+    check('iron bars are bars across a thin rail', (() => { const docs = draw('iron'); return docs.filter(d => d.strokeColor === '#8a929b').length >= 10 && docs.some(d => d.strokeColor === wallMaterialById('iron').color && d.strokeWidth <= 5); })());
+    check('a hedge is wider than the line, with leaves along it', (() => { const docs = draw('hedge'); return docs.some(d => d.strokeWidth === 16) && docs.filter(d => d.fillType === 1 && ['#5aa04a', '#4f9a3c'].includes(d.fillColor)).length >= 10; })());
+    check('a thin line weight still shows the pattern: stone, brick and wood are never under 8 pixels', ['stone', 'brick', 'wood'].every(id => draw(id, [0, 0, 400, 0], { weight: 2 }).some(d => d.strokeWidth >= 8)));
 }
 
 console.log('\nfitting an opening onto a wall');

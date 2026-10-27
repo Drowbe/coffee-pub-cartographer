@@ -326,6 +326,274 @@ function patch(texture) {
     };
 }
 
+// ------------------------------------------------------------------
+// ----- Clutter ----------------------------------------------------
+// ------------------------------------------------------------------
+
+/** A rectangle with rounded corners, centred, as flat points. */
+function rrect(cx, cy, w, h, r = 0.03) {
+    const pts = [];
+    const corners = [[1, -1], [1, 1], [-1, 1], [-1, -1]];
+    corners.forEach(([sx, sy], index) => {
+        const ox = cx + sx * (w / 2 - r);
+        const oy = cy + sy * (h / 2 - r);
+        for (let i = 0; i <= 3; i++) {
+            const angle = (index * Math.PI) / 2 - Math.PI / 2 + (i / 3) * (Math.PI / 2);
+            pts.push(ox + Math.cos(angle) * r, oy + Math.sin(angle) * r);
+        }
+    });
+    return pts;
+}
+
+const seam = (x1, y1, x2, y2, width = 0.012, alpha = 0.35, tone = 'dark') => line([x1, y1, x2, y2], width, tone, { alpha });
+
+function table(rng) {
+    const prims = [poly(rrect(0, 0, 0.94, 0.6, 0.04), 'dark', { shadow: true }), poly(rrect(0, 0, 0.88, 0.54, 0.03), 'base')];
+    for (const y of [-0.13, 0.0, 0.13]) prims.push(seam(-0.42, y + (rng() - 0.5) * 0.02, 0.42, y + (rng() - 0.5) * 0.02));
+    prims.push(poly(rrect(-0.2, -0.17, 0.4, 0.1, 0.03), 'light', { alpha: 0.22 }));
+    return prims;
+}
+
+function roundTable() {
+    return [
+        poly(ngon(0, 0, 0.45, 0.45, 28), 'dark', { shadow: true }),
+        poly(ngon(0, 0, 0.4, 0.4, 28), 'base'),
+        line(ngon(0, 0, 0.28, 0.28, 24), 0.012, 'dark', { closed: true, alpha: 0.3 }),
+        poly(ngon(-0.1, -0.12, 0.16, 0.12, 12), 'light', { alpha: 0.22 })
+    ];
+}
+
+function chair() {
+    return [
+        poly(rrect(0, 0.05, 0.52, 0.5, 0.05), 'dark', { shadow: true }),
+        poly(rrect(0, 0.06, 0.46, 0.42, 0.04), 'base'),
+        poly(rrect(0, -0.24, 0.56, 0.12, 0.04), 'dark', { outline: 'dark' }),
+        seam(-0.2, -0.24, 0.2, -0.24, 0.012, 0.5, 'light')
+    ];
+}
+
+function bed() {
+    return [
+        poly(rrect(0, 0, 0.58, 0.96, 0.04), 'dark', { shadow: true }),
+        poly(rrect(0, 0.01, 0.5, 0.88, 0.03), 'light'),
+        poly(rrect(0, -0.32, 0.4, 0.17, 0.05), 'accent2', { outline: 'dark' }),
+        poly(rrect(0, 0.17, 0.5, 0.56, 0.03), 'accent'),
+        seam(-0.25, -0.08, 0.25, -0.08, 0.014, 0.35),
+        seam(-0.2, 0.2, 0.2, 0.2, 0.01, 0.2, 'light')
+    ];
+}
+
+function cabinet() {
+    return [
+        poly(rrect(0, 0, 0.9, 0.52, 0.03), 'dark', { shadow: true }),
+        poly(rrect(0, 0, 0.84, 0.46, 0.025), 'base'),
+        seam(0, -0.23, 0, 0.23, 0.014, 0.5),
+        poly(ngon(-0.06, 0, 0.026, 0.026, 8), 'light'),
+        poly(ngon(0.06, 0, 0.026, 0.026, 8), 'light'),
+        poly(rrect(-0.2, -0.12, 0.34, 0.08, 0.02), 'light', { alpha: 0.2 })
+    ];
+}
+
+function workbench() {
+    return [
+        poly(rrect(0, 0, 0.96, 0.52, 0.03), 'dark', { shadow: true }),
+        poly(rrect(0, 0, 0.9, 0.46, 0.025), 'base'),
+        seam(-0.4, -0.07, 0.4, -0.07), seam(-0.4, 0.08, 0.4, 0.08),
+        poly(rrect(-0.36, 0.0, 0.1, 0.22, 0.015), 'accent', { outline: 'dark' }),
+        line([-0.1, 0.1, 0.12, 0.1], 0.03, 'dark', { alpha: 0.8 }),
+        poly(rrect(0.14, 0.1, 0.1, 0.05, 0.01), 'accent', { outline: 'dark' }),
+        poly(ngon(0.3, -0.1, 0.045, 0.045, 10), 'light', { outline: 'dark' })
+    ];
+}
+
+function stove() {
+    const prims = [poly(rrect(0, 0, 0.8, 0.8, 0.05), 'dark', { shadow: true }), poly(rrect(0, 0, 0.74, 0.74, 0.04), 'base')];
+    for (const [x, y] of [[-0.2, -0.16], [0.2, -0.16], [-0.2, 0.2], [0.2, 0.2]]) {
+        prims.push(poly(ngon(x, y, 0.12, 0.12, 16), 'dark', { alpha: 0.85 }));
+        prims.push(line(ngon(x, y, 0.07, 0.07, 12), 0.016, 'light', { closed: true, alpha: 0.55 }));
+    }
+    prims.push(poly(ngon(0.31, -0.31, 0.055, 0.055, 12), 'light', { outline: 'dark' }));
+    return prims;
+}
+
+function box() {
+    return [
+        poly(rrect(0, 0, 0.66, 0.66, 0.03), 'dark', { shadow: true }),
+        poly(rrect(0, 0, 0.6, 0.6, 0.025), 'base'),
+        seam(-0.3, -0.3, 0.3, 0.3, 0.012, 0.3), seam(0.3, -0.3, -0.3, 0.3, 0.012, 0.3),
+        poly(rrect(0, 0, 0.1, 0.62, 0.01), 'light', { alpha: 0.5 }),
+        poly(rrect(0, 0, 0.62, 0.1, 0.01), 'light', { alpha: 0.5 })
+    ];
+}
+
+function crateFrame(size) {
+    const half = size / 2;
+    return [
+        poly(rrect(0, 0, size + 0.04, size + 0.04, 0.03), 'dark', { shadow: true }),
+        poly(rrect(0, 0, size - 0.04, size - 0.04, 0.025), 'base'),
+        line([-half + 0.02, -half + 0.02, half - 0.02, -half + 0.02, half - 0.02, half - 0.02, -half + 0.02, half - 0.02], 0.045, 'dark', { closed: true, alpha: 0.85 })
+    ];
+}
+
+function crate() {
+    const prims = crateFrame(0.74);
+    for (const y of [-0.14, 0, 0.14]) prims.push(seam(-0.32, y, 0.32, y, 0.012, 0.4));
+    prims.push(line([-0.3, 0.3, 0.3, -0.3], 0.04, 'dark', { alpha: 0.7 }));
+    return prims;
+}
+
+function barrel(rng) {
+    const prims = [poly(ngon(0, 0, 0.45, 0.45, 28), 'dark', { shadow: true }), poly(ngon(0, 0, 0.4, 0.4, 28), 'base')];
+    const turn = rng() * TAU;
+    for (let i = 0; i < 5; i++) {
+        const angle = turn + (i / 5) * Math.PI;
+        prims.push(seam(Math.cos(angle) * 0.38, Math.sin(angle) * 0.38, -Math.cos(angle) * 0.38, -Math.sin(angle) * 0.38, 0.01, 0.3));
+    }
+    prims.push(line(ngon(0, 0, 0.31, 0.31, 24), 0.03, 'accent', { closed: true, alpha: 0.9 }));
+    prims.push(line(ngon(0, 0, 0.19, 0.19, 20), 0.02, 'accent', { closed: true, alpha: 0.6 }));
+    prims.push(poly(ngon(0, 0, 0.035, 0.035, 8), 'dark'));
+    return prims;
+}
+
+function chest() {
+    return [
+        poly(rrect(0, 0, 0.88, 0.6, 0.05), 'dark', { shadow: true }),
+        poly(rrect(0, 0, 0.82, 0.54, 0.045), 'base'),
+        seam(-0.4, -0.1, 0.4, -0.1, 0.016, 0.55),
+        poly(rrect(-0.27, 0, 0.07, 0.54, 0.01), 'accent', { outline: 'dark' }),
+        poly(rrect(0.27, 0, 0.07, 0.54, 0.01), 'accent', { outline: 'dark' }),
+        poly(rrect(0, -0.1, 0.1, 0.12, 0.015), 'light', { outline: 'dark' }),
+        poly(rrect(-0.2, -0.2, 0.3, 0.06, 0.02), 'light', { alpha: 0.18 })
+    ];
+}
+
+function appleCrate(rng) {
+    const prims = crateFrame(0.74);
+    prims.push(poly(rrect(0, 0, 0.58, 0.58, 0.02), 'accent'));
+    const spots = [];
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) spots.push([-0.18 + col * 0.18 + (rng() - 0.5) * 0.04, -0.18 + row * 0.18 + (rng() - 0.5) * 0.04]);
+    for (const [x, y] of spots) {
+        prims.push(poly(ngon(x, y, 0.095, 0.095, 12), 'accent2', { outline: 'dark', shadow: true }));
+        prims.push(poly(ngon(x - 0.03, y - 0.03, 0.03, 0.03, 8), 'light', { alpha: 0.7 }));
+    }
+    return prims;
+}
+
+function cauldron(rng) {
+    const prims = [
+        poly(rrect(-0.44, 0, 0.1, 0.1, 0.03), 'base', { outline: 'dark' }),
+        poly(rrect(0.44, 0, 0.1, 0.1, 0.03), 'base', { outline: 'dark' }),
+        poly(ngon(0, 0, 0.4, 0.4, 28), 'dark', { shadow: true }),
+        poly(ngon(0, 0, 0.36, 0.36, 28), 'base'),
+        poly(ngon(0, 0, 0.29, 0.29, 24), 'accent'),
+        poly(ngon(-0.08, -0.08, 0.14, 0.1, 10), 'light', { alpha: 0.25 })
+    ];
+    for (let i = 0; i < 6; i++) {
+        const angle = rng() * TAU;
+        const reach = Math.sqrt(rng()) * 0.22;
+        prims.push(poly(ngon(Math.cos(angle) * reach, Math.sin(angle) * reach, between(rng, 0.025, 0.055), undefined, 8), 'accent2', { alpha: 0.85 }));
+    }
+    return prims;
+}
+
+function pumpkin(cx, cy, r) {
+    return [
+        poly(ngon(cx, cy, r, r * 0.88, 20), 'base', { outline: 'dark', shadow: true }),
+        line(ngon(cx, cy, r * 0.5, r * 0.86, 14), r * 0.05, 'dark', { closed: true, alpha: 0.4 }),
+        line(ngon(cx, cy, r * 0.82, r * 0.86, 16), r * 0.04, 'dark', { closed: true, alpha: 0.3 }),
+        poly(ngon(cx - r * 0.3, cy - r * 0.3, r * 0.22, r * 0.14, 8), 'light', { alpha: 0.4 }),
+        poly(rrect(cx, cy - r * 0.05, r * 0.14, r * 0.26, r * 0.04), 'accent', { outline: 'dark' })
+    ];
+}
+
+function pumpkins(rng) {
+    const prims = [];
+    for (const [x, y, r] of [[-0.2, 0.14, 0.26], [0.22, 0.17, 0.23], [0.0, -0.2, 0.28]]) prims.push(...pumpkin(x + (rng() - 0.5) * 0.04, y + (rng() - 0.5) * 0.04, r));
+    return prims;
+}
+
+function melon(cx, cy, rx, ry, turn) {
+    const move = pts => place(pts, { dx: cx, dy: cy, turn });
+    return [
+        poly(move(ngon(0, 0, rx, ry, 20)), 'base', { outline: 'dark', shadow: true }),
+        line(move(ngon(0, 0, rx * 0.55, ry, 16)), 0.014, 'light', { closed: true, alpha: 0.55 }),
+        line(move(ngon(0, 0, rx * 0.85, ry, 16)), 0.014, 'dark', { closed: true, alpha: 0.4 }),
+        poly(move(ngon(-rx * 0.3, -ry * 0.35, rx * 0.25, ry * 0.15, 8)), 'light', { alpha: 0.3 })
+    ];
+}
+
+function melons(rng) {
+    const prims = [...melon(-0.2, -0.17, 0.3, 0.22, 0.3 + (rng() - 0.5) * 0.3), ...melon(0.2, 0.22, 0.3, 0.22, -0.2 + (rng() - 0.5) * 0.3)];
+    // One cut open.
+    const cx = -0.12;
+    const cy = 0.24;
+    prims.push(poly(ngon(cx, cy, 0.28, 0.2, 20), 'dark', { shadow: true }));
+    prims.push(poly(ngon(cx, cy, 0.24, 0.16, 20), 'light'));
+    prims.push(poly(ngon(cx, cy, 0.2, 0.12, 20), 'accent2'));
+    for (let i = 0; i < 7; i++) prims.push(poly(ngon(cx + (rng() - 0.5) * 0.3, cy + (rng() - 0.5) * 0.14, 0.015, 0.025, 6), 'dark'));
+    return prims;
+}
+
+// ------------------------------------------------------------------
+// ----- Crops ------------------------------------------------------
+// ------------------------------------------------------------------
+
+/**
+ * One plant of a field, and the soil it stands in. A field is a lattice of these -- a stamp that sits on
+ * grid points half a square or so apart (`lattice` in the catalogue) -- so a drag lays rows.
+ */
+function field(plant) {
+    return rng => [
+        poly(ngon(0, 0, 0.5, 0.5, 18), 'dark', { alpha: 0.18 }),
+        poly(ngon(0, 0, 0.42, 0.42, 18), 'base', { alpha: 0.55 }),
+        ...plant(rng)
+    ];
+}
+
+const corn = rng => {
+    const turn = rng() * TAU;
+    return [
+        poly(star(0, 0, 0.4, 0.07, 7, turn), 'accent', { outline: 'dark' }),
+        poly(star(0, 0, 0.26, 0.05, 7, turn + 0.2), 'light', { alpha: 0.85 }),
+        poly(ngon(0, 0, 0.085, 0.085, 10), 'accent2', { outline: 'dark' })
+    ];
+};
+
+const wheat = rng => {
+    const prims = [];
+    const turn = rng() * TAU;
+    for (let i = 0; i < 9; i++) {
+        const angle = turn + (i / 9) * TAU;
+        prims.push(poly(blade(Math.cos(angle) * 0.04, Math.sin(angle) * 0.04, angle + Math.PI / 2, 0.32, 0.01, 0.028), i % 2 ? 'accent2' : 'accent'));
+    }
+    prims.push(poly(ngon(0, 0, 0.07, 0.07, 8), 'light', { alpha: 0.9 }));
+    return prims;
+};
+
+const cabbage = rng => [
+    poly(canopy(rng, 0, 0, 0.38, 6), 'accent', { outline: 'dark' }),
+    poly(canopy(rng, 0, 0, 0.27, 6), 'light', { outline: 'dark' }),
+    poly(canopy(rng, 0, 0, 0.15, 5), 'accent', { alpha: 0.6 }),
+    line([0, -0.34, 0, -0.1, 0.3, 0.17, 0.08, 0.04], 0.012, 'dark', { alpha: 0.25 })
+];
+
+const pumpkinPlant = rng => [
+    poly(canopy(rng, -0.05, -0.05, 0.4, 5), 'accent', { outline: 'dark' }),
+    // The pumpkin's orange is the plant's fruit colour, not the soil's.
+    ...pumpkin(0.1, 0.08, 0.2).map(prim => ({ ...prim, shadow: false, tone: prim.tone === 'base' ? 'accent2' : prim.tone }))
+];
+
+const carrots = rng => {
+    const prims = [];
+    const turn = rng() * TAU;
+    for (let i = 0; i < 8; i++) {
+        const angle = turn + (i / 8) * TAU;
+        prims.push(poly(blade(0, 0, angle + Math.PI / 2, 0.36, 0.015, 0.03), i % 2 ? 'light' : 'accent'));
+    }
+    prims.push(poly(ngon(0, 0, 0.06, 0.06, 8), 'accent2', { outline: 'dark' }));
+    return prims;
+};
+
 // The tidy markers the tool has always had. They are drawn by the drawing tool's own code; the
 // geometry here is only for the pictures in the window.
 const markerPlus = () => [line([-0.32, 0, 0.32, 0], 0.16, 'base'), line([0, -0.32, 0, 0.32], 0.16, 'base')];
@@ -349,8 +617,12 @@ export const STAMP_CATEGORIES = [
     { id: 'trees', labelKey: 'categoryTrees' },
     { id: 'plants', labelKey: 'categoryPlants' },
     { id: 'ground', labelKey: 'categoryGround' },
+    { id: 'fields', labelKey: 'categoryFields' },
     { id: 'rocks', labelKey: 'categoryRocks' },
     { id: 'features', labelKey: 'categoryFeatures' },
+    { id: 'furniture', labelKey: 'categoryFurniture' },
+    { id: 'storage', labelKey: 'categoryStorage' },
+    { id: 'kitchen', labelKey: 'categoryKitchen' },
     { id: 'markers', labelKey: 'categoryMarkers' }
 ];
 
@@ -394,6 +666,41 @@ export const STAMPS = [
         palette: { dark: '#8a7a55', base: '#3f7fbf', light: '#9acff0', accent: '#5aa04a', accent2: '#c0452f' } },
     { id: 'campfire', category: 'features', icon: 'fa-solid fa-fire', labelKey: 'stampCampfire', squares: 1.5, build: campfire,
         palette: { dark: '#3b2e25', base: '#8a8a8a', light: '#b5b5b5', accent: '#f5c542', accent2: '#e8742a' } },
+    { id: 'table', category: 'furniture', icon: 'fa-solid fa-table', labelKey: 'stampTable', squares: 2, build: table, palette: { dark: '#4f3620', base: '#8a6238', light: '#b58a58', accent: '#c9995e', accent2: '#c0452f' } },
+    { id: 'round-table', category: 'furniture', icon: 'fa-solid fa-circle', labelKey: 'stampRoundTable', squares: 1.5, build: roundTable, palette: { dark: '#4f3620', base: '#8a6238', light: '#b58a58', accent: '#c9995e', accent2: '#c0452f' } },
+    { id: 'chair', category: 'furniture', icon: 'fa-solid fa-chair', labelKey: 'stampChair', squares: 0.7, build: chair, palette: { dark: '#4f3620', base: '#8a6238', light: '#b58a58', accent: '#c9995e', accent2: '#c0452f' } },
+    { id: 'bed', category: 'furniture', icon: 'fa-solid fa-bed', labelKey: 'stampBed', squares: 2, build: bed,
+        palette: { dark: '#4f3620', base: '#8a6238', light: '#ddd6c2', accent: '#a63d3d', accent2: '#f2eee2' } },
+    { id: 'cabinet', category: 'furniture', icon: 'fa-solid fa-box-archive', labelKey: 'stampCabinet', squares: 1.2, build: cabinet, palette: { dark: '#4f3620', base: '#8a6238', light: '#b58a58', accent: '#c9995e', accent2: '#c0452f' } },
+    { id: 'workbench', category: 'furniture', icon: 'fa-solid fa-hammer', labelKey: 'stampWorkbench', squares: 2, build: workbench,
+        palette: { dark: '#4f3620', base: '#8a6238', light: '#b9b9b9', accent: '#808080', accent2: '#c0452f' } },
+    { id: 'box', category: 'storage', icon: 'fa-solid fa-box', labelKey: 'stampBox', squares: 0.7, build: box,
+        palette: { dark: '#6b4a2b', base: '#a67c4a', light: '#d2a972', accent: '#8a8a8a', accent2: '#c0452f' } },
+    { id: 'crate', category: 'storage', icon: 'fa-solid fa-boxes-stacked', labelKey: 'stampCrate', squares: 0.9, build: crate, palette: { dark: '#4f3620', base: '#8a6238', light: '#b58a58', accent: '#c9995e', accent2: '#c0452f' } },
+    { id: 'barrel', category: 'storage', icon: 'fa-solid fa-circle-notch', labelKey: 'stampBarrel', squares: 0.7, build: barrel,
+        palette: { dark: '#4f3620', base: '#8a6238', light: '#b58a58', accent: '#6a6a6a', accent2: '#c0452f' } },
+    { id: 'chest', category: 'storage', icon: 'fa-solid fa-treasure-chest', labelKey: 'stampChest', squares: 1, build: chest,
+        palette: { dark: '#4f3620', base: '#8a6238', light: '#d8b45a', accent: '#b8923a', accent2: '#c0452f' } },
+    { id: 'apple-crate', category: 'storage', icon: 'fa-solid fa-apple-whole', labelKey: 'stampAppleCrate', squares: 0.9, build: appleCrate,
+        palette: { dark: '#4f3620', base: '#8a6238', light: '#f19090', accent: '#d9c27a', accent2: '#c0392b' } },
+    { id: 'stove', category: 'kitchen', icon: 'fa-solid fa-fire-burner', labelKey: 'stampStove', squares: 1.2, build: stove,
+        palette: { dark: '#2a2a2a', base: '#555555', light: '#8d8d8d', accent: '#c0452f', accent2: '#e8742a' } },
+    { id: 'cauldron', category: 'kitchen', icon: 'fa-solid fa-flask', labelKey: 'stampCauldron', squares: 1, build: cauldron,
+        palette: { dark: '#222222', base: '#3a3a3a', light: '#8a8a8a', accent: '#5fbf4a', accent2: '#a6ef8a' } },
+    { id: 'pumpkins', category: 'kitchen', icon: 'fa-solid fa-jack-o-lantern', labelKey: 'stampPumpkins', squares: 1.2, build: pumpkins,
+        palette: { dark: '#8f4a0d', base: '#e07a1f', light: '#f2a24a', accent: '#5a7a2a', accent2: '#c0452f' } },
+    { id: 'melons', category: 'kitchen', icon: 'fa-solid fa-circle', labelKey: 'stampMelons', squares: 1.2, build: melons,
+        palette: { dark: '#2f6a26', base: '#4f9a3c', light: '#9ad08a', accent: '#d8d8a8', accent2: '#d94a4a' } },
+    { id: 'crop-corn', category: 'fields', icon: 'fa-solid fa-wheat-awn', labelKey: 'stampCropCorn', squares: 0.75, lattice: true, build: field(corn),
+        palette: { dark: '#5a4128', base: '#7a5a3a', light: '#9ed36a', accent: '#4f9a2c', accent2: '#e8c340' } },
+    { id: 'crop-wheat', category: 'fields', icon: 'fa-solid fa-wheat-awn', labelKey: 'stampCropWheat', squares: 0.75, lattice: true, build: field(wheat),
+        palette: { dark: '#5a4128', base: '#7a5a3a', light: '#f0d878', accent: '#a8963c', accent2: '#d9b84a' } },
+    { id: 'crop-cabbage', category: 'fields', icon: 'fa-solid fa-leaf', labelKey: 'stampCropCabbage', squares: 0.75, lattice: true, build: field(cabbage),
+        palette: { dark: '#5a4128', base: '#7a5a3a', light: '#b8e07a', accent: '#5aa03c', accent2: '#8a3a8a' } },
+    { id: 'crop-pumpkin', category: 'fields', icon: 'fa-solid fa-jack-o-lantern', labelKey: 'stampCropPumpkin', squares: 0.75, lattice: true, build: field(pumpkinPlant),
+        palette: { dark: '#5a4128', base: '#7a5a3a', light: '#8fc060', accent: '#4f8a2c', accent2: '#e07a1f' } },
+    { id: 'crop-carrots', category: 'fields', icon: 'fa-solid fa-carrot', labelKey: 'stampCropCarrots', squares: 0.75, lattice: true, build: field(carrots),
+        palette: { dark: '#5a4128', base: '#7a5a3a', light: '#9ed36a', accent: '#4a9a2c', accent2: '#e8832a' } },
     { id: 'plus', category: 'markers', icon: 'fa-solid fa-plus', labelKey: 'stampPlus', scale: 1, legacy: true, build: markerPlus },
     { id: 'x', category: 'markers', icon: 'fa-solid fa-xmark', labelKey: 'stampX', scale: 1, legacy: true, build: markerX },
     { id: 'dot', category: 'markers', icon: 'fa-solid fa-circle', labelKey: 'stampDot', scale: 1, legacy: true, build: markerDot },

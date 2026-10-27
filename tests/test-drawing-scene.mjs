@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import {
     stampSquares, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings } from '../scripts/utils-drawing.js';
 import { SKIP_JOIN } from '../scripts/utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
@@ -129,7 +129,7 @@ const make = () => {
             drawingMode: 'wall', stampStyle: 'tree', symbolSize: 'medium', timedEraseEnabled: false,
             brushSettings: { size: 6, color: 'rgba(186, 60, 49, 0.7)', type: 'pen' },
             stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 },
-            wallShape: 'line', wallSnap: true, wallKind: 'wall', wallDoor: 'closed'
+            wallShape: 'line', wallSnap: true, wallKind: 'wall', wallDoor: 'closed', wallMaterial: 'plain'
         },
         services: { canvasLayer: { added: [], addChild(g) { this.added.push(g); } } },
         _pixiDrawings: [], _kept: [], _roll: null, _lastDrawing: null,
@@ -266,6 +266,151 @@ console.log('\ndoors and windows are two points');
     await wall.createWallStroke(sketch);
     check('where a freehand wall is still several', scene.creates.find(([type]) => type === 'Wall')[1].length > 1);
     check('isOpeningKind says which', isOpeningKind('door') && isOpeningKind('secret') && isOpeningKind('window') && !isOpeningKind('wall') && !isOpeningKind('invisible'));
+}
+
+console.log('\nwalls as a box and as an ellipse');
+{
+    const strokeShape = async (shape, kind = 'wall', points = [[3, 4], [304, 203]]) => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.wallShape = shape;
+        tool.state.wallKind = kind;
+        await tool.createWallStroke(points);
+        return { tool, walls: scene.creates.find(([type]) => type === 'Wall')?.[1] ?? [], drawn: scene.creates.find(([type]) => type === 'Drawing')?.[1] ?? [] };
+    };
+    {
+        const { walls, drawn, tool } = await strokeShape('box');
+        check('a box is a room of four walls', walls.length === 4 && walls.map(w => w.c.join()).join('|') === '0,0,300,0|300,0,300,200|300,200,0,200|0,200,0,0');
+        check('with its line, drawn round the room', drawn.length > 6 && drawn.filter(d => d.fillType === 1).length === 2 * 5);
+        check('the walls are one group, with the line', new Set(walls.map(w => w.flags[MODULE.ID].drawnWall.id)).size === 1 && drawn.every(d => d.flags[MODULE.ID].drawnWall.id === walls[0].flags[MODULE.ID].drawnWall.id));
+        await tool._undoKept();
+        check('and undo takes the whole room', scene.walls.size === 0 && scene.drawings.size === 0);
+    }
+    {
+        const { walls } = await strokeShape('ellipse', 'wall', [[0, 0], [800, 600]]);
+        check('an ellipse is a ring of walls', walls.length >= 12 && walls.every(w => w.c.length === 4 && (w.c[0] !== w.c[2] || w.c[1] !== w.c[3])));
+        check('closed: each wall begins where the last ended', walls.every((w, i) => w.c[0] === walls[(i + walls.length - 1) % walls.length].c[2] && w.c[1] === walls[(i + walls.length - 1) % walls.length].c[3]));
+    }
+    {
+        const { walls } = await strokeShape('box', 'door');
+        check('a door is two points whatever the shape: a box is not a room of doors', walls.length === 1);
+        const window_ = await strokeShape('ellipse', 'window');
+        check('nor a window', window_.walls.length === 1);
+    }
+    {
+        const { walls } = await strokeShape('box', 'invisible');
+        check('a box of invisible walls is four invisible walls', walls.length === 4 && walls.every(w => w.sight === CONST.EDGE_SENSE_TYPES.NONE));
+        const brick = make();
+        scene = makeScene();
+        brick.state.wallShape = 'box';
+        brick.state.wallMaterial = 'brick';
+        await brick.createWallStroke([[0, 0], [300, 200]]);
+        check('and a box of brick is brick all round', scene.creates.find(([type]) => type === 'Drawing')[1].every(d => d.flags[MODULE.ID].drawnWall.material === 'brick') && scene.walls.size === 4);
+    }
+    {
+        const tiny = await strokeShape('box', 'wall', [[10, 10], [30, 20]]);
+        check('a box too small to be a room is not written', tiny.walls.length === 0 && scene.creates.length === 0);
+    }
+    for (const [shape, mode] of [['sketch', 'sketch'], ['line', 'line'], ['box', 'box'], ['ellipse', 'ellipse']]) {
+        const t = make();
+        t.state.wallShape = shape;
+        check(`wall, ${shape}, strokes as ${mode}`, t._strokeMode() === mode);
+        t.state.wallKind = 'door';
+        check(`but a door never does: it is a line`, t._strokeMode() === 'line');
+    }
+    {
+        const t = make();
+        const saved = [];
+        game.settings.set = (...args) => saved.push(args);
+        t.setWallOption('shape', 'box');
+        const afterBox = t.state.wallShape;
+        t.setWallOption('shape', 'ellipse');
+        const afterEllipse = t.state.wallShape;
+        t.setWallOption('shape', 'nonsense');
+        game.settings.set = () => {};
+        check('the shape is chosen from the four, and is remembered; nonsense is a line', afterBox === 'box' && afterEllipse === 'ellipse' && t.state.wallShape === 'line' && saved[0][2].shape === 'box');
+    }
+}
+
+console.log('\nmaterials');
+{
+    const strokeWith = async (material, kind = 'wall') => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.wallKind = kind;
+        tool.state.wallMaterial = material;
+        await tool.createWallStroke([[0, 0], [500, 0]]);
+        return { tool, drawn: scene.creates.find(([type]) => type === 'Drawing')[1], wall: scene.creates.find(([type]) => type === 'Wall')[1][0] };
+    };
+    const plain = await strokeWith('plain');
+    check('a plain wall is as it was: six Drawings', plain.drawn.length === 6);
+    for (const material of ['stone', 'brick', 'wood', 'fence', 'iron', 'hedge']) {
+        const { drawn, wall } = await strokeWith(material);
+        check(`${material}: drawn as that, with more than a plain line`, drawn.length > 6 && drawn.some(d => d.strokeColor === wallMaterialById(material).color || d.fillColor === wallMaterialById(material).color));
+        check(`${material}: the Drawings and the wall remember the material`, drawn.every(d => d.flags[MODULE.ID].drawnWall.material === material) && wall.flags[MODULE.ID].drawnWall.material === material);
+    }
+    {
+        const { drawn, wall } = await strokeWith('brick', 'door');
+        check('a door is drawn as a door, whatever the material', drawn.length === 7 && wall.flags[MODULE.ID].drawnWall.material === 'plain' && drawn.every(d => d.strokeColor !== wallMaterialById('brick').color));
+        const window_ = await strokeWith('stone', 'window');
+        check('and a window', window_.drawn.length === 7);
+    }
+    {
+        const { drawn, wall } = await strokeWith('stone', 'invisible');
+        check('a wall of another kind is drawn in the material, and keeps what its kind does', drawn.length > 6 && wall.sight === CONST.EDGE_SENSE_TYPES.NONE && wall.move === CONST.EDGE_SENSE_TYPES.NORMAL);
+    }
+    {
+        const { tool } = await strokeWith('stone');
+        await tool._undoKept();
+        check('undo takes a stone wall and every piece of it', scene.walls.size === 0 && scene.drawings.size === 0);
+    }
+    {
+        scene = makeScene();
+        const tool = make();
+        tool.setDrawingMode = mode => { tool.mode = mode; };
+        tool.updateModeButtons = () => {};
+        tool.startFromWindow = () => { tool.started = true; };
+        tool.chooseMaterial('fence');
+        check('choosing a fence from a plain wall chooses a wall that stops movement only, and starts', tool.state.wallMaterial === 'fence' && tool.state.wallKind === 'invisible' && tool.mode === 'wall' && tool.started === true);
+        const hedge = make();
+        hedge.setDrawingMode = () => {};
+        hedge.updateModeButtons = () => {};
+        hedge.startFromWindow = () => {};
+        hedge.chooseMaterial('hedge');
+        check('a hedge, a terrain wall', hedge.state.wallKind === 'terrain');
+        const door = make();
+        door.state.wallKind = 'door';
+        door.setDrawingMode = () => {};
+        door.updateModeButtons = () => {};
+        door.startFromWindow = () => {};
+        door.chooseMaterial('fence');
+        check('a kind already chosen is kept: a door stays a door', door.state.wallKind === 'door' && door.state.wallMaterial === 'fence');
+        const stone = make();
+        stone.setDrawingMode = () => {};
+        stone.updateModeButtons = () => {};
+        stone.startFromWindow = () => {};
+        stone.chooseMaterial('stone');
+        check('a material with no suggestion leaves the kind alone', stone.state.wallKind === 'wall' && stone.state.wallMaterial === 'stone');
+        const later = make();
+        later.state.wallKind = 'terrain';
+        later.setDrawingMode = () => {};
+        later.updateModeButtons = () => {};
+        later.startFromWindow = () => {};
+        later.chooseMaterial('fence');
+        check('and so does a kind chosen by hand: terrain stays terrain', later.state.wallKind === 'terrain');
+        isGM = false;
+        const player = make();
+        player.chooseMaterial('stone');
+        check('a player cannot choose one', player.state.wallMaterial === 'plain');
+        isGM = true;
+        const saved = [];
+        game.settings.set = (...args) => saved.push(args);
+        const remember = make();
+        remember.setWallOption('material', 'brick');
+        remember.setWallOption('material', 'nonsense');
+        game.settings.set = () => {};
+        check('the material is remembered, and nonsense is refused', remember.state.wallMaterial === 'brick' && saved.at(-1)[2].material === 'brick');
+    }
 }
 
 console.log('\nthe marks on a door and a window');
@@ -439,7 +584,7 @@ console.log('\nkinds of wall');
         tool.setWallOption('kind', 'nonsense');
         tool.setWallOption('door', 'ajar');
         check('the kind and the door state are chosen, and nonsense is refused', tool.state.wallKind === 'door' && tool.state.wallDoor === 'locked');
-        check('and remembered with the shape and snap', JSON.stringify(saved.at(-1)[2]) === JSON.stringify({ shape: 'line', snap: true, kind: 'door', door: 'locked' }));
+        check('and remembered with the shape and snap', JSON.stringify(saved.at(-1)[2]) === JSON.stringify({ shape: 'line', snap: true, kind: 'door', door: 'locked', material: 'plain' }));
         game.settings.set = () => {};
         tool.state.drawingMode = 'sketch';
         isGM = false;
@@ -645,7 +790,7 @@ console.log('\ndrawing from the window: press, drag, release');
         const tool = make();
         tool.state.active = true;
         tool.state.isDrawing = false;
-        for (const name of ['startDrawing', 'startLineDrawing', 'startBoxDrawing', 'startEllipseDrawing', 'updateDrawing', 'updateLinePreview', 'updateBoxPreview', 'updateEllipsePreview', 'finishDrawing', 'finishLineDrawing', 'finishBoxDrawing', 'finishEllipseDrawing', 'cancelDrawing', 'stampSymbol', '_eraseAtEvent', '_previewEraser', '_commitErase']) {
+        for (const name of ['startDrawing', 'startLineDrawing', 'startBoxDrawing', 'startEllipseDrawing', 'updateDrawing', 'updateLinePreview', 'updateBoxPreview', 'updateEllipsePreview', 'finishDrawing', 'finishLineDrawing', 'finishBoxDrawing', 'finishEllipseDrawing', 'cancelDrawing', 'stampSymbol', '_eraseAtEvent', '_previewEraser', '_commitErase', 'stopFromWindow']) {
             tool[name] = () => { calls.push(name); if (name.startsWith('start') && name !== 'stampSymbol') tool.state.isDrawing = true; if (name.startsWith('finish') || name === 'cancelDrawing') tool.state.isDrawing = false; };
         }
         tool.canUserDraw = () => true;
@@ -717,6 +862,56 @@ console.log('\ndrawing from the window: press, drag, release');
         tool.state.active = true;
         tool._windowPointerDown(event());
         check('a user who may not draw cannot start', calls.length === 0);
+    }
+    {
+        const rightClick = (tool, x = 100, y = 100, upX = x, upY = y) => {
+            const down = event({ button: 2, clientX: x, clientY: y });
+            tool._windowPointerDown(down);
+            tool._windowPointerUp(event({ button: 2, clientX: upX, clientY: upY }));
+            return down;
+        };
+        calls.length = 0;
+        let tool = recorder();
+        tool.state.drawingMode = 'sketch';
+        const down = rightClick(tool);
+        check('a right-click stops drawing', calls.join() === 'stopFromWindow');
+        check('and the press is left to Foundry, so a right-drag can still pan', down.prevented === 0);
+        calls.length = 0;
+        tool = recorder();
+        rightClick(tool, 100, 100, 160, 140);
+        check('a right-drag, which pans, does not stop it', calls.length === 0);
+        calls.length = 0;
+        tool = recorder();
+        rightClick(tool, 100, 100, 103, 102);
+        check('a right-click that wobbles a pixel or two still stops it', calls.join() === 'stopFromWindow');
+        calls.length = 0;
+        tool = recorder();
+        tool.state.drawingMode = 'sketch';
+        tool._windowPointerDown(event());
+        calls.length = 0;
+        rightClick(tool);
+        check('a right-click in the middle of a stroke does not stop it', calls.length === 0 && tool.state.isDrawing);
+        calls.length = 0;
+        tool = recorder();
+        tool.state.drawingMode = 'erase';
+        tool._windowPointerDown(event());
+        calls.length = 0;
+        rightClick(tool);
+        check('nor in the middle of erasing', calls.length === 0);
+        calls.length = 0;
+        tool = recorder();
+        tool.state.active = false;
+        rightClick(tool);
+        check('with drawing already stopped it does nothing', calls.length === 0);
+        calls.length = 0;
+        tool = recorder();
+        tool._windowPointerUp(event({ button: 2 }));
+        check('a right button that came up with no press of its own, as after a menu, stops nothing', calls.length === 0);
+        calls.length = 0;
+        tool = recorder();
+        tool.state.drawingMode = 'stamp';
+        rightClick(tool);
+        check('it stops a stamp, too', calls.join() === 'stopFromWindow');
     }
     {
         calls.length = 0;
@@ -998,6 +1193,50 @@ console.log('\npainting ground: a drag that does not stop');
     tool._placeStamp('tree', 100, 100);
     await new Promise(resolve => setTimeout(resolve, 10));
     check('a single stamp, no stroke, is still written at once', scene.creates.filter(([type]) => type === 'Drawing').length === 1);
+}
+
+console.log('\nlaying a field: crops on a lattice');
+{
+    scene = makeScene();
+    added.length = 0;
+    const tool = make();
+    tool.state.drawingMode = 'stamp';
+    tool.state.stampStyle = 'crop-corn';
+    const cell = tool._stampPixels('crop-corn');
+    check('a plant is three quarters of a square at medium, so rows are that far apart', cell === 75);
+    check('a crop is never turned, flipped or sized at random, whatever the options say', (() => { const t = make(); t.state.stampStyle = 'crop-corn'; const roll = t._peekRoll(); return roll.rotation === 0 && roll.mirror === false && roll.jitter === 1; })());
+    check('a tree still is', (() => { const t = make(); t.state.stampStyle = 'tree'; const roll = t._peekRoll(); return roll.jitter !== 1 || roll.rotation !== 0 || roll.mirror !== undefined; })());
+    tool._beginScatter({ x: 80, y: 74 });
+    tool._placeStamp('crop-corn', 80, 74);
+    const first = tool._pixiDrawings[0];
+    check('a plant goes on the nearest point of the lattice', first.x === 75 && first.y === 75);
+    tool._placeStamp('crop-corn', 82, 70);
+    check('another that falls on the same point is dropped: one plant to a point', tool._pixiDrawings.length === 1);
+    tool._scatterTo({ x: 80 + cell * 4, y: 74 });
+    const xs = tool._pixiDrawings.map(d => d.x).sort((a, b) => a - b);
+    check('a drag lays a row: a plant at every point along it, none doubled, none missing', xs.join() === [75, 150, 225, 300, 375].join(), xs.join());
+    check('every one is on the lattice', tool._pixiDrawings.every(d => d.x % cell === 0 && d.y % cell === 0));
+    tool._scatterTo({ x: 80 + cell * 4, y: 74 + cell * 2 });
+    check('a drag down a column lays a column', tool._pixiDrawings.length === 7 && tool._pixiDrawings.every(d => d.x % cell === 0 && d.y % cell === 0));
+    tool._endScatter();
+    check('a new stroke may put a plant on a point an earlier one used', (() => { tool._beginScatter({ x: 80, y: 74 }); tool._placeStamp('crop-corn', 80, 74); const n = tool._pixiDrawings.length; tool._endScatter(); return n === 8; })());
+    check('the size sets the lattice: a small plant is a third as far apart', (() => { const t = make(); t.state.symbolSize = 'small'; return t._stampPixels('crop-corn') === 25; })());
+    check('and spacing does not change it, so rows stay rows', (() => { const t = make(); t.state.stamp.spacing = 3; return t._scatterStep('crop-corn') === make()._scatterStep('crop-corn'); })());
+    check('a drag samples more often than a cell, so no point is skipped on a diagonal', tool._scatterStep('crop-corn') === cell * 0.5);
+}
+{
+    scene = makeScene();
+    const tool = make();
+    tool.state.stampStyle = 'crop-wheat';
+    tool.state.stamp.keep = true;
+    tool._beginScatter({ x: 0, y: 0 });
+    tool._placeStamp('crop-wheat', 0, 0);
+    tool._scatterTo({ x: 75 * 3, y: 0 });
+    tool._endScatter();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const written = scene.creates.filter(([type]) => type === 'Drawing');
+    check('a kept field is written as one batch, a plant at each point', written.length === 1 && new Set(written[0][1].map(d => d.flags[MODULE.ID].stamp.id)).size === 4);
+    check('and is one thing to undo', tool._kept.length === 1);
 }
 
 console.log('\nwhat the user may do');

@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import { STAMPS, STAMP_CATEGORIES, stampSvg, parseColor } from '../scripts/utils-stamps.js';
 import { TERRAINS, terrainSvg } from '../scripts/utils-terrain.js';
-import { WALL_KINDS, wallKindSvg, isDoorKind, isOpeningKind } from '../scripts/utils-drawing.js';
+import { WALL_KINDS, wallKindSvg, isDoorKind, isOpeningKind, WALL_MATERIALS, wallMaterialSvg } from '../scripts/utils-drawing.js';
 
 const src = fs.readFileSync('scripts/window-drawing.js', 'utf8');
 const managerSrc = fs.readFileSync('scripts/manager-drawing.js', 'utf8');
@@ -51,7 +51,7 @@ const tool = (overrides = {}) => Object.assign(new FakeTool(), {
     state: {
         active: false, drawingMode: 'sketch', stampStyle: 'tree', symbolSize: 'medium', lineStyle: 'solid', timedEraseEnabled: false,
         brushSettings: { size: 6, color: 'rgba(186, 60, 49, 0.7)', type: 'pen' },
-        stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 }, wallShape: 'line', wallSnap: true, wallKind: 'wall', wallDoor: 'closed'
+        stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 }, wallShape: 'line', wallSnap: true, wallKind: 'wall', wallDoor: 'closed', wallMaterial: 'plain'
     },
     canMakeWalls: () => isGM, canKeepOnScene: () => isGM, canUndo: () => true,
     canSetScene: () => isGM, sceneState: () => ({ tokenVision: true, globalLight: false, darkness: 0.25 })
@@ -75,7 +75,8 @@ for (const gm of [true, false]) {
         const body = w._buildBody();
         const all = body + w._buildFooterLeft() + w._buildFooterRight();
         check(`${gm ? 'GM' : 'player'} ${tab}: no undefined, no [object Object], no missing string`, !/undefined|\[object Object\]|!!coffee-pub|NaN/.test(all), (all.match(/.{30}(undefined|\[object Object\]|!!coffee-pub|NaN).{30}/) ?? [''])[0]);
-        check(`${gm ? 'GM' : 'player'} ${tab}: underline tabs, one active`, has(body, 'blacksmith-tool-tabs') && count(body, /blacksmith-tool-tab is-active/g) === 1);
+        const tabs = w._buildTabs(w._currentTab());
+        check(`${gm ? 'GM' : 'player'} ${tab}: underline tabs, one active`, has(tabs, 'blacksmith-tool-tabs') && count(tabs, /blacksmith-tool-tab is-active/g) === 1);
     }
 }
 
@@ -100,10 +101,11 @@ console.log('\nthe Stamps tab');
 {
     const w = build(tool(), 'stamps');
     const body = w._buildBody();
-    check('every stamp but the ground patches has a button here', STAMPS.filter(s => s.category !== 'ground').every(s => has(body, `data-kind="${s.id}"`)));
-    check('the ground patches are not here, they are with the paths', STAMPS.filter(s => s.category === 'ground').every(s => !has(body, `data-kind="${s.id}"`)) && !has(body, lang['drawingTools.categoryGround']));
-    check('every other category has a section heading', STAMP_CATEGORIES.filter(c => c.id !== 'ground').every(c => has(body, lang[`drawingTools.${c.labelKey}`] ?? `drawingTools.${c.labelKey}`)));
-    const shown = STAMPS.filter(s => s.category !== 'ground').length;
+    const terrainStamps = s => s.category === 'ground' || s.category === 'fields';
+    check('every stamp but the ground patches and fields has a button here', STAMPS.filter(s => !terrainStamps(s)).every(s => has(body, `data-kind="${s.id}"`)));
+    check('the ground patches and fields are not here, they are with the paths', STAMPS.filter(terrainStamps).every(s => !has(body, `data-kind="${s.id}"`)) && !has(body, lang['drawingTools.categoryGround']) && !has(body, lang['drawingTools.categoryFields']));
+    check('every other category has a section heading', STAMP_CATEGORIES.filter(c => c.id !== 'ground' && c.id !== 'fields').every(c => has(body, lang[`drawingTools.${c.labelKey}`] ?? `drawingTools.${c.labelKey}`)));
+    const shown = STAMPS.filter(s => !terrainStamps(s)).length;
     check('each button has a picture and a name', count(body, /cartographer-stamp-art/g) === shown && count(body, /cartographer-stamp-name/g) === shown);
     check('exactly one stamp is active, the tree, only in stamp mode', count(body, /cartographer-stamp is-active/g) === 0);
     const inStamp = build(tool({ state: { ...tool().state, drawingMode: 'stamp' } }), 'stamps')._buildBody();
@@ -129,19 +131,47 @@ console.log('\nthe Drawing tab has no wall tool, the Walls tab has');
     check('the Drawing tab offers sketch, line, box and ellipse, and not wall', ['sketch', 'line', 'box', 'ellipse'].every(id => has(body, `data-mode="${id}"`)) && !has(body, 'data-mode="wall"') && !has(body, 'name="wallSnap"'));
 }
 
+console.log('\nthe tabs stay put, and the controls come first');
+{
+    isGM = true;
+    const w = build(tool(), 'stamps');
+    const data = await w.getData();
+    check('the tabs are in the window bar, which does not scroll, and not in the body', data.showToolBar === true && has(data.toolBarLeft, 'blacksmith-tool-tabs') && count(data.toolBarLeft, /data-action="drawing-tab"/g) === 5 && !has(data.bodyContent, 'blacksmith-tool-tabs'));
+    check('and the other side of the bar is empty', data.toolBarRight === '');
+    const body = w._buildBody();
+    const at = text => body.indexOf(text);
+    check('on the Stamps tab the options are first, above every stamp', at('name="drawing-size"') > 0 && at('name="drawing-size"') < at('data-action="drawing-stamp"') && at('name="keep"') < at('data-action="drawing-stamp"') && at('name="spacing"') < at('data-action="drawing-stamp"'));
+    check('the switches are in a grid, all four together', /cartographer-drawing-toggles">(?:(?!<\/div>)[\s\S])*name="natural"(?:(?!<\/div>\s*<label class="cartographer-drawing-row")[\s\S])*name="keep"/.test(body) && count(body, /cartographer-drawing-toggles/g) === 1 && count(body, /blacksmith-toggle-row/g) === 4);
+    const walls = build(tool(), 'walls')._buildBody();
+    const wat = text => walls.indexOf(text);
+    check('on the Walls tab how they are drawn is first, above the kinds and the materials', wat('data-shape="sketch"') > 0 && wat('data-shape="sketch"') < wat('data-action="drawing-wall"') && wat('name="wallSnap"') < wat('data-action="drawing-wall"') && wat('name="drawing-weight"') < wat('data-action="drawing-wall"') && wat('data-action="drawing-wall"') < wat('data-action="drawing-wall-material"'));
+    check('the walls are drawn the way drawings are: sketch, line, box and ellipse, in the same order', (() => { const ids = [...walls.matchAll(/name="drawing-wall-shape" value="(\w+)"/g)].map(m => m[1]); return ids.join() === 'sketch,line,box,ellipse'; })());
+    check('and the shape chosen is the one checked', /value="box"[^>]*data-shape="box" checked/.test(build(tool({ state: { ...tool().state, wallShape: 'box' } }), 'walls')._buildBody()));
+    const door = build(tool({ state: { ...tool().state, wallKind: 'door' } }), 'walls')._buildBody();
+    check('a door has no shape to choose, and its state is above the kinds', !has(door, 'name="drawing-wall-shape"') && door.indexOf('data-door="locked"') < door.indexOf('data-action="drawing-wall"'));
+    const utilities = build(tool(), 'utilities')._buildBody();
+    check('the Utilities switches are in grids too', count(utilities, /cartographer-drawing-toggles/g) === 2 && count(utilities, /blacksmith-toggle-row/g) === 3);
+}
+
 console.log('\nthe Walls tab');
 {
     isGM = true;
     const body = build(tool(), 'walls')._buildBody();
     check('every kind of wall has a button with its picture and name', WALL_KINDS.every(k => has(body, `data-action="drawing-wall" data-kind="${k.id}"`) && has(body, wallKindSvg(k.id))));
     check('at least a wall, a door, a window and an invisible wall are among them', ['wall', 'door', 'window', 'invisible', 'secret', 'terrain', 'ethereal'].every(id => WALL_KINDS.some(k => k.id === id)));
-    check('none is active until wall is the tool', count(body, /cartographer-stamp is-active/g) === 0);
+    check('no kind is active until wall is the tool', count(body, /is-active" data-action="drawing-wall" /g) === 0);
     const drawing = build(tool({ state: { ...tool().state, drawingMode: 'wall', wallKind: 'window' } }), 'walls')._buildBody();
     check('when it is, the kind chosen is active', count(drawing, /cartographer-stamp is-active/g) === 1 && /is-active" data-action="drawing-wall" data-kind="window"/.test(drawing));
     check('the shape, snap and weight are there', has(body, 'data-shape="line"') && has(body, 'data-shape="sketch"') && has(body, 'name="wallSnap"') && has(body, 'data-action="drawing-weight"'));
     for (const kind of ['door', 'secret', 'window']) {
         const opening = build(tool({ state: { ...tool().state, wallKind: kind } }), 'walls')._buildBody();
         check(`${kind}: no shape to choose, since it is two points, and it says so`, !has(opening, 'data-shape=') && has(opening, lang['drawingTools.wallOpeningHint'].slice(0, 30)) && has(opening, 'name="wallSnap"'));
+    }
+    check('every material has a button with its picture and name', WALL_MATERIALS.every(m => has(body, `data-action="drawing-wall-material" data-material="${m.id}"`) && has(body, wallMaterialSvg(m.id))));
+    check('the material chosen is the active one', count(body, /data-action="drawing-wall-material"[^>]*aria-pressed="true"/g) === 1 && /is-active" data-action="drawing-wall-material" data-material="plain"/.test(body));
+    check('another is when it is chosen', /is-active" data-action="drawing-wall-material" data-material="brick"/.test(build(tool({ state: { ...tool().state, wallMaterial: 'brick' } }), 'walls')._buildBody()));
+    for (const kind of ['door', 'secret', 'window']) {
+        check(`${kind}: no material to choose, since it is drawn as itself`, !has(build(tool({ state: { ...tool().state, wallKind: kind } }), 'walls')._buildBody(), 'data-material='));
     }
     for (const kind of ['wall', 'invisible', 'terrain', 'ethereal']) {
         check(`${kind}: the shape is still chosen`, has(build(tool({ state: { ...tool().state, wallKind: kind } }), 'walls')._buildBody(), 'data-shape="sketch"'));
@@ -155,10 +185,10 @@ console.log('\nthe Walls tab');
     }
     isGM = false;
     const player = build(tool(), 'walls');
-    check('a player has no Walls tab', !has(player._buildBody(), 'data-tab="walls"'));
-    check('and is shown the Drawing tab if they were on it', has(player._buildBody(), 'data-mode="sketch"'));
+    check('a player has no Walls tab', !has(player._buildTabs(player._currentTab()), 'data-tab="walls"'));
+    check('and is shown the Drawing tab if they were on it', has(player._buildBody(), 'data-mode="sketch"') && player._currentTab() === 'draw');
     isGM = true;
-    check('a GM has the tab', has(build(tool(), 'draw')._buildBody(), 'data-tab="walls"'));
+    check('a GM has the tab', has(build(tool(), 'draw')._buildTabs('draw'), 'data-tab="walls"'));
 }
 
 console.log('\nthe Utilities tab');
@@ -184,6 +214,8 @@ console.log('\nthe Terrain tab');
     check('none is active until terrain is the tool', count(body, /cartographer-stamp is-active/g) === 0);
     const ground = STAMPS.filter(s => s.category === 'ground');
     check('the ground patches are here, each a stamp button with a picture', ground.length >= 4 && ground.every(s => has(body, `data-action="drawing-stamp" data-kind="${s.id}"`) && has(body, stampSvg(s.id))));
+    const crops = STAMPS.filter(s => s.category === 'fields');
+    check('the crops are here too, each a stamp button with a picture, under their own heading', crops.length >= 4 && crops.every(s => has(body, `data-action="drawing-stamp" data-kind="${s.id}"`) && has(body, stampSvg(s.id))) && has(body, lang['drawingTools.categoryFields']));
     check('with a heading, and a size for them', has(body, lang['drawingTools.categoryGround']) && has(body, 'name="drawing-size"'));
     const placing = build(tool({ state: { ...tool().state, drawingMode: 'stamp', stampStyle: 'patch-sand' } }), 'terrain')._buildBody();
     check('the patch being placed is the active one', count(placing, /cartographer-stamp is-active/g) === 1 && /is-active" data-action="drawing-stamp" data-kind="patch-sand"/.test(placing));
@@ -193,8 +225,8 @@ console.log('\nthe Terrain tab');
     check('keep is offered, off by default', has(body, 'name="keep"') && !/name="keep"[^>]*checked/.test(body));
     const at = text => body.indexOf(text);
     check('keep is first on the tab, before the paths, where it is seen', at('name="keep"') > 0 && at('name="keep"') < at('data-action="drawing-terrain"'));
-    check('the width is in the paths section: after the paths, before the patches', at('name="drawing-path-width"') > at('data-action="drawing-terrain"') && at('name="drawing-path-width"') < at('data-action="drawing-stamp"'));
-    check('the patch size is with the patches, after them', at('name="drawing-size"') > at('data-action="drawing-stamp" data-kind="patch-dirt"'));
+    check('each control is above what it controls: keep, then the width, then the paths, then the size, then the patches, then the crops', (() => { const order = [at('name="keep"'), at('name="drawing-path-width"'), at('data-action="drawing-terrain"'), at('name="drawing-size"'), at('data-kind="patch-dirt"'), at('data-kind="crop-corn"')]; return order.every(n => n > 0) && order.every((n, i) => !i || n > order[i - 1]); })());
+    check('the size is above both the patches and the crops it controls', at('name="drawing-size"') < at('data-kind="patch-dirt"') && at('name="drawing-size"') < at('data-kind="crop-corn"'));
     isGM = false;
     const player = build(tool(), 'terrain')._buildBody();
     check('a user who may not create drawings has keep disabled', /name="keep"[^>]*disabled/.test(player));
@@ -237,6 +269,7 @@ console.log('\nthe joins');
     for (const category of STAMP_CATEGORIES) strings.add(category.labelKey);
     for (const terrain of TERRAINS) strings.add(terrain.labelKey);
     for (const kind of WALL_KINDS) strings.add(kind.labelKey);
+    for (const material of WALL_MATERIALS) strings.add(material.labelKey);
     const missing = [...strings].filter(key => !(`drawingTools.${key}` in lang));
     check('every string the window uses exists', missing.length === 0, missing.join(', '));
     const keys = Object.keys(lang).filter(key => key.startsWith('drawingTools.')).map(key => key.slice('drawingTools.'.length));
@@ -249,7 +282,7 @@ console.log('\nthe joins');
     const props = new Set([...src.matchAll(/manager\.state\.(\w+)/g)].map(m => m[1]));
     check('and every state it reads is state the tool has', [...props].every(p => new RegExp(`\\b${p}:`).test(managerSrc)), [...props].join(', '));
     check('the window id matches the one the tool looks for', src.includes("`${MODULE.ID}-drawing-tools`") && managerSrc.includes('`${MODULE.ID}-drawing-tools`'));
-    check('every class the window builds is styled', ['cartographer-drawing-panel', 'cartographer-drawing-row', 'cartographer-drawing-label', 'cartographer-drawing-buttons', 'cartographer-drawing-swatch', 'cartographer-stamp-grid', 'cartographer-stamp', 'cartographer-stamp-art', 'cartographer-stamp-name']
+    check('every class the window builds is styled', ['cartographer-drawing-panel', 'cartographer-drawing-row', 'cartographer-drawing-label', 'cartographer-drawing-buttons', 'cartographer-drawing-swatch', 'cartographer-stamp-grid', 'cartographer-stamp', 'cartographer-stamp-art', 'cartographer-stamp-name', 'cartographer-drawing-toggles']
         .every(name => fs.readFileSync('styles/tool-drawing.css', 'utf8').includes(`.${name}`)));
     check('the menubar button opens it', fs.readFileSync('scripts/manager-drawing.js', 'utf8').includes('onClick: () => self.openWindow()'));
     check('a swatch colour is one the colour parser reads', ['rgba(38, 38, 38, 0.7)'].every(c => parseColor(c)));
