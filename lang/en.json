@@ -134,6 +134,8 @@
 	"drawingTools.terrainMud": "Mud",
 	"drawingTools.terrainBoardwalk": "Boardwalk",
 	"drawingTools.terrainStream": "Stream",
+	"drawingTools.patchSize": "Patch size",
+	"drawingTools.patchHint": "Click a patch, then click the map to put one down, or drag to scatter several. A patch fades at its edges, so it hints at ground rather than filling the map.",
 	"drawingTools.tabUtilities": "Utilities",
 	"drawingTools.categoryGround": "Ground patches",
 	"drawingTools.stampPatchDirt": "Dirt patch",

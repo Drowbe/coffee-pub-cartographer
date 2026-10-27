@@ -41,6 +41,8 @@ Hooks.on('canvasTearDown', () => {
 
 // The walls tool has a button among Foundry's own wall tools. Registered at load, before the controls are first built.
 Hooks.on('getSceneControlButtons', controls => autoWallManager.addWallTool(controls));
+// The drawing tools window has one too, among the drawing tools or, failing those, the token tools.
+Hooks.on('getSceneControlButtons', controls => drawingTool.addDrawingTool(controls));
 
 Hooks.once('init', () => {
     game.keybindings.register(MODULE.ID, 'drawHotkey', {

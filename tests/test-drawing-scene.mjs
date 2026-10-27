@@ -20,6 +20,7 @@ const slice = (from, to) => {
     return src.slice(a, b);
 };
 const methods = slice('    // ===== STAMPS ====', '    // ===== THE TOOLS WINDOW');
+const toolButton = slice('    addDrawingTool(controls) {', '    /** Open the drawing tools window, or bring');
 const pointer = slice('    /** The button went down on the map', '    /** Stop drawing from the window. */');
 const strokeMode = slice('    _strokeMode() {', '    /**\n     * Set the stamp style');
 
@@ -95,6 +96,7 @@ return class Harness {
 ${strokeMode}
 ${methods}
 ${pointer}
+${toolButton}
 };
 })()`);
 

@@ -22,8 +22,10 @@ always draw.
 
 ## The drawing tools window
 
-Click **Tools** in the **Drawing Tools** section of the Cartographer bar, or choose **Drawing Tools**
-from the Cartographer button's right-click menu. A window opens with four tabs, **Drawing**,
+Click **Drawing Tools** (the pen and ruler) among Foundry's own scene controls down the left of the
+canvas -- with the drawing tools, or with the token tools if you have no drawing tools -- or click **Tools** in
+the **Drawing Tools** section of the Cartographer bar, or choose **Drawing Tools** from the Cartographer
+button's right-click menu. Clicking the scene control again closes the window. A window opens with four tabs, **Drawing**,
 **Stamps**, **Terrain** and **Utilities**, holding the same controls as the bar and more. The buttons in the bar stay where they are, and the
 two follow each other: choose a tool in one and the other shows it.
 
@@ -77,7 +79,6 @@ the colour you choose and are never the same twice:
 
 - **Trees** -- a tree and a pine.
 - **Plants** -- a shrub, a tuft of grass and flowers.
-- **Ground patches** -- small soft areas of dirt, gravel, sand, mud or snow, described below.
 - **Rocks** -- a rock and a pile of boulders.
 - **Features** -- a stump, a log, a pond and a campfire.
 - **Markers** -- the plus, X, dot, arrows and square the tool has always had.
@@ -99,14 +100,6 @@ The options under the stamps:
   or delete it with Foundry's own Drawing tools. It needs permission to create Drawings, which the GM
   always has; a player the world does not allow to create them gets a temporary stamp.
 
-### Ground patches
-
-A ground patch is a small area of ground, like the pond but for dirt: a loose blob whose edge fades
-away, so it hints at ground rather than filling the scene with it. Click to put one down; drag to
-scatter a few. They are large against other stamps, so a Medium patch is about a square and a half
-across. Each is made of several see-through layers, so a patch kept on the scene is a handful of
-Drawings, not one.
-
 ## Paths and ground
 
 The **Terrain** tab lays makeshift paths and ground. Click a kind, then **drag along the map**; the
@@ -121,6 +114,14 @@ path follows your stroke, smoothed, with the ground's texture scattered over it:
 does for stamps: off, the path is temporary and everyone sees it; on, it is written to the scene as Foundry
 Drawings. A kept path holds fewer specks of texture than a temporary one, to keep the scene light.
 Undo takes back a whole path.
+
+### Ground patches
+
+Below the paths on the Terrain tab, a ground patch is a small area of ground, like the pond but for dirt: a loose blob whose edge fades
+away, so it hints at ground rather than filling the scene with it. Click to put one down; drag to
+scatter a few. They are large against other stamps, so a Medium patch is about a square and a half
+across. Each is made of several see-through layers, so a patch kept on the scene is a handful of
+Drawings, not one.
 
 ## Utilities
 

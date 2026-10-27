@@ -4746,6 +4746,33 @@ class DrawingTool {
     // ===== THE TOOLS WINDOW ===========================================
     // ==================================================================
 
+    /**
+     * The window's button in Foundry's own scene controls: among the drawing tools if the user has
+     * them, and among the token tools, which everyone has, if not. It opens the window, and closes
+     * it again if it is open. Not offered to a player when the GM has turned player drawing off.
+     */
+    addDrawingTool(controls) {
+        const group = controls?.drawings ?? controls?.tokens;
+        if (!group) return;
+        const allowed = game.user.isGM || globalThis.BlacksmithUtils?.getSettingSafely?.(MODULE.ID, 'drawing.enablePlayerDrawing', true) !== false;
+        if (!allowed) return;
+        const tool = {
+            name: `${MODULE.ID}-drawing-tools`,
+            order: 30,
+            title: `${MODULE.ID}.drawingTools.title`,
+            icon: 'fa-solid fa-pen-ruler',
+            button: true,
+            visible: true,
+            onChange: () => {
+                const open = this.window;
+                if (open) void open.close();
+                else void this.openWindow();
+            }
+        };
+        if (Array.isArray(group.tools)) group.tools.push(tool);
+        else (group.tools ??= {})[tool.name] = tool;
+    }
+
     /** Open the drawing tools window, or bring the one that is open forward. */
     async openWindow(tab = null) {
         const { DrawingToolsWindow } = await import('./window-drawing.js');

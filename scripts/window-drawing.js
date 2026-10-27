@@ -27,6 +27,8 @@ const TABS = [
     { id: 'terrain', icon: 'fa-solid fa-road', labelKey: 'tabTerrain' },
     { id: 'utilities', icon: 'fa-solid fa-screwdriver-wrench', labelKey: 'tabUtilities' }
 ];
+/** The stamps that are ground, not things standing on it: they are shown with the paths. */
+const TERRAIN_CATEGORY = 'ground';
 /** How wide a path is, in grid squares. */
 const PATH_WIDTHS = [
     { id: '0.5', icon: 'fa-solid fa-minus', labelKey: 'widthNarrow' },
@@ -327,6 +329,8 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         const tint = state.brushSettings.color;
         let sections = '';
         for (const category of STAMP_CATEGORIES) {
+            // Ground patches are terrain, and are on the Terrain tab.
+            if (category.id === TERRAIN_CATEGORY) continue;
             const stamps = STAMPS.filter(stamp => stamp.category === category.id);
             if (!stamps.length) continue;
             const icon = { trees: 'fa-solid fa-tree', plants: 'fa-solid fa-seedling', ground: 'fa-solid fa-circle-half-stroke', rocks: 'fa-solid fa-mountain', features: 'fa-solid fa-campground', markers: 'fa-solid fa-location-dot' }[category.id];
@@ -359,7 +363,12 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         const options = this._segmented('drawing-path-width', localize('pathWidth'), PATH_WIDTHS, state.stamp.pathWidth, 'width')
             + this._toggle('keep', localize('keep'), state.stamp.keep && canKeep, { hint: localize(canKeep ? 'keepHint' : 'keepDenied'), disabled: !canKeep })
             + this._hint(localize('terrainHint'));
+        // Patches of ground are stamps -- click to place one, drag to scatter -- that live here with the paths.
+        const patches = STAMPS.filter(stamp => stamp.category === TERRAIN_CATEGORY);
+        const patchOptions = this._segmented('drawing-size', localize('patchSize'), SIZES, state.symbolSize, 'size') + this._hint(localize('patchHint'));
         return this._section('fa-solid fa-road', localize('terrain'), `<div class="cartographer-stamp-grid">${tiles}</div>`)
+            + this._section('fa-solid fa-circle-half-stroke', localize('categoryGround'),
+                `<div class="cartographer-stamp-grid">${patches.map(stamp => this._buildStamp(stamp, state.brushSettings.color)).join('')}</div>` + patchOptions)
             + this._section('fa-solid fa-sliders', localize('options'), options);
     }
 
