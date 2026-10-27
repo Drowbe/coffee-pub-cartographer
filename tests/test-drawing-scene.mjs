@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import {
     stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData } from '../scripts/utils-drawing.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
 const src = fs.readFileSync('scripts/manager-drawing.js', 'utf8');
@@ -162,16 +162,21 @@ console.log('\na wall stroke');
     await tool.createWallStroke([[12, 8], [388, 14]]);
     const walls = scene.creates.filter(([type]) => type === 'Wall');
     const lines = scene.creates.filter(([type]) => type === 'Drawing');
-    check('one wall, and its line with the dark one under it, are written', walls.length === 1 && walls[0][1].length === 1 && lines.length === 1 && lines[0][1].length === 2);
+    check('one wall is written, with its line, the dark line under it, and a disc at each end of both', walls.length === 1 && walls[0][1].length === 1 && lines.length === 1 && lines[0][1].length === 6);
     check('the wall is where the snap put it', walls[0][1][0].c.join() === '0,0,400,0');
-    check('the wall and the line carry the same group flag', walls[0][1][0].flags[MODULE.ID].drawnWall.id === lines[0][1][1].flags[MODULE.ID].drawnWall.id);
-    check('the line is the colour of the kind, at the brush\'s width', lines[0][1][1].strokeColor === wallKindById('wall').color && lines[0][1][1].strokeWidth === 6 && lines[0][1][1].strokeAlpha === 1);
+    check('the wall and the line carry the same group flag', walls[0][1][0].flags[MODULE.ID].drawnWall.id === lines[0][1][3].flags[MODULE.ID].drawnWall.id);
+    check('the line is the colour of the kind, at the brush\'s width', lines[0][1][3].strokeColor === wallKindById('wall').color && lines[0][1][3].strokeWidth === 6 && lines[0][1][3].strokeAlpha === 1);
     check('a plain wall is written as Foundry\'s defaults: no sense fields at all', !('door' in walls[0][1][0]) && !('light' in walls[0][1][0]) && !('threshold' in walls[0][1][0]));
-    check('the line is open: no fill', lines[0][1].every(d => d.fillType === 0));
-    check('the line runs along the wall', lines[0][1].every(d => d.shape.points.join() === '0,0,400,0' && d.x === 0 && d.y === 0));
-    check('under the line is a darker, wider one, so the wall shows on any map', lines[0][1][0].strokeColor === WALL_CASING && lines[0][1][0].strokeWidth === 10 && lines[0][1][0].sort < lines[0][1][1].sort);
-    check('both carry the same group flag, so the eraser takes both', lines[0][1][0].flags[MODULE.ID].drawnWall.id === lines[0][1][1].flags[MODULE.ID].drawnWall.id);
-    check('it is one thing to take back, with both kinds in it', tool._kept.length === 1 && tool._kept[0].wallIds.length === 1 && tool._kept[0].drawingIds.length === 2);
+    check('the line is open: no fill', [lines[0][1][0], lines[0][1][3]].every(d => d.fillType === 0));
+    check('the line runs along the wall', [lines[0][1][0], lines[0][1][3]].every(d => d.shape.points.join() === '0,0,400,0' && d.x === 0 && d.y === 0));
+    check('under the line is a darker, wider one, so the wall shows on any map', lines[0][1][0].strokeColor === WALL_CASING && lines[0][1][0].strokeWidth === 10 && lines[0][1][0].sort < lines[0][1][3].sort);
+    const discs = lines[0][1].filter(d => d.fillType === 1);
+    check('the ends are round: a dark disc and a coloured one at each end', discs.length === 4 && discs.filter(d => d.fillColor === WALL_CASING).length === 2 && discs.filter(d => d.fillColor === wallKindById('wall').color).length === 2);
+    check('the discs are as wide as the lines they cap', discs.filter(d => d.fillColor === WALL_CASING).every(d => d.shape.width >= 10 && d.shape.width <= 11) && discs.filter(d => d.fillColor !== WALL_CASING).every(d => d.shape.width >= 6 && d.shape.width <= 7));
+    check('the discs sit on the ends of the wall', [0, 400].every(x => discs.some(d => Math.abs(d.x + d.shape.width / 2 - x) <= 1)));
+    check('dark below, colour above: every dark thing sorts under every coloured one', Math.max(...lines[0][1].filter(d => d.sort === 0).map(d => d.sort)) < Math.min(...lines[0][1].filter(d => d.sort === 1).map(d => d.sort)) && lines[0][1].filter(d => d.sort === 0).length === 3);
+    check('both carry the same group flag, so the eraser takes both', lines[0][1].every(d => d.flags[MODULE.ID].drawnWall.id === lines[0][1][0].flags[MODULE.ID].drawnWall.id));
+    check('it is one thing to take back, with both kinds in it', tool._kept.length === 1 && tool._kept[0].wallIds.length === 1 && tool._kept[0].drawingIds.length === 6);
     check('the window is told', tool.changes >= 1);
 }
 {
@@ -193,6 +198,10 @@ console.log('\na wall stroke');
     check('a freehand stroke along two sides makes a few walls', walls.length >= 2 && walls.length <= 4, `got ${walls.length}`);
     check('every wall is four numbers', walls.every(w => w.c.length === 4 && w.c.every(Number.isFinite)));
     check('one line is drawn over all of them', scene.creates.filter(([type]) => type === 'Drawing').length === 1);
+    const drawn = scene.creates.find(([type]) => type === 'Drawing')[1];
+    const corners = walls.length + 1;
+    check('a corner where two walls meet has a disc, so it is a joint and not two slabs', drawn.filter(d => d.fillType === 1).length === corners * 2);
+    check('and a run of walls is still one line over one dark line', drawn.filter(d => d.fillType === 0).length === 2);
     check('the walls are one group', new Set(walls.map(w => w.flags[MODULE.ID].drawnWall.id)).size === 1);
 }
 {
@@ -236,7 +245,7 @@ console.log('\nkinds of wall');
         tool.state.wallKind = kind;
         setup(tool);
         await tool.createWallStroke([[0, 0], [400, 0]]);
-        return { tool, wall: scene.creates.find(([type]) => type === 'Wall')[1][0], line: scene.creates.find(([type]) => type === 'Drawing')[1][1], casing: scene.creates.find(([type]) => type === 'Drawing')[1][0] };
+        return { tool, wall: scene.creates.find(([type]) => type === 'Wall')[1][0], line: scene.creates.find(([type]) => type === 'Drawing')[1][3], casing: scene.creates.find(([type]) => type === 'Drawing')[1][0] };
     };
     const sense = CONST.EDGE_SENSE_TYPES;
     {
@@ -314,9 +323,9 @@ console.log('\nundo');
     const tool = make();
     await tool.createWallStroke([[0, 0], [300, 0]]);
     await tool.createWallStroke([[0, 100], [300, 100]]);
-    check('two strokes, two things to take back', tool._kept.length === 2 && scene.walls.size === 2 && scene.drawings.size === 4);
+    check('two strokes, two things to take back', tool._kept.length === 2 && scene.walls.size === 2 && scene.drawings.size === 12);
     await tool._undoKept();
-    check('undo takes back the last wall and its line, and no more', scene.walls.size === 1 && scene.drawings.size === 2 && tool._kept.length === 1);
+    check('undo takes back the last wall and its line, and no more', scene.walls.size === 1 && scene.drawings.size === 6 && tool._kept.length === 1);
     const remaining = [...scene.walls.map.values()][0];
     check('and it is the first that is left', remaining.c.join() === '0,0,300,0');
     await tool._undoKept();
@@ -632,14 +641,14 @@ console.log('\nthe eraser');
         const tool = await strokeAndErase(t => t.createWallStroke([[0, 0], [400, 0]]), [200, 8]);
         check('erasing on a wall stroke takes the wall and its line', scene.walls.size === 0 && scene.drawings.size === 0);
         const entry = tool._kept.at(-1);
-        check('and is one thing to undo, holding both', entry.kind === 'erase' && entry.restore.Wall.length === 1 && entry.restore.Drawing.length === 2);
+        check('and is one thing to undo, holding both', entry.kind === 'erase' && entry.restore.Wall.length === 1 && entry.restore.Drawing.length === 6);
         await tool._undoKept();
-        check('undo puts back the wall and the line, with their own ids', scene.walls.size === 1 && scene.drawings.size === 2 && scene.walls.has(entry.restore.Wall[0]._id));
+        check('undo puts back the wall and the line, with their own ids', scene.walls.size === 1 && scene.drawings.size === 6 && scene.walls.has(entry.restore.Wall[0]._id));
         check('what comes back is what went: the same wall', [...scene.walls.map.values()][0].c.join() === '0,0,400,0');
     }
     {
         await strokeAndErase(t => t.createWallStroke([[0, 0], [400, 0]]), [200, 300]);
-        check('erasing away from it takes nothing', scene.walls.size === 1 && scene.drawings.size === 2);
+        check('erasing away from it takes nothing', scene.walls.size === 1 && scene.drawings.size === 6);
     }
     {
         const tool = await strokeAndErase(async t => { t.state.stamp.keep = true; t._placeStamp('shrub', 640, 480); await new Promise(r => setTimeout(r, 10)); }, [640, 480]);
@@ -687,7 +696,7 @@ console.log('\nthe eraser');
         isGM = false;
         tool._eraseAt(200, 0);
         await tool._commitErase();
-        check('a player cannot erase what is not theirs', scene.drawings.size === 2 && scene.walls.size === 1);
+        check('a player cannot erase what is not theirs', scene.drawings.size === 6 && scene.walls.size === 1);
         isGM = true;
     }
     {
@@ -725,14 +734,14 @@ console.log('\nthe eraser');
         await tool.createWallStroke([[0, 300], [400, 300]]);
         confirmAnswer = false;
         await tool.eraseAllKept();
-        check('erase all asks first, and does nothing if refused', scene.walls.size === 2 && scene.drawings.size === 4);
+        check('erase all asks first, and does nothing if refused', scene.walls.size === 2 && scene.drawings.size === 12);
         confirmAnswer = true;
         await tool.eraseAllKept();
         check('erase all takes every stroke, walls and lines', scene.walls.size === 0 && scene.drawings.size === 0);
         const entry = tool._kept.at(-1);
-        check('as one thing to undo', entry.kind === 'erase' && entry.restore.Wall.length === 2 && entry.restore.Drawing.length === 4);
+        check('as one thing to undo', entry.kind === 'erase' && entry.restore.Wall.length === 2 && entry.restore.Drawing.length === 12);
         await tool._undoKept();
-        check('which puts them all back', scene.walls.size === 2 && scene.drawings.size === 4);
+        check('which puts them all back', scene.walls.size === 2 && scene.drawings.size === 12);
         isGM = false;
         scene.creates.length = 0;
         await tool.eraseAllKept();

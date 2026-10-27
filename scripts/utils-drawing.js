@@ -89,6 +89,26 @@ export function strokeDrawingData(path, { color, alpha = 1, width, flags = {}, n
     };
 }
 
+/**
+ * A filled disc, as a polygon Drawing: the round cap on the end of a wall line, and the joint where
+ * two meet, so a corner is a corner and not two slabs.
+ * @param {{ color: string, alpha?: number, flags?: object, solid?: number, sort?: number }} style
+ *   `solid` is CONST.DRAWING_FILL_TYPES.SOLID.
+ */
+export function discDrawingData(x, y, radius, { color, alpha = 1, flags = {}, solid = 1, sort = 0 }) {
+    const steps = 16;
+    const ring = [];
+    for (let i = 0; i < steps; i++) ring.push(x + Math.cos((i / steps) * Math.PI * 2) * radius, y + Math.sin((i / steps) * Math.PI * 2) * radius);
+    return {
+        ...polygonShape(ring),
+        bezierFactor: 0,
+        sort,
+        fillType: solid, fillColor: color, fillAlpha: alpha,
+        strokeWidth: 0, strokeColor: color, strokeAlpha: 0,
+        flags
+    };
+}
+
 // ------------------------------------------------------------------
 // Finding what is under the eraser
 // ------------------------------------------------------------------

@@ -6,7 +6,7 @@ import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
 import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor } from './utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData } from './utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData } from './utils-drawing.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
 
 // ================================================================== 
@@ -4570,11 +4570,21 @@ class DrawingTool {
         const path = segmentsPath(segments);
         const none = CONST.DRAWING_FILL_TYPES.NONE;
         const weight = this.state.brushSettings.size;
-        const casing = strokeDrawingData(path, { color: WALL_CASING, alpha: 0.85, width: weight + 4, flags, none, sort: 0 });
-        const line = strokeDrawingData(path, { color: wallKindById(kind).color, alpha: 1, width: weight, flags, none, sort: 1 });
+        const solid = CONST.DRAWING_FILL_TYPES.SOLID;
+        const color = wallKindById(kind).color;
+        // A disc at every end and corner, dark under and coloured over, so ends are round and corners meet.
+        const joints = [];
+        for (let i = 0; i < path.length; i += 2) joints.push([path[i], path[i + 1]]);
+        const discs = (radius, fill, sort) => joints.map(([x, y]) => discDrawingData(x, y, radius, { color: fill, alpha: 1, flags, solid, sort }));
+        const drawn = [
+            strokeDrawingData(path, { color: WALL_CASING, alpha: 1, width: weight + 4, flags, none, sort: 0 }),
+            ...discs(weight / 2 + 2, WALL_CASING, 0),
+            strokeDrawingData(path, { color, alpha: 1, width: weight, flags, none, sort: 1 }),
+            ...discs(weight / 2, color, 1)
+        ];
         try {
             const walls = await scene.createEmbeddedDocuments('Wall', wallData);
-            const lines = await scene.createEmbeddedDocuments('Drawing', [casing, line]);
+            const lines = await scene.createEmbeddedDocuments('Drawing', drawn);
             this._pushKept({
                 kind: 'wall',
                 wallIds: (walls ?? []).map(doc => doc.id),

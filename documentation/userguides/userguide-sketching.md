@@ -153,7 +153,7 @@ playable at once. Click a kind, then press, drag and let go on the map:
 - **Window** -- sight and light pass close up and fade over two squares; movement and sound are stopped.
 
 Each kind is written the way Foundry's own wall tools write it, and the line over it is a colour of its
-own, with a dark edge so it shows on a pale map, so you can tell the kinds apart. The walls themselves
+own, with a dark edge so it shows on a pale map and round ends and corners, so you can tell the kinds apart. The walls themselves
 are Foundry's, and show, as any wall does, when the Walls controls are selected.
 
 - **Straight** -- one wall, from where you press to where you let go.
