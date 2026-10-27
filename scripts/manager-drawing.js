@@ -5,8 +5,9 @@
 import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
-import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor } from './utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData } from './utils-drawing.js';
+import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor, stampSquares } from './utils-stamps.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks } from './utils-drawing.js';
+import { SKIP_JOIN } from './utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
 
 // ================================================================== 
@@ -3531,7 +3532,9 @@ class DrawingTool {
     _strokeMode() {
         const mode = this.state.drawingMode;
         if (mode === 'terrain') return 'sketch';
-        return mode === 'wall' ? (this.state.wallShape === 'sketch' ? 'sketch' : 'line') : mode;
+        // A door or a window is two points, whatever shape is chosen for the walls.
+        if (mode === 'wall') return this.state.wallShape === 'sketch' && !isOpeningKind(this.state.wallKind) ? 'sketch' : 'line';
+        return mode;
     }
 
     /**
@@ -4167,13 +4170,13 @@ class DrawingTool {
     // ===== STAMPS =====================================================
     // ==================================================================
 
-    /** The pixel size of the square a Small, Medium or Large stamp fits in, before the stamp's own scale. */
-    _symbolPixels() {
-        return {
-            small: DrawingTool.strSmallSymbolSize,
-            medium: DrawingTool.strMediumSymbolSize,
-            large: DrawingTool.strLargeSymbolSize
-        }[this.state.symbolSize] ?? DrawingTool.strMediumSymbolSize;
+    /**
+     * How wide a stamp is, in pixels: its size in grid squares -- a tree is 1, 3 or 6 -- by the grid, so a
+     * tree is a tree whatever the scene's scale.
+     */
+    _stampPixels(kind) {
+        const grid = Number(canvas.grid?.size) || 100;
+        return grid * (stampSquares(kind, this.state.symbolSize) ?? 1);
     }
 
     /** What the next stamp will look like -- its seed, turn, flip and size -- rolled ahead so the preview is what is placed. */
@@ -4243,7 +4246,7 @@ class DrawingTool {
     _scatterStep(kind) {
         const stamp = stampById(kind);
         const apart = stamp.category === 'ground' ? 0.2 : 0.6;
-        return Math.max(6, this._symbolPixels() * stamp.scale * this.state.stamp.spacing * apart);
+        return Math.max(6, this._stampPixels(kind) * this.state.stamp.spacing * apart);
     }
 
     _scatterTo(event) {
@@ -4272,7 +4275,7 @@ class DrawingTool {
         const roll = this._peekRoll();
         const graphics = new PIXI.Graphics();
         drawStamp(graphics, buildStamp(kind, roll), stampPalette(kind, this._stampTint(kind)), {
-            x, y, size: this._symbolPixels() * stamp.scale * roll.jitter, alpha: 0.55
+            x, y, size: this._stampPixels(kind) * roll.jitter, alpha: 0.55
         });
         layer.addChild(graphics);
         this._previewSymbol = graphics;
@@ -4286,7 +4289,7 @@ class DrawingTool {
         const stamp = stampById(kind);
         if (!stamp || stamp.legacy) return;
         const roll = this._takeRoll();
-        const size = this._symbolPixels() * stamp.scale * roll.jitter;
+        const size = this._stampPixels(kind) * roll.jitter;
         const tint = this._stampTint(kind);
         const prims = buildStamp(kind, roll);
         const palette = stampPalette(kind, tint);
@@ -4545,17 +4548,32 @@ class DrawingTool {
             return;
         }
         const grid = Number(canvas.grid?.size) || 100;
-        const segments = wallStrokeSegments({
-            shape: this.state.wallShape,
+        const kind = wallKindById(this.state.wallKind)?.id ?? 'wall';
+        const opening = isOpeningKind(kind);
+        let segments = wallStrokeSegments({
+            // A door or a window is two points, the first and the last, however it was drawn.
+            shape: opening ? 'line' : this.state.wallShape,
             points,
             snap: point => this._wallSnap(point),
             epsilon: Math.max(2, grid * 0.12),
             closeDistance: grid * 0.4
         });
+
+        // An opening drawn on a solid wall is fitted onto it, and the wall is cut around it, as the
+        // walls tool does: what is before it and what is after it are left as walls.
+        let cut = null;
+        if (opening) {
+            const plain = scene.walls.contents.filter(wall => this._isSolidWall(wall));
+            const fit = fitOpeningToWall(plain.map(wall => [...wall.c]), segments[0] ?? [points[0], points[points.length - 1]], { grid });
+            if (fit) {
+                cut = { wall: plain[fit.wall], pieces: fit.pieces };
+                segments = [fit.segment];
+            }
+        }
         if (!segments.length) return;
 
         const group = foundry.utils.randomID();
-        const kind = wallKindById(this.state.wallKind)?.id ?? 'wall';
+        const wallFlags = { [MODULE.ID]: { drawnWall: { id: group, kind, ...(cut ? { cutFrom: { id: cut.wall.id, c: [...cut.wall.c] } } : {}) } } };
         const flags = { [MODULE.ID]: { drawnWall: { id: group, kind } } };
         const levels = scene.levels?.size > 1 && canvas.level?.id ? { levels: [canvas.level.id] } : {};
         // What each kind of wall is made of -- what it stops, what it lets through -- as Foundry's own tools make it.
@@ -4564,7 +4582,14 @@ class DrawingTool {
             doorTypes: CONST.WALL_DOOR_TYPES,
             doorStates: CONST.WALL_DOOR_STATES
         }, { doorState: this.state.wallDoor, windowDistance: 2 * (Number(canvas.dimensions?.distance) || 5) });
-        const wallData = segments.map(([a, b]) => ({ c: [a[0], a[1], b[0], b[1]], ...made, flags, ...levels }));
+        const wallData = segments.map(([a, b]) => ({ c: [a[0], a[1], b[0], b[1]], ...made, flags: wallFlags, ...levels }));
+        // The rest of the wall an opening was cut from, after the opening, is a wall of its own.
+        if (cut && cut.pieces.length === 2) {
+            const tail = cut.wall.toObject();
+            delete tail._id;
+            tail.c = cut.pieces[1];
+            wallData.push(tail);
+        }
         // The line over them is the colour of the kind, so a kind can be told from another on the map,
         // laid over a darker, wider line, so it shows on a pale map as well as a dark one.
         const path = segmentsPath(segments);
@@ -4580,15 +4605,27 @@ class DrawingTool {
             strokeDrawingData(path, { color: WALL_CASING, alpha: 1, width: weight + 4, flags, none, sort: 0 }),
             ...discs(weight / 2 + 2, WALL_CASING, 0),
             strokeDrawingData(path, { color, alpha: 1, width: weight, flags, none, sort: 1 }),
-            ...discs(weight / 2, color, 1)
+            ...discs(weight / 2, color, 1),
+            // A door has its leaf, a secret door its dot, a window its pane: what the button shows.
+            ...(opening ? openingMarks(kind, segments[0], { weight, color, casing: WALL_CASING, flags, solid, none, sort: 2 }) : [])
         ];
+        const options = cut ? { [SKIP_JOIN]: true } : {};
+        // The wall as it was, taken before anything is written: cutting it changes it.
+        const original = cut ? { id: cut.wall.id, c: [...cut.wall.c], data: cut.wall.toObject() } : null;
         try {
-            const walls = await scene.createEmbeddedDocuments('Wall', wallData);
+            const walls = await scene.createEmbeddedDocuments('Wall', wallData, options);
+            if (cut) {
+                // The wall it was cut from is cut short to what is before it, or goes if nothing is.
+                if (cut.pieces.length) await scene.updateEmbeddedDocuments('Wall', [{ _id: cut.wall.id, c: cut.pieces[0] }], options);
+                else await scene.deleteEmbeddedDocuments('Wall', [cut.wall.id]);
+            }
             const lines = await scene.createEmbeddedDocuments('Drawing', drawn);
             this._pushKept({
                 kind: 'wall',
                 wallIds: (walls ?? []).map(doc => doc.id),
-                drawingIds: (lines ?? []).map(doc => doc.id)
+                drawingIds: (lines ?? []).map(doc => doc.id),
+                // What it was cut from, to make it whole again if this is taken back.
+                cut: original
             });
         } catch (error) {
             console.error(`${MODULE.NAME}: could not draw the wall`, error);
@@ -4599,6 +4636,12 @@ class DrawingTool {
                 stackKey: `${MODULE.ID}-wall`
             });
         }
+    }
+
+    /** A wall that an opening can be cut into: not a door, not a window. */
+    _isSolidWall(wall) {
+        const sense = CONST.EDGE_SENSE_TYPES ?? CONST.WALL_SENSE_TYPES;
+        return !wall.door && wall.light !== sense.PROXIMITY && wall.sight !== sense.PROXIMITY;
     }
 
     // ==================================================================
@@ -4640,8 +4683,13 @@ class DrawingTool {
             const exists = (collection, ids) => (ids ?? []).filter(id => collection.has(id));
             const walls = exists(scene.walls, entry.wallIds);
             const drawings = exists(scene.drawings, entry.drawingIds);
-            if (walls.length) await scene.deleteEmbeddedDocuments('Wall', walls);
+            if (walls.length) await scene.deleteEmbeddedDocuments('Wall', walls, entry.cut ? { [SKIP_JOIN]: true } : {});
             if (drawings.length) await scene.deleteEmbeddedDocuments('Drawing', drawings);
+            // An opening that was cut out of a wall: the wall is whole again.
+            if (entry.cut) {
+                if (scene.walls.has(entry.cut.id)) await scene.updateEmbeddedDocuments('Wall', [{ _id: entry.cut.id, c: entry.cut.c }], { [SKIP_JOIN]: true });
+                else await scene.createEmbeddedDocuments('Wall', [entry.cut.data], { keepId: true, [SKIP_JOIN]: true });
+            }
         } catch (error) {
             console.error(`${MODULE.NAME}: could not take it back`, error);
         }

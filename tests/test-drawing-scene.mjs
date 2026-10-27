@@ -7,9 +7,10 @@
 // It does not run Foundry: that Foundry accepts the data is for the map to show.
 import fs from 'node:fs';
 import {
-    stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor
+    stampSquares, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks } from '../scripts/utils-drawing.js';
+import { SKIP_JOIN } from '../scripts/utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
 const src = fs.readFileSync('scripts/manager-drawing.js', 'utf8');
@@ -67,14 +68,23 @@ const makeScene = () => {
         failNext: null,
         async createEmbeddedDocuments(type, data, options = {}) {
             if (scene.failNext === type) { scene.failNext = null; throw new Error('refused'); }
-            scene.creates.push([type, data]);
+            scene.creates.push([type, data, options]);
             const collection = type === 'Wall' ? scene.walls : scene.drawings;
             return data.map(d => {
                 const id = options.keepId && d._id ? d._id : `${type}${++counter}`;
-                const doc = { ...d, id, isOwner: true, toObject() { return { ...d, _id: id }; } };
+                const doc = { ...d, id, isOwner: true, toObject() { const { id: own, isOwner, toObject, ...rest } = doc; return { ...rest, _id: own }; } };
                 collection.map.set(id, doc);
                 return doc;
             });
+        },
+        wallUpdates: [],
+        async updateEmbeddedDocuments(type, updates, options = {}) {
+            const collection = type === 'Wall' ? scene.walls : scene.drawings;
+            for (const update of updates) {
+                Object.assign(collection.map.get(update._id), update);
+                scene.wallUpdates.push([type, update, options]);
+            }
+            return [];
         },
         updates: [],
         async update(changes) { scene.updates.push(changes); },
@@ -237,6 +247,129 @@ console.log('\na wall stroke');
     check('if the line is refused the user is told, and nothing is recorded to undo', notices.some(n => /Could not draw/.test(n.title)) && tool._kept.length === 0);
 }
 
+console.log('\ndoors and windows are two points');
+{
+    const sketch = [];
+    for (let i = 0; i <= 30; i++) sketch.push([i * 10, 40 * Math.sin(i / 3)]);
+    const toolFor = kind => { const t = make(); t.state.wallKind = kind; t.state.wallShape = 'sketch'; return t; };
+    check('a door drawn freehand strokes as a line', toolFor('door')._strokeMode() === 'line' && toolFor('secret')._strokeMode() === 'line' && toolFor('window')._strokeMode() === 'line');
+    check('a wall drawn freehand still strokes as a sketch', toolFor('wall')._strokeMode() === 'sketch' && toolFor('terrain')._strokeMode() === 'sketch');
+    for (const kind of ['door', 'secret', 'window']) {
+        scene = makeScene();
+        const tool = toolFor(kind);
+        await tool.createWallStroke(sketch);
+        const walls = scene.creates.find(([type]) => type === 'Wall')[1];
+        check(`${kind}: a freehand stroke is one wall, from the first point to the last`, walls.length === 1 && walls[0].c.join() === '0,0,300,0', walls.map(w => w.c.join()).join(' | '));
+    }
+    scene = makeScene();
+    const wall = toolFor('wall');
+    await wall.createWallStroke(sketch);
+    check('where a freehand wall is still several', scene.creates.find(([type]) => type === 'Wall')[1].length > 1);
+    check('isOpeningKind says which', isOpeningKind('door') && isOpeningKind('secret') && isOpeningKind('window') && !isOpeningKind('wall') && !isOpeningKind('invisible'));
+}
+
+console.log('\nthe marks on a door and a window');
+{
+    const draw = async kind => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.wallKind = kind;
+        await tool.createWallStroke([[0, 0], [100, 0]]);
+        return scene.creates.find(([type]) => type === 'Drawing')[1];
+    };
+    const plain = await draw('wall');
+    const door = await draw('door');
+    const secret = await draw('secret');
+    const window_ = await draw('window');
+    check('a wall has no mark: just its lines and discs', plain.length === 6);
+    check('a door has a leaf over its line', door.length === 7 && door.at(-1).sort === 2 && door.at(-1).fillType === 1 && door.at(-1).strokeColor === wallKindById('door').color && door.at(-1).fillColor === WALL_CASING);
+    check('the leaf is across the middle, wider than the line, and not the whole door', (() => { const leaf = door.at(-1); return leaf.shape.width < 100 && leaf.shape.width > 40 && leaf.shape.height > 6 && Math.abs(leaf.x + leaf.shape.width / 2 - 50) < 2; })());
+    check('a secret door has the leaf and a dot', secret.length === 8 && secret.at(-2).fillType === 1 && secret.at(-1).fillColor === wallKindById('secret').color && secret.at(-1).shape.width < 15);
+    check('a window has a white pane down it', window_.length === 7 && window_.at(-1).strokeColor === '#ffffff' && window_.at(-1).fillType === 0 && window_.at(-1).sort === 2);
+    check('the marks carry the group flag, so the eraser takes them too', [door, secret, window_].every(list => list.every(d => d.flags[MODULE.ID].drawnWall.id === list[0].flags[MODULE.ID].drawnWall.id)));
+    check('an opening too short to hold a mark has none', openingMarks('door', [[0, 0], [10, 0]], { weight: 6, color: '#0f0', casing: '#000' }).length === 0);
+    check('and a kind that has none, none', openingMarks('wall', [[0, 0], [100, 0]], { weight: 6, color: '#fff', casing: '#000' }).length === 0);
+    const turned = openingMarks('door', [[0, 0], [0, 100]], { weight: 6, color: '#0f0', casing: '#000' })[0];
+    check('on a door that runs down the map the leaf runs down it', turned.shape.height > turned.shape.width);
+}
+
+console.log('\nan opening drawn on a wall');
+{
+    const setup = async (wallC = [0, 0, 1000, 0], extra = {}) => {
+        scene = makeScene();
+        await scene.createEmbeddedDocuments('Wall', [{ c: wallC, flags: {}, ...extra }]);
+        scene.creates.length = 0;
+        const tool = make();
+        return tool;
+    };
+    {
+        const tool = await setup();
+        tool.state.wallKind = 'door';
+        await tool.createWallStroke([[300, 10], [400, -8]]);
+        const created = scene.creates.find(([type]) => type === 'Wall');
+        check('a door on a wall is fitted onto it, on the wall\'s line', created[1][0].c.join() === '300,0,400,0');
+        check('and the rest of the wall after it is a wall of its own', created[1].length === 2 && created[1][1].c.join() === '400,0,1000,0');
+        check('the wall is cut short to what is before the door', scene.wallUpdates.some(([type, u]) => type === 'Wall' && u.c.join() === '0,0,300,0'));
+        check('so the wall is a wall, a door and a wall', scene.walls.size === 3);
+        check('it is cut without the join hook moving its ends', created[2][SKIP_JOIN] === true && scene.wallUpdates.every(([, , o]) => o[SKIP_JOIN] === true));
+        check('the door remembers what it was cut from', created[1][0].flags[MODULE.ID].drawnWall.cutFrom.c.join() === '0,0,1000,0');
+        check('the tail is a plain wall, not a door', !created[1][1].door && !('cutFrom' in (created[1][1].flags?.[MODULE.ID]?.drawnWall ?? {})));
+        await tool._undoKept();
+        const left = [...scene.walls.map.values()];
+        check('undo takes the door and puts the wall back whole', scene.walls.size === 1 && left[0].c.join() === '0,0,1000,0');
+        check('and takes the line and its marks', scene.drawings.size === 0);
+    }
+    {
+        const tool = await setup();
+        tool.state.wallKind = 'window';
+        await tool.createWallStroke([[0, 6], [100, 4]]);
+        check('a window at the start of a wall leaves one wall, after it', scene.walls.size === 2 && scene.wallUpdates.some(([, u]) => u.c.join() === '100,0,1000,0'));
+        check('and the window is on the wall', [...scene.walls.map.values()].some(w => w.c.join() === '0,0,100,0' && w.threshold));
+    }
+    {
+        const tool = await setup([0, 0, 100, 0]);
+        tool.state.wallKind = 'door';
+        await tool.createWallStroke([[3, 5], [96, -4]]);
+        const survivors = [...scene.walls.map.values()];
+        check('a door that fills a wall replaces it', survivors.length === 1 && survivors[0].door === 1 && survivors[0].c.join() === '0,0,100,0');
+        await tool._undoKept();
+        const back = [...scene.walls.map.values()];
+        check('and taking it back puts the wall back, with its own id', back.length === 1 && !back[0].door && scene.walls.has(tool._kept.length ? 'x' : back[0].id));
+    }
+    {
+        const tool = await setup();
+        tool.state.wallKind = 'door';
+        await tool.createWallStroke([[300, 400], [400, 400]]);
+        check('a door away from any wall is drawn where it is, and cuts nothing', scene.walls.size === 2 && scene.wallUpdates.length === 0);
+        check('and joins as any wall does', scene.creates.find(([type]) => type === 'Wall')[2][SKIP_JOIN] === undefined);
+    }
+    {
+        const tool = await setup();
+        tool.state.wallKind = 'door';
+        await tool.createWallStroke([[500, -50], [500, 50]]);
+        check('a door drawn across a wall, not along it, is not fitted to it', scene.wallUpdates.length === 0);
+    }
+    {
+        const tool = await setup([0, 0, 1000, 0], { door: 1 });
+        tool.state.wallKind = 'window';
+        await tool.createWallStroke([[300, 0], [400, 0]]);
+        check('a door is not a wall to cut another opening into', scene.wallUpdates.length === 0);
+    }
+    {
+        const tool = await setup();
+        tool.state.wallKind = 'wall';
+        await tool.createWallStroke([[300, 0], [400, 0]]);
+        check('a plain wall drawn on a wall cuts nothing', scene.wallUpdates.length === 0 && scene.walls.size === 2);
+    }
+    {
+        const tool = await setup();
+        tool.state.wallKind = 'door';
+        tool.state.wallSnap = false;
+        await tool.createWallStroke([[300, 10], [400, -8]]);
+        check('with snap off the door is still fitted onto the wall', scene.creates.find(([type]) => type === 'Wall')[1][0].c.join() === '300,0,400,0');
+    }
+}
+
 console.log('\nkinds of wall');
 {
     const written = async (kind, setup = () => {}) => {
@@ -368,7 +501,7 @@ console.log('\na stamp, temporary');
     check('it is a graphic on the canvas layer and a record', tool.services.canvasLayer.added.length === 1 && tool._pixiDrawings.length === 1 && record.stampKind === 'tree');
     check('it is the one to undo, and cleanup is scheduled', tool._lastDrawing === record && tool.scheduled === true);
     check('it is broadcast with everything needed to draw it elsewhere', added.length === 1 && ['stampKind', 'seed', 'rotation', 'mirror', 'size', 'x', 'y', 'drawingId', 'userId'].every(k => added[0][k] !== undefined));
-    check('the size is a tree at medium: 80 by the stamp scale, give or take the variation', added[0].size > 80 * 1.5 * 0.84 && added[0].size < 80 * 1.5 * 1.16);
+    check('the size is a tree at medium: 3 grid squares, give or take the variation', added[0].size > 300 * 0.84 && added[0].size < 300 * 1.16);
     check('natural colours: no tint is sent', added[0].tint === null);
     check('nothing is written to the scene', scene.creates.length === 0);
     check('a legacy marker is not placed this way', (() => { const t = make(); t._placeStamp('plus', 0, 0); return t._pixiDrawings.length === 0; })());
@@ -389,7 +522,7 @@ console.log('\na stamp, temporary');
     small.state.stamp.jitter = false;
     added.length = 0;
     small._placeStamp('rock', 0, 0);
-    check('without variation the size is exact: small, by the rock\'s scale', added[0].size === 40 * stampById('rock').scale);
+    check('without variation the size is exact: a small rock, in grid squares', added[0].size === 100 * stampSquares('rock', 'small'));
     const flat = make();
     flat.state.stamp.rotate = false;
     added.length = 0;
@@ -489,7 +622,7 @@ console.log('\nscattering');
     check('dragging after a nature stamp scatters more', tool._scatter && tool._scatter.x === 100);
     tool._scatterTo({ x: 105, y: 100 });
     check('a short move places nothing', tool._pixiDrawings.length === 0);
-    const step = 80 * stampById('tree').scale * 0.6;
+    const step = 300 * 0.6;
     tool._scatterTo({ x: 100 + step * 1.5, y: 100 });
     check('a move of enough places another', tool._pixiDrawings.length === 1);
     tool._scatterTo({ x: 100 + step * 3.5, y: 100 });
@@ -801,8 +934,8 @@ console.log('\npainting ground: a drag that does not stop');
     tool.state.stamp.jitter = false;
     const treeStep = make()._scatterStep('tree');
     const patchStep = tool._scatterStep('patch-dirt');
-    check('ground is painted at a fraction of its size, so dabs run together', patchStep === 80 * 2.0 * 0.2 && patchStep < 80 * 2.0 * 0.5);
-    check('where a tree is put down further apart', treeStep === 80 * 1.5 * 0.6);
+    check('ground is painted at a fraction of its size, so dabs run together', patchStep === 300 * 0.2 && patchStep < 300 * 0.5);
+    check('where a tree is put down further apart', treeStep === 300 * 0.6);
     check('wider spacing spreads it, and it never falls below a few pixels', (() => { const t = make(); t.state.stamp.spacing = 3; return t._scatterStep('patch-dirt') === patchStep * 3 && (() => { t.state.symbolSize = 'small'; t.state.stamp.spacing = 0.01; return t._scatterStep('patch-dirt') >= 6; })(); })());
     tool._beginScatter({ x: 0, y: 0 });
     tool.stampSymbol = () => tool._placeStamp('patch-dirt', 0, 0);

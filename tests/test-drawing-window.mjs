@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import { STAMPS, STAMP_CATEGORIES, stampSvg, parseColor } from '../scripts/utils-stamps.js';
 import { TERRAINS, terrainSvg } from '../scripts/utils-terrain.js';
-import { WALL_KINDS, wallKindSvg, isDoorKind } from '../scripts/utils-drawing.js';
+import { WALL_KINDS, wallKindSvg, isDoorKind, isOpeningKind } from '../scripts/utils-drawing.js';
 
 const src = fs.readFileSync('scripts/window-drawing.js', 'utf8');
 const managerSrc = fs.readFileSync('scripts/manager-drawing.js', 'utf8');
@@ -139,6 +139,13 @@ console.log('\nthe Walls tab');
     const drawing = build(tool({ state: { ...tool().state, drawingMode: 'wall', wallKind: 'window' } }), 'walls')._buildBody();
     check('when it is, the kind chosen is active', count(drawing, /cartographer-stamp is-active/g) === 1 && /is-active" data-action="drawing-wall" data-kind="window"/.test(drawing));
     check('the shape, snap and weight are there', has(body, 'data-shape="line"') && has(body, 'data-shape="sketch"') && has(body, 'name="wallSnap"') && has(body, 'data-action="drawing-weight"'));
+    for (const kind of ['door', 'secret', 'window']) {
+        const opening = build(tool({ state: { ...tool().state, wallKind: kind } }), 'walls')._buildBody();
+        check(`${kind}: no shape to choose, since it is two points, and it says so`, !has(opening, 'data-shape=') && has(opening, lang['drawingTools.wallOpeningHint'].slice(0, 30)) && has(opening, 'name="wallSnap"'));
+    }
+    for (const kind of ['wall', 'invisible', 'terrain', 'ethereal']) {
+        check(`${kind}: the shape is still chosen`, has(build(tool({ state: { ...tool().state, wallKind: kind } }), 'walls')._buildBody(), 'data-shape="sketch"'));
+    }
     check('snap is checked when on, and not when off', /name="wallSnap"[^>]*checked/.test(body) && !/name="wallSnap"[^>]*checked/.test(build(tool({ state: { ...tool().state, wallSnap: false } }), 'walls')._buildBody()));
     check('the shape checked is the shape chosen', /data-shape="sketch"[^>]*checked/.test(build(tool({ state: { ...tool().state, wallShape: 'sketch' } }), 'walls')._buildBody()));
     check('a plain wall is offered no door state', !has(body, 'data-door='));

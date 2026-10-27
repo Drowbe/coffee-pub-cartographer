@@ -88,8 +88,11 @@ Click a stamp, then click the map to put one down, or **drag to scatter** severa
 
 The options under the stamps:
 
-- **Size** -- small, medium or large. A medium tree is bigger than a medium tuft of grass, so a
-  scattering of mixed stamps looks right.
+- **Size** -- small, medium or large, **measured in grid squares**, so a stamp is the same size on any
+  map. A tree is 1 square across at small, 3 at medium and 6 at large; a shrub is half that, a pond a
+  little more, a tuft of grass or a rock a third of it at small and 2 squares at large. The
+  markers (plus, X, dot, arrows, square) are the exception: they keep a size of their own in pixels, near a
+  square at medium.
 - **Natural colors** -- draws each stamp in its own colours. Off tints it with your brush colour
   from the Drawing tab. Markers are always your brush colour.
 - **Turn and flip** and **Vary the size** -- give each stamp a random turn, flip and size so a
@@ -120,7 +123,7 @@ Undo takes back a whole path.
 Below the paths on the Terrain tab, a ground patch is a small area of ground, like the pond but for dirt: a loose blob whose edge fades
 away, so it hints at ground rather than filling the scene with it. Click to put one down, or **hold the button and drag to paint**: a dab goes down every
 few pixels along the way, so they run together into a continuous area, and a fast drag leaves no gaps. A
-Medium patch is about a square and a half across, and **Scatter spacing** on the Stamps tab widens or
+Medium patch is 3 squares across, a Small one 1 and a Large one 6, and **Scatter spacing** on the Stamps tab widens or
 tightens the dabs. One drag is one stroke: Undo takes the whole of it back, and, kept on the scene, it is
 written as one when you let go. What you see while you drag is what is written; to keep the scene light, each dab after the first keeps only a few specks of texture.
 
@@ -159,6 +162,13 @@ are Foundry's, and show, as any wall does, when the Walls controls are selected.
 - **Straight** -- one wall, from where you press to where you let go.
 - **Freehand** -- the stroke is straightened into a run of walls, and closed into a ring if it ends
   near where it began.
+
+A **door**, **secret door** or **window** is always two points -- press where it starts and let go where
+it ends -- so there is no shape to choose for them. Draw one **along a wall** and it is fitted onto the wall,
+and the wall is cut around it, so what is before it and what is after it stay walls. A door that covers a whole
+wall replaces it. **Undo** makes the wall whole again. (Erasing a door leaves the gap; Undo is how to put the
+wall back.) A door has its leaf drawn across it, a secret door a dot as well, and a window a pane, as on the
+buttons.
 
 **Snap to the grid** puts wall ends on the points Foundry's own wall tool snaps to; turn it off to
 place them exactly. Walls follow the same **Join Walls Where They Meet** setting as the walls

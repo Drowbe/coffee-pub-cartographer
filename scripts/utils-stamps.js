@@ -334,6 +334,16 @@ const markerDot = () => [poly(ngon(0, 0, 0.36, 0.36, 20), 'base')];
 const markerArrow = turn => () => [poly(place([-0.32, -0.32, -0.16, 0, -0.32, 0.32, 0.34, 0], { turn }), 'base')];
 const markerSquare = () => [poly(place([-0.32, -0.32, 0.32, -0.32, 0.32, 0.32, -0.32, 0.32], {}), 'base')];
 
+/** How big Small and Large are against Medium: a tree is 1, 3 and 6 squares across. */
+export const SIZE_FACTORS = { small: 1 / 3, medium: 1, large: 2 };
+
+/** How many grid squares across a stamp is at a size, or null for a marker, which is sized in pixels. */
+export function stampSquares(kind, size = 'medium') {
+    const stamp = BY_ID.get(kind);
+    if (!stamp || stamp.legacy) return null;
+    return stamp.squares * (SIZE_FACTORS[size] ?? 1);
+}
+
 /** The groups the Stamps tab shows, in order. */
 export const STAMP_CATEGORIES = [
     { id: 'trees', labelKey: 'categoryTrees' },
@@ -345,42 +355,44 @@ export const STAMP_CATEGORIES = [
 ];
 
 /**
- * Every stamp. `scale` is how big the stamp is against the Small, Medium or Large size chosen, so
- * a Medium tree is a tree and a Medium tuft of grass is a tuft. `palette` is its natural colours.
+ * Every stamp. `squares` is how many grid squares across the stamp is at Medium, so a Medium tree is a
+ * tree and a Medium tuft of grass is a tuft, on any grid; Small and Large are a third and double of it
+ * (see SIZE_FACTORS). The markers the tool has always had keep a size in pixels of their own, and have a
+ * `scale` of 1 instead. `palette` is its natural colours.
  * `legacy` marks the markers drawn by the drawing tool's own code.
  */
 export const STAMPS = [
-    { id: 'tree', category: 'trees', icon: 'fa-solid fa-tree', labelKey: 'stampTree', scale: 1.5, build: tree,
+    { id: 'tree', category: 'trees', icon: 'fa-solid fa-tree', labelKey: 'stampTree', squares: 3, build: tree,
         palette: { dark: '#2c5a28', base: '#3f7d36', light: '#7bb85c', accent: '#8b5e34', accent2: '#c0452f' } },
-    { id: 'pine', category: 'trees', icon: 'fa-solid fa-tree-christmas', labelKey: 'stampPine', scale: 1.4, build: pine,
+    { id: 'pine', category: 'trees', icon: 'fa-solid fa-tree-christmas', labelKey: 'stampPine', squares: 3, build: pine,
         palette: { dark: '#1d4a30', base: '#2d6a45', light: '#5a9a6a', accent: '#6b4a2b', accent2: '#c0452f' } },
-    { id: 'shrub', category: 'plants', icon: 'fa-solid fa-seedling', labelKey: 'stampShrub', scale: 0.85, build: shrub,
+    { id: 'shrub', category: 'plants', icon: 'fa-solid fa-seedling', labelKey: 'stampShrub', squares: 1.5, build: shrub,
         palette: { dark: '#3a6a2c', base: '#528a3a', light: '#8cc063', accent: '#8b5e34', accent2: '#c0452f' } },
-    { id: 'grass', category: 'plants', icon: 'fa-solid fa-leaf', labelKey: 'stampGrass', scale: 0.6, build: grass,
+    { id: 'grass', category: 'plants', icon: 'fa-solid fa-leaf', labelKey: 'stampGrass', squares: 1, build: grass,
         palette: { dark: '#4a7a2e', base: '#6a9c3c', light: '#9acb5a', accent: '#8b5e34', accent2: '#c0452f' } },
-    { id: 'flowers', category: 'plants', icon: 'fa-solid fa-flower', labelKey: 'stampFlowers', scale: 0.6, build: flowers,
+    { id: 'flowers', category: 'plants', icon: 'fa-solid fa-flower', labelKey: 'stampFlowers', squares: 1, build: flowers,
         palette: { dark: '#3f6e2a', base: '#5d9238', light: '#8cc063', accent: '#f2d04a', accent2: '#e8739a' } },
-    { id: 'patch-dirt', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchDirt', scale: 2.0, build: patch('grain'),
+    { id: 'patch-dirt', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchDirt', squares: 3, build: patch('grain'),
         palette: { dark: '#6e5233', base: '#8f6d47', light: '#b08d63', accent: '#5a4128', accent2: '#c4a77c' } },
-    { id: 'patch-gravel', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchGravel', scale: 2.0, build: patch('pebble'),
+    { id: 'patch-gravel', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchGravel', squares: 3, build: patch('pebble'),
         palette: { dark: '#77726a', base: '#9a958c', light: '#c4c0b8', accent: '#5f5b55', accent2: '#aca79e' } },
-    { id: 'patch-sand', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchSand', scale: 2.0, build: patch('dust'),
+    { id: 'patch-sand', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchSand', squares: 3, build: patch('dust'),
         palette: { dark: '#bba873', base: '#dccb94', light: '#efe3b8', accent: '#a8945c', accent2: '#e6d7a4' } },
-    { id: 'patch-mud', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchMud', scale: 2.0, build: patch('grain'),
+    { id: 'patch-mud', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchMud', squares: 3, build: patch('grain'),
         palette: { dark: '#3f3022', base: '#5e4a35', light: '#7a6249', accent: '#2e2218', accent2: '#8a7152' } },
-    { id: 'patch-snow', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchSnow', scale: 2.0, build: patch('flake'),
+    { id: 'patch-snow', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchSnow', squares: 3, build: patch('flake'),
         palette: { dark: '#c5d0d8', base: '#e9eef2', light: '#ffffff', accent: '#b8c6d1', accent2: '#d6e0e7' } },
-    { id: 'rock', category: 'rocks', icon: 'fa-solid fa-gem', labelKey: 'stampRock', scale: 0.7, build: rock,
+    { id: 'rock', category: 'rocks', icon: 'fa-solid fa-gem', labelKey: 'stampRock', squares: 1, build: rock,
         palette: { dark: '#575757', base: '#7d7d7d', light: '#b0b0b0', accent: '#8b5e34', accent2: '#c0452f' } },
-    { id: 'boulders', category: 'rocks', icon: 'fa-solid fa-mountain', labelKey: 'stampBoulders', scale: 1.15, build: boulders,
+    { id: 'boulders', category: 'rocks', icon: 'fa-solid fa-mountain', labelKey: 'stampBoulders', squares: 2, build: boulders,
         palette: { dark: '#555555', base: '#7a7a7a', light: '#adadad', accent: '#8b5e34', accent2: '#c0452f' } },
-    { id: 'stump', category: 'features', icon: 'fa-solid fa-circle-dot', labelKey: 'stampStump', scale: 0.6, build: stump,
+    { id: 'stump', category: 'features', icon: 'fa-solid fa-circle-dot', labelKey: 'stampStump', squares: 1, build: stump,
         palette: { dark: '#5b3f22', base: '#8b5e34', light: '#c89a64', accent: '#c9995e', accent2: '#c0452f' } },
-    { id: 'log', category: 'features', icon: 'fa-solid fa-grip-lines', labelKey: 'stampLog', scale: 1.0, build: log,
+    { id: 'log', category: 'features', icon: 'fa-solid fa-grip-lines', labelKey: 'stampLog', squares: 2, build: log,
         palette: { dark: '#4f3620', base: '#7a5230', light: '#b58a58', accent: '#c9995e', accent2: '#c0452f' } },
-    { id: 'pond', category: 'features', icon: 'fa-solid fa-droplet', labelKey: 'stampPond', scale: 1.7, build: pond,
+    { id: 'pond', category: 'features', icon: 'fa-solid fa-droplet', labelKey: 'stampPond', squares: 4, build: pond,
         palette: { dark: '#8a7a55', base: '#3f7fbf', light: '#9acff0', accent: '#5aa04a', accent2: '#c0452f' } },
-    { id: 'campfire', category: 'features', icon: 'fa-solid fa-fire', labelKey: 'stampCampfire', scale: 0.8, build: campfire,
+    { id: 'campfire', category: 'features', icon: 'fa-solid fa-fire', labelKey: 'stampCampfire', squares: 1.5, build: campfire,
         palette: { dark: '#3b2e25', base: '#8a8a8a', light: '#b5b5b5', accent: '#f5c542', accent2: '#e8742a' } },
     { id: 'plus', category: 'markers', icon: 'fa-solid fa-plus', labelKey: 'stampPlus', scale: 1, legacy: true, build: markerPlus },
     { id: 'x', category: 'markers', icon: 'fa-solid fa-xmark', labelKey: 'stampX', scale: 1, legacy: true, build: markerX },

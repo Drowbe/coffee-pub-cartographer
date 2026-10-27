@@ -8,9 +8,9 @@
 // It does not show how a stamp looks or that Foundry accepts the Drawings: that wants the map.
 import {
     STAMPS, STAMP_CATEGORIES, TONES, buildStamp, stampPalette, stampSvg, drawStamp, stampDrawingData,
-    isProceduralStamp, isStamp, stampById, parseColor, makeRng
+    isProceduralStamp, isStamp, stampById, parseColor, makeRng, stampSquares
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, polygonShape, distanceToPolyline, insidePolygon, drawingHit, keptGroup, WALL_KINDS, wallKindById, wallKindData, wallKindSvg, isDoorKind } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, polygonShape, distanceToPolyline, insidePolygon, drawingHit, keptGroup, WALL_KINDS, wallKindById, wallKindData, wallKindSvg, isDoorKind, fitOpeningToWall } from '../scripts/utils-drawing.js';
 import { TERRAINS, terrainById, terrainPalette, smoothPath, buildTerrain, terrainSvg, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
 let failures = 0;
@@ -131,7 +131,7 @@ console.log('\nground patches');
         check(`${patch.id}: the outer edge is faint, so it fades`, layers[0].alpha <= 0.12);
         check(`${patch.id}: each layer is inside the one before it`, layers.every((p, i) => { if (!i) return true; const reach = pts => Math.max(...pts.map(Math.abs)); return reach(p.pts) < reach(layers[i - 1].pts); }));
         check(`${patch.id}: it has texture over the middle`, prims.length > layers.length + 5);
-        check(`${patch.id}: it is large against other stamps`, patch.scale >= 1.8);
+        check(`${patch.id}: it is large against other stamps`, patch.squares >= 3);
         check(`${patch.id}: it has no shadow`, prims.every(p => !p.shadow));
         check(`${patch.id}: its texture stays inside its edge`, prims.filter(p => !layers.includes(p) && p.k === 'poly' && p.alpha !== 0.18).every(p => Math.hypot(p.pts[0], p.pts[1]) < 0.4));
     }
@@ -157,6 +157,16 @@ console.log('\nfinding what is under the eraser');
     const m = 'coffee-pub-cartographer';
     check('a stamp, a path and a wall stroke are each a group', keptGroup({ [m]: { stamp: { id: 'a' } } }, m).key === 'stamp:a' && keptGroup({ [m]: { terrain: { id: 'b' } } }, m).key === 'terrain:b' && keptGroup({ [m]: { drawnWall: { id: 'c' } } }, m).key === 'drawnWall:c');
     check('anything else is not', keptGroup({}, m) === null && keptGroup(undefined, m) === null && keptGroup({ other: { stamp: { id: 'a' } } }, m) === null && keptGroup({ [m]: { autoWall: { run: 1 } } }, m) === null);
+}
+
+console.log('\nstamp sizes, in grid squares');
+{
+    check('a tree is 1, 3 and 6 squares across', stampSquares('tree', 'small') === 1 && stampSquares('tree', 'medium') === 3 && stampSquares('tree', 'large') === 6);
+    check('small is a third and large double of medium, for every stamp', STAMPS.filter(s => !s.legacy).every(s => Math.abs(stampSquares(s.id, 'small') * 3 - s.squares) < 1e-9 && stampSquares(s.id, 'large') === s.squares * 2));
+    check('medium is the default, and an unknown size is medium', stampSquares('tree') === 3 && stampSquares('tree', 'huge') === 3);
+    check('every stamp but the markers has a size in squares', STAMPS.filter(s => !s.legacy).every(s => s.squares > 0) && STAMPS.filter(s => s.legacy).every(s => stampSquares(s.id) === null && s.scale === 1));
+    check('a tree is bigger than a shrub, a shrub than a tuft of grass, and a pond bigger than a tree', stampById('tree').squares > stampById('shrub').squares && stampById('shrub').squares > stampById('grass').squares && stampById('pond').squares > stampById('tree').squares);
+    check('a small tree is a square, so it is a character\'s size, and nothing is smaller than a third of one', STAMPS.filter(s => !s.legacy).every(s => stampSquares(s.id, 'small') >= 0.3));
 }
 
 console.log('\nterrain paths');
@@ -188,6 +198,38 @@ console.log('\nterrain paths');
     check('written to the scene, a path is lines stroked at its width and the texture over them', docs.length > 3 && docs[1].fillType === 0 && docs[1].strokeWidth === 80 && docs[3].fillType === 1);
     check('and every Drawing has something to show and a whole-number size', docs.every(d => ((d.fillType !== 0 && d.fillAlpha > 0) || (d.strokeWidth > 0 && d.strokeAlpha > 0)) && Number.isInteger(d.shape.width) && Number.isInteger(d.shape.height)));
     check('the scene allowance is smaller than the canvas one', MAX_TEXTURE.scene < MAX_TEXTURE.canvas);
+}
+
+console.log('\nfitting an opening onto a wall');
+{
+    const grid = 100;
+    const wall = [0, 0, 1000, 0];
+    const fit = (segment, walls = [wall]) => fitOpeningToWall(walls, segment, { grid });
+    let r = fit([[300, 10], [400, -8]]);
+    check('an opening along a wall is put on it, and the wall is left as two', r.segment.join() === '300,0,400,0' && r.pieces.length === 2 && r.pieces[0].join() === '0,0,300,0' && r.pieces[1].join() === '400,0,1000,0');
+    r = fit([[400, 5], [300, -5]]);
+    check('whichever way round it was drawn', r.segment.join() === '300,0,400,0');
+    r = fit([[0, 4], [100, 4]]);
+    check('at the start of a wall one piece is left, after it', r.pieces.length === 1 && r.pieces[0].join() === '100,0,1000,0');
+    r = fit([[900, 4], [1000, 4]]);
+    check('at the end, one piece, before it', r.pieces.length === 1 && r.pieces[0].join() === '0,0,900,0');
+    r = fit([[1, 3], [998, -3]]);
+    check('one that all but fills a wall takes the whole of it, and leaves nothing', r.pieces.length === 0 && r.segment.join() === '0,0,1000,0');
+    check('one too far from the wall is not fitted', fit([[300, 80], [400, 80]]) === null);
+    check('one only just in reach is', fit([[300, 45], [400, 45]]) !== null);
+    check('one across the wall is not', fit([[500, -50], [500, 50]]) === null);
+    check('one too short is not', fit([[300, 0], [315, 0]]) === null);
+    check('one well past the end of a wall is not', fit([[1200, 0], [1300, 0]]) === null);
+    check('one that runs a little off the end is clipped to the wall', (() => { const o = fit([[900, 0], [1040, 0]]); return o && o.segment[1].join() === '1000,0'; })());
+    check('a wall too short to cut is left alone', fit([[0, 0], [30, 0]], [[0, 0, 40, 0]]) === null);
+    r = fit([[300, 40], [400, 40]], [wall, [0, 100, 1000, 100]]);
+    check('of two walls the nearer is the one cut', r.wall === 0);
+    r = fit([[300, 70], [400, 70]], [wall, [0, 100, 1000, 100]]);
+    check('and the other when it is nearer', r.wall === 1 && r.segment.join() === '300,100,400,100');
+    r = fit([[100, 100], [100, 300]], [[100, 0, 100, 1000]]);
+    check('a wall that runs down the map is cut along it', r.segment.join() === '100,100,100,300' && r.pieces.length === 2 && r.pieces[1].join() === '100,300,100,1000');
+    r = fit([[100, 100], [300, 300]], [[0, 0, 1000, 1000]]);
+    check('and one that runs on a slant', r.wall === 0 && r.pieces.length === 2);
 }
 
 console.log('\nwall strokes');

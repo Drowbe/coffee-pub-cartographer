@@ -15,7 +15,7 @@
 import { MODULE } from './const.js';
 import { STAMPS, STAMP_CATEGORIES, stampSvg, parseColor } from './utils-stamps.js';
 import { TERRAINS, terrainSvg } from './utils-terrain.js';
-import { WALL_KINDS, wallKindSvg, isDoorKind } from './utils-drawing.js';
+import { WALL_KINDS, wallKindSvg, isDoorKind, isOpeningKind } from './utils-drawing.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -306,7 +306,10 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         const door = isDoorKind(state.wallKind)
             ? this._segmented('drawing-wall-door', localize('doorState'), DOOR_STATES, state.wallDoor, 'door')
             : '';
-        const how = this._segmented('drawing-wall-shape', localize('wallShape'), WALL_SHAPES, state.wallShape, 'shape')
+        // A door or a window is two points, so there is no shape to choose.
+        const how = (isOpeningKind(state.wallKind)
+            ? this._hint(localize('wallOpeningHint'))
+            : this._segmented('drawing-wall-shape', localize('wallShape'), WALL_SHAPES, state.wallShape, 'shape'))
             + this._toggle('wallSnap', localize('wallSnap'), state.wallSnap, { hint: localize('wallSnapHint') })
             + door
             + this._segmented('drawing-weight', localize('weight'), WEIGHTS, state.brushSettings.size, 'size')

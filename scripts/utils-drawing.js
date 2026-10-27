@@ -258,3 +258,93 @@ export function wallKindSvg(kind) {
     }
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40" aria-hidden="true">${body}</svg>`;
 }
+
+// ------------------------------------------------------------------
+// Openings: doors and windows
+// ------------------------------------------------------------------
+
+/** The kinds that are an opening in a wall -- two points, put on a wall if there is one. */
+export const isOpeningKind = id => id === 'door' || id === 'secret' || id === 'window';
+
+/**
+ * An opening drawn near a solid wall, fitted onto it: its ends are put on the wall, and the wall is
+ * worked out as it will be left, cut short to what is before the opening with what is after it a
+ * wall of its own, or taken whole if the opening reaches both ends. Nothing is fitted if the
+ * drawn opening is not along a wall: both ends within reach of its line, and not off its ends.
+ *
+ * @param {number[][]} walls  Each solid wall as [x1, y1, x2, y2].
+ * @param {number[][]} segment  The opening as drawn, [[x, y], [x, y]].
+ * @param {{ grid: number, reach?: number, minSquares?: number }} options  `reach` is how near, in grid squares.
+ * @returns {{ wall: number, segment: number[][], pieces: number[][] } | null}  `wall` indexes `walls`; `pieces`
+ *   is what is left of that wall: none, one or two walls.
+ */
+export function fitOpeningToWall(walls, segment, { grid, reach = 0.5, minSquares = 0.3 } = {}) {
+    let best = null;
+    walls.forEach((c, index) => {
+        const [x1, y1, x2, y2] = c;
+        const length = Math.hypot(x2 - x1, y2 - y1);
+        if (length < grid * 0.5) return;
+        const ux = (x2 - x1) / length;
+        const uy = (y2 - y1) / length;
+        const m = segment.map(([x, y]) => ({ along: (x - x1) * ux + (y - y1) * uy, across: Math.abs(-(x - x1) * uy + (y - y1) * ux) }));
+        const worst = Math.max(m[0].across, m[1].across);
+        if (worst > reach * grid) return;
+        const low = Math.min(m[0].along, m[1].along);
+        const high = Math.max(m[0].along, m[1].along);
+        if (low < -reach * grid || high > length + reach * grid) return;
+        const lo = Math.max(0, low);
+        const hi = Math.min(length, high);
+        if (hi - lo < grid * minSquares) return;
+        if (!best || worst < best.worst) best = { index, worst, lo, hi, length, ux, uy, x1, y1, x2, y2 };
+    });
+    if (!best) return null;
+    const tolerance = 2;
+    const point = s => [Math.round(best.x1 + best.ux * s), Math.round(best.y1 + best.uy * s)];
+    const before = best.lo > tolerance;
+    const after = best.hi < best.length - tolerance;
+    // An opening that all but reaches an end of the wall takes it to the end.
+    const lo = before ? best.lo : 0;
+    const hi = after ? best.hi : best.length;
+    const pieces = [];
+    if (before) pieces.push([best.x1, best.y1, ...point(lo)]);
+    if (after) pieces.push([...point(hi), best.x2, best.y2]);
+    return { wall: best.index, segment: [point(lo), point(hi)], pieces };
+}
+
+/**
+ * The marks that say what an opening is, drawn over its line, as the picture on its button does: a door
+ * leaf across a door, with a dot on a secret one, and a pane down the middle of a window. Nothing for
+ * an opening too short to hold them, or a kind that has none.
+ *
+ * @param {string} kind
+ * @param {number[][]} segment  [[x, y], [x, y]].
+ * @param {{ weight: number, color: string, casing: string, flags?: object, solid?: number, none?: number, sort?: number }} style
+ */
+export function openingMarks(kind, segment, { weight, color, casing, flags = {}, solid = 1, none = 0, sort = 2 }) {
+    const [[ax, ay], [bx, by]] = segment;
+    const length = Math.hypot(bx - ax, by - ay);
+    if (!isOpeningKind(kind) || length < 16) return [];
+    const ux = (bx - ax) / length;
+    const uy = (by - ay) / length;
+    const cx = (ax + bx) / 2;
+    const cy = (ay + by) / 2;
+    if (kind === 'window') {
+        const pane = strokeDrawingData([ax, ay, bx, by], { color: '#ffffff', alpha: 0.85, width: Math.max(2, weight * 0.35), flags, none, sort });
+        return [pane];
+    }
+    // The leaf of a door: a panel across the middle, wider than the wall, in the door's colour.
+    const half = length * 0.3;
+    const thick = Math.max(weight * 0.9, 6);
+    const corner = (along, across) => [cx + ux * along - uy * across, cy + uy * along + ux * across];
+    const ring = [...corner(-half, -thick), ...corner(half, -thick), ...corner(half, thick), ...corner(-half, thick)];
+    const leaf = {
+        ...polygonShape(ring),
+        bezierFactor: 0, sort,
+        fillType: solid, fillColor: casing, fillAlpha: 1,
+        strokeWidth: 3, strokeColor: color, strokeAlpha: 1,
+        flags
+    };
+    const marks = [leaf];
+    if (kind === 'secret') marks.push(discDrawingData(cx, cy, Math.max(3, weight * 0.4), { color, alpha: 1, flags, solid, sort }));
+    return marks;
+}
