@@ -1,0 +1,205 @@
+// The drawing tools window's HTML, built for both tabs, as a GM and as a player, from the real
+// methods in window-drawing.js against a stand-in drawing tool. It shows that nothing builds as
+// "undefined" or "[object Object]", that each control is there for who it belongs to, that the
+// window is made of Blacksmith's own tool-window components, and that every action a button
+// carries is one the window handles, every string it uses exists, and every call it makes on the
+// drawing tool is a method the drawing tool has.
+//
+// It does not show how the window looks or that Blacksmith draws it.
+import fs from 'node:fs';
+import { STAMPS, STAMP_CATEGORIES, stampSvg, parseColor } from '../scripts/utils-stamps.js';
+import { TERRAINS, terrainSvg } from '../scripts/utils-terrain.js';
+
+const src = fs.readFileSync('scripts/window-drawing.js', 'utf8');
+const managerSrc = fs.readFileSync('scripts/manager-drawing.js', 'utf8');
+const lang = JSON.parse(fs.readFileSync('lang/en.json', 'utf8'))['coffee-pub-cartographer'];
+const slice = (from, to) => {
+    const a = src.indexOf(from);
+    const b = src.indexOf(to, a);
+    if (a < 0 || b < 0) throw new Error(`could not locate ${from.trim().slice(0, 40)}`);
+    return src.slice(a, b);
+};
+const tables = slice('/** The tabs, in order. */', 'export class DrawingToolsWindow');
+const methods = slice('    _localize(key) {', '    // ==================================================================\n    // ===== LIFECYCLE');
+
+const MODULE = { ID: 'coffee-pub-cartographer' };
+let isGM = true;
+const game = {
+    i18n: { localize: key => lang[key.replace('coffee-pub-cartographer.', '')] ?? `!!${key}` },
+    get user() { return { isGM, color: { css: '#aa3322' } }; }
+};
+const foundry = { utils: { escapeHTML: text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;') } };
+
+const Harness = eval(`(() => {
+${tables}
+return class Harness {
+    constructor(manager) { this.manager = manager; this.tab = 'draw'; }
+    get id() { return 'window-id'; }
+${methods}
+};
+})()`);
+
+class FakeTool {
+    static strColor1 = 'rgba(38, 38, 38, 0.7)';
+    static strColor2 = 'rgba(186, 60, 49, 0.7)';
+    static strColor3 = 'rgba(76, 147, 204, 0.7)';
+    static strColor4 = 'rgba(3, 105, 41, 0.7)';
+    static strColor5 = 'rgba(219, 130, 12, 0.7)';
+}
+const tool = (overrides = {}) => Object.assign(new FakeTool(), {
+    state: {
+        active: false, drawingMode: 'sketch', stampStyle: 'tree', symbolSize: 'medium', lineStyle: 'solid', timedEraseEnabled: false,
+        brushSettings: { size: 6, color: 'rgba(186, 60, 49, 0.7)', type: 'pen' },
+        stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 }, wallShape: 'line', wallSnap: true
+    },
+    canMakeWalls: () => isGM, canKeepOnScene: () => isGM, canUndo: () => true
+}, overrides);
+const build = (manager, tab) => { const w = new Harness(manager); w.tab = tab; return w; };
+
+let failures = 0;
+const check = (label, ok, detail = '') => {
+    if (ok) { console.log(`  ok    ${label}`); return; }
+    failures++;
+    console.log(`  FAIL  ${label}${detail ? `\n        ${detail}` : ''}`);
+};
+const has = (html, text) => html.includes(text);
+const count = (html, pattern) => (html.match(pattern) ?? []).length;
+
+console.log('every tab builds, for a GM and a player');
+for (const gm of [true, false]) {
+    isGM = gm;
+    for (const tab of ['draw', 'stamps', 'terrain']) {
+        const w = build(tool(), tab);
+        const body = w._buildBody();
+        const all = body + w._buildFooterLeft() + w._buildFooterRight();
+        check(`${gm ? 'GM' : 'player'} ${tab}: no undefined, no [object Object], no missing string`, !/undefined|\[object Object\]|!!coffee-pub|NaN/.test(all), (all.match(/.{30}(undefined|\[object Object\]|!!coffee-pub|NaN).{30}/) ?? [''])[0]);
+        check(`${gm ? 'GM' : 'player'} ${tab}: underline tabs, one active`, has(body, 'blacksmith-tool-tabs') && count(body, /blacksmith-tool-tab is-active/g) === 1);
+    }
+}
+
+console.log('\nthe Drawing tab');
+isGM = true;
+{
+    const body = build(tool(), 'draw')._buildBody();
+    check('every tool is offered to a GM, wall included', ['sketch', 'line', 'box', 'ellipse', 'wall'].every(id => has(body, `data-mode="${id}"`)));
+    check('the current tool is the one checked', /value="sketch"[^>]*checked/.test(body) && count(body, /name="drawing-mode"[^>]*checked/g) === 1);
+    check('the wall options are not shown until wall is chosen', !has(body, 'name="wallSnap"') && !has(body, 'data-shape='));
+    check('weight, style and colour are there', has(body, 'data-action="drawing-weight"') && has(body, 'data-action="drawing-style"') && has(body, 'data-action="drawing-color"'));
+    check('the medium weight is checked', /value="6"[^>]*checked/.test(body));
+    check('six swatches: the player and five colours', count(body, /cartographer-drawing-swatch[ "]/g) === 6);
+    check('exactly one swatch is active', count(body, /cartographer-drawing-swatch is-active/g) === 1);
+    check('the active swatch is the red one', /is-active" role="radio" aria-checked="true" data-action="drawing-color" data-color="rgba\(186, 60, 49, 0\.7\)"/.test(body));
+    check('both clear buttons for a GM', has(body, 'data-action="drawing-clear"') && has(body, 'data-action="drawing-clear-all"'));
+    check('timed erase is a toggle', has(body, 'name="timedErase"'));
+    const wall = build(tool({ state: { ...tool().state, drawingMode: 'wall' } }), 'draw')._buildBody();
+    check('with wall chosen the shape and snap appear', has(wall, 'data-shape="line"') && has(wall, 'data-shape="sketch"') && has(wall, 'name="wallSnap"'));
+    check('the snap is checked when on, and not when off', /name="wallSnap" checked|name="wallSnap"[^>]*checked/.test(wall)
+        && !/name="wallSnap"[^>]*checked/.test(build(tool({ state: { ...tool().state, drawingMode: 'wall', wallSnap: false } }), 'draw')._buildBody()));
+    const free = build(tool({ state: { ...tool().state, drawingMode: 'wall', wallShape: 'sketch' } }), 'draw')._buildBody();
+    check('the wall shape checked is the shape chosen', /value="sketch"[^>]*data-shape="sketch" checked|data-shape="sketch"[^>]*checked/.test(free));
+}
+{
+    isGM = false;
+    const body = build(tool(), 'draw')._buildBody();
+    check('a player is not offered wall', !has(body, 'data-mode="wall"') && has(body, 'data-mode="box"'));
+    check('a player has only their own clear', has(body, 'data-action="drawing-clear"') && !has(body, 'data-action="drawing-clear-all"'));
+    const asked = build(tool({ state: { ...tool().state, drawingMode: 'wall' } }), 'draw')._buildBody();
+    check('a player whose saved tool is wall sees no wall options', !has(asked, 'name="wallSnap"'));
+    isGM = true;
+}
+
+console.log('\nthe Stamps tab');
+{
+    const w = build(tool(), 'stamps');
+    const body = w._buildBody();
+    check('every stamp has a button', STAMPS.every(s => has(body, `data-kind="${s.id}"`)));
+    check('every category has a section heading', STAMP_CATEGORIES.every(c => has(body, lang[`drawingTools.${c.labelKey}`] ?? `drawingTools.${c.labelKey}`)));
+    check('each button has a picture and a name', count(body, /cartographer-stamp-art/g) === STAMPS.length && count(body, /cartographer-stamp-name/g) === STAMPS.length);
+    check('exactly one stamp is active, the tree, only in stamp mode', count(body, /cartographer-stamp is-active/g) === 0);
+    const inStamp = build(tool({ state: { ...tool().state, drawingMode: 'stamp' } }), 'stamps')._buildBody();
+    check('in stamp mode the chosen stamp is active', count(inStamp, /cartographer-stamp is-active/g) === 1 && /is-active" data-action="drawing-stamp" data-kind="tree"/.test(inStamp));
+    check('size, natural, rotate, jitter, spacing and keep are all there', ['name="drawing-size"', 'name="natural"', 'name="rotate"', 'name="jitter"', 'name="spacing"', 'name="keep"'].every(t => has(body, t)));
+    check('the medium size is checked', /value="medium"[^>]*checked/.test(body));
+    check('natural, rotate and jitter are on and keep is off by default', /name="natural"[^>]*checked/.test(body) && /name="rotate"[^>]*checked/.test(body) && /name="jitter"[^>]*checked/.test(body) && !/name="keep"[^>]*checked/.test(body));
+    check('the spacing slider carries its value and range', /name="spacing" min="0.5" max="3" step="0.25" value="1"/.test(body));
+    const kept = build(tool({ state: { ...tool().state, stamp: { ...tool().state.stamp, keep: true } } }), 'stamps')._buildBody();
+    check('keep is checked when on', /name="keep"[^>]*checked/.test(kept));
+    isGM = false;
+    const denied = build(tool({ state: { ...tool().state, stamp: { ...tool().state.stamp, keep: true } } }), 'stamps')._buildBody();
+    check('a user who may not create drawings has keep off and disabled, whatever was saved', !/name="keep"[^>]*checked/.test(denied) && /name="keep"[^>]*disabled/.test(denied));
+    isGM = true;
+    const off = build(tool({ state: { ...tool().state, stamp: { ...tool().state.stamp, natural: false } } }), 'stamps')._buildBody();
+    check('with natural colours off a stamp is drawn in the brush colour', off !== body && has(off, '#ba3c31'));
+    check('the markers are always in the brush colour', has(body, stampSvg('plus', { tint: 'rgba(186, 60, 49, 0.7)' })));
+}
+
+console.log('\nthe Terrain tab');
+{
+    const body = build(tool(), 'terrain')._buildBody();
+    check('every kind of path has a button with a picture and a name', TERRAINS.every(t => has(body, `data-action="drawing-terrain" data-kind="${t.id}"`) && has(body, terrainSvg(t.id))));
+    check('none is active until terrain is the tool', count(body, /cartographer-stamp is-active/g) === 0);
+    const laying = build(tool({ state: { ...tool().state, drawingMode: 'terrain', stamp: { ...tool().state.stamp, terrain: 'gravel' } } }), 'terrain')._buildBody();
+    check('when it is, the kind chosen is active', count(laying, /cartographer-stamp is-active/g) === 1 && /is-active" data-action="drawing-terrain" data-kind="gravel"/.test(laying));
+    check('three widths, the chosen one checked', count(body, /data-width="/g) === 3 && /value="1"[^>]*checked/.test(body));
+    check('keep is offered, off by default', has(body, 'name="keep"') && !/name="keep"[^>]*checked/.test(body));
+    isGM = false;
+    const player = build(tool(), 'terrain')._buildBody();
+    check('a user who may not create drawings has keep disabled', /name="keep"[^>]*disabled/.test(player));
+    isGM = true;
+}
+
+console.log('\nthe footer');
+{
+    const idle = build(tool(), 'draw');
+    check('Start, when nothing is drawing', has(idle._buildFooterRight(), 'drawing-toggle') && has(idle._buildFooterRight(), 'fa-play'));
+    const running = build(tool({ state: { ...tool().state, active: true } }), 'draw');
+    check('Stop, when it is', has(running._buildFooterRight(), 'fa-stop'));
+    check('Undo is enabled when there is something to undo', !/disabled/.test(idle._buildFooterLeft()));
+    check('and disabled when there is not', /disabled/.test(build(tool({ canUndo: () => false }), 'draw')._buildFooterLeft()));
+}
+
+console.log('\nescaping');
+{
+    const evil = tool({ state: { ...tool().state, brushSettings: { size: 6, color: 'rgba(1, 2, 3, 1)', type: 'pen' } } });
+    const w = build(evil, 'draw');
+    check('a label cannot break out of its attribute', !/"><script/.test(w._button({ action: 'x', icon: 'i', label: '"><script>alert(1)</script>' })));
+    check('nor a section title', !has(w._section('i', '<b>', ''), '<b>'));
+}
+
+console.log('\nthe joins');
+{
+    const actions = [...src.matchAll(/(?:data-action="|action: ')([\w-]+)/g)].map(m => m[1]);
+    const radioGroups = [...src.matchAll(/_segmented\('([\w-]+)'/g)].map(m => m[1]);
+    const handlers = new Set([...src.matchAll(/^\s+'([\w-]+)': \(/gm)].map(m => m[1]));
+    const used = new Set([...actions, ...radioGroups]);
+    check('every action a button carries is handled', [...used].every(a => handlers.has(a)), [...used].filter(a => !handlers.has(a)).join(', '));
+    check('every handler is used by a button', [...handlers].every(h => used.has(h)), [...handlers].filter(h => !used.has(h)).join(', '));
+    const strings = new Set();
+    // A string named in a call to localize, even in a choice between two: localize(active ? 'stop' : 'start')
+    for (const call of src.matchAll(/(?:localize|_localize)\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
+        for (const word of call[1].matchAll(/'(\w+)'/g)) strings.add(word[1]);
+    }
+    for (const m of src.matchAll(/labelKey: '(\w+)'/g)) strings.add(m[1]);
+    for (const stamp of STAMPS) strings.add(stamp.labelKey);
+    for (const category of STAMP_CATEGORIES) strings.add(category.labelKey);
+    for (const terrain of TERRAINS) strings.add(terrain.labelKey);
+    const missing = [...strings].filter(key => !(`drawingTools.${key}` in lang));
+    check('every string the window uses exists', missing.length === 0, missing.join(', '));
+    const keys = Object.keys(lang).filter(key => key.startsWith('drawingTools.')).map(key => key.slice('drawingTools.'.length));
+    const unused = keys.filter(key => key !== 'title' && !strings.has(key));
+    check('and none of the window\'s strings goes unused', unused.length === 0, unused.join(', '));
+    check('the window title string exists', 'drawingTools.title' in lang && src.includes('drawingTools.title'));
+    const calls = new Set([...src.matchAll(/(?:app\.manager|this\.manager|manager)\.(\w+)\(/g)].map(m => m[1]));
+    const absent = [...calls].filter(name => !new RegExp(`^    (async )?${name}\\(`, 'm').test(managerSrc));
+    check('every call the window makes on the drawing tool is a method it has', absent.length === 0, absent.join(', '));
+    const props = new Set([...src.matchAll(/manager\.state\.(\w+)/g)].map(m => m[1]));
+    check('and every state it reads is state the tool has', [...props].every(p => new RegExp(`\\b${p}:`).test(managerSrc)), [...props].join(', '));
+    check('the window id matches the one the tool looks for', src.includes("`${MODULE.ID}-drawing-tools`") && managerSrc.includes('`${MODULE.ID}-drawing-tools`'));
+    check('every class the window builds is styled', ['cartographer-drawing-panel', 'cartographer-drawing-row', 'cartographer-drawing-label', 'cartographer-drawing-buttons', 'cartographer-drawing-swatch', 'cartographer-stamp-grid', 'cartographer-stamp', 'cartographer-stamp-art', 'cartographer-stamp-name']
+        .every(name => fs.readFileSync('styles/tool-drawing.css', 'utf8').includes(`.${name}`)));
+    check('the menubar button opens it', fs.readFileSync('scripts/manager-drawing.js', 'utf8').includes('onClick: () => self.openWindow()'));
+    check('a swatch colour is one the colour parser reads', ['rgba(38, 38, 38, 0.7)'].every(c => parseColor(c)));
+}
+
+console.log(failures ? `\n${failures} failed` : '\nall passed');
+process.exit(failures ? 1 : 0);

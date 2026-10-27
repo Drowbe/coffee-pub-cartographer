@@ -75,6 +75,11 @@ class CartographerToolbar {
                         mode: 'default',
                         order: 1
                     },
+                    // Opens the drawing tools window: see window-drawing.js.
+                    'Drawing Tools': {
+                        mode: 'default',
+                        order: 4
+                    },
                     'Drawing Mode': {
                         mode: 'switch', // Radio-button behavior: only one active at a time
                         order: 5 // Order for the group (first group)
@@ -414,6 +419,11 @@ class CartographerToolbar {
             };
 
         return [
+            {
+                name: localize('drawingTools'),
+                icon: 'fa-solid fa-pen-ruler',
+                onClick: () => this.invokeTool(`${MODULE.ID}-drawing-tools`)
+            },
             {
                 name: localize('partyMaps'),
                 icon: 'fa-solid fa-street-view',

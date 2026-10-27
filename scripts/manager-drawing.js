@@ -5,6 +5,9 @@
 import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
+import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor } from './utils-stamps.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData } from './utils-drawing.js';
+import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
 
 // ================================================================== 
 // ===== DRAWING TOOL CLASS ========================================
@@ -38,8 +41,19 @@ class DrawingTool {
         // Drawing state
         this.state = {
             active: false,
-            drawingMode: 'sketch', // 'sketch' (freehand), 'line' (straight segment), 'box', 'ellipse', 'stamp'
-            stampStyle: 'plus', // 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square' - used when mode is stamp
+            drawingMode: 'sketch', // 'sketch' (freehand), 'line' (straight segment), 'box', 'ellipse', 'stamp', 'wall' (GM: walls and a line)
+            stampStyle: 'plus', // any stamp id from utils-stamps.js (the markers 'plus', 'x', 'dot', arrows, 'square', plus trees, rocks...) - used when mode is stamp
+            stamp: {
+                natural: true, // draw a stamp in its own colours; off tints it with the brush colour
+                keep: false, // write the stamp to the scene as Drawings, not a temporary drawing
+                rotate: true, // turn and flip each stamp as it is put down
+                jitter: true, // vary each stamp's size a little
+                spacing: 1, // how far apart dragging scatters stamps, as a multiple of a stamp's size
+                terrain: 'dirt', // terrain mode: the kind of path laid (utils-terrain.js)
+                pathWidth: 1 // terrain mode: how wide a path is, in grid squares
+            },
+            wallShape: 'line', // wall mode: 'line' (one straight wall) or 'sketch' (freehand, simplified to walls)
+            wallSnap: true, // wall mode: put wall ends on Foundry's wall snap points
             symbolSize: 'medium', // 'small', 'medium', 'large' - controls square bounding box size
             lineStyle: 'solid', // 'solid', 'dotted', 'dashed'
             brushSettings: {
@@ -76,6 +90,12 @@ class DrawingTool {
         
         // Key-based activation
         this._keyDown = false;
+
+        // What has been written to the scene (wall strokes, kept stamps), newest last, for undo
+        this._kept = [];
+        // What the next stamp will look like, and where a drag of stamps was last put down
+        this._roll = null;
+        this._scatter = null;
     }
     
     /**
@@ -95,12 +115,14 @@ class DrawingTool {
         const savedColor = game.settings.get(MODULE.ID, 'toolbar.color');
         
         // Apply saved selections if valid; migrate legacy 'line' (freehand) to 'sketch'
-        const symbolTypes = ['plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'];
+        const symbolTypes = STAMPS.filter(stamp => stamp.legacy).map(stamp => stamp.id);
         if (savedDrawingMode === 'line') {
             // Legacy: 'line' was freehand – treat as sketch
             this.state.drawingMode = 'sketch';
             game.settings.set(MODULE.ID, 'toolbar.drawingMode', 'sketch');
-        } else if (['sketch', 'line', 'box', 'ellipse', 'stamp'].includes(savedDrawingMode)) {
+        } else if (['sketch', 'line', 'box', 'ellipse', 'stamp'].includes(savedDrawingMode)
+            || (savedDrawingMode === 'wall' && game.user.isGM)
+            || savedDrawingMode === 'terrain') {
             this.state.drawingMode = savedDrawingMode;
         } else if (symbolTypes.includes(savedDrawingMode)) {
             this.state.drawingMode = 'stamp';
@@ -108,9 +130,16 @@ class DrawingTool {
             game.settings.set(MODULE.ID, 'toolbar.drawingMode', 'stamp');
             game.settings.set(MODULE.ID, 'toolbar.stampStyle', savedDrawingMode);
         }
-        if (symbolTypes.includes(savedStampStyle)) {
+        if (isStamp(savedStampStyle)) {
             this.state.stampStyle = savedStampStyle;
         }
+        const savedStampOptions = game.settings.get(MODULE.ID, 'toolbar.stampOptions');
+        for (const name of Object.keys(this.state.stamp)) {
+            if (typeof savedStampOptions?.[name] === typeof this.state.stamp[name]) this.state.stamp[name] = savedStampOptions[name];
+        }
+        const savedWallOptions = game.settings.get(MODULE.ID, 'toolbar.wallOptions');
+        if (['line', 'sketch'].includes(savedWallOptions?.shape)) this.state.wallShape = savedWallOptions.shape;
+        if (typeof savedWallOptions?.snap === 'boolean') this.state.wallSnap = savedWallOptions.snap;
         if (['small', 'medium', 'large'].includes(savedSymbolSize)) {
             this.state.symbolSize = savedSymbolSize;
         }
@@ -196,7 +225,10 @@ class DrawingTool {
         
         // Detach canvas handlers
         this.detachCanvasHandlers();
-        
+
+        // What was written to a scene cannot be taken back from another
+        this._kept = [];
+
         // Hooks are automatically cleaned up by BlacksmithHookManager via context
         this.hookIds = [];
         
@@ -264,6 +296,16 @@ class DrawingTool {
             
             const self = this;
             
+            // Opens the drawing tools window: the same tools, with the stamps and walls
+            cartographerToolbar.registerTool(`${MODULE.ID}-drawing-tools`, {
+                icon: "fa-solid fa-pen-ruler",
+                tooltip: "Drawing tools: drawing, stamps and walls",
+                label: "Tools",
+                group: "Drawing Tools",
+                order: 1,
+                onClick: () => self.openWindow()
+            });
+
             // Register Drawing Mode buttons (Sketch, Line, Box, Ellipse, Stamp)
             self._modeButtons = {
                 sketch: `${MODULE.ID}-mode-sketch`,
@@ -488,21 +530,7 @@ class DrawingTool {
                 group: "Utilities", // Utilities group
                 order: 1,
                 buttonColor: "rgba(161, 60, 41, 0.2)", // Red tint for destructive action
-                onClick: () => {
-                    // Always clear only the current user's drawings (for both GM and players)
-                    const removed = self.clearUserDrawings(game.user.id) ?? 0;
-                    notify(
-                        removed ? 'Your drawings cleared' : 'Nothing to clear',
-                        {
-                            subtitle: removed
-                                ? `${removed} temporary drawing${removed === 1 ? '' : 's'} removed`
-                                : 'You have no temporary drawings on this scene',
-                            type: removed ? 'info' : 'warn',
-                            icon: 'fa-solid fa-eraser',
-                            stackKey: `${MODULE.ID}-clear`
-                        }
-                    );
-                }
+                onClick: () => self.clearMine()
             });
             
             // GM-only: Clear all drawings button
@@ -513,22 +541,7 @@ class DrawingTool {
                     group: "Utilities", // Utilities group
                     order: 0, // Show before the regular clear button
                     buttonColor: "rgba(200, 40, 20, 0.3)", // Darker red for more destructive action
-                    onClick: () => {
-                        // GM clears all drawings from all users
-                        const removed = self._pixiDrawings?.length ?? 0;
-                        self.clearAllDrawings();
-                        notify(
-                            removed ? 'All drawings cleared' : 'Nothing to clear',
-                            {
-                                subtitle: removed
-                                    ? `${removed} temporary drawing${removed === 1 ? '' : 's'} removed from every player`
-                                    : 'No temporary drawings on this scene',
-                                type: removed ? 'info' : 'warn',
-                                icon: 'fa-solid fa-trash-can',
-                                stackKey: `${MODULE.ID}-clear-all`
-                            }
-                        );
-                    }
+                    onClick: () => self.clearEveryone()
                 });
             }
             
@@ -553,39 +566,7 @@ class DrawingTool {
                 order: 3,
                 toggleable: true, // Makes it a toggle button
                 active: () => self.state.timedEraseEnabled,
-                onClick: () => {
-                    self.state.timedEraseEnabled = !self.state.timedEraseEnabled;
-                    
-                    // Save state to settings
-                    game.settings.set(MODULE.ID, 'toolbar.timedEraseEnabled', self.state.timedEraseEnabled);
-                    
-                    self.updateTimedEraseButton();
-                    
-                    // Restart cleanup with new interval based on timed erase state
-                    if (self._cleanupInterval) {
-                        clearInterval(self._cleanupInterval);
-                        self._cleanupInterval = null;
-                    }
-                    // Schedule cleanup with appropriate interval
-                    if (self._pixiDrawings && self._pixiDrawings.length > 0) {
-                        self.scheduleCleanup();
-                    }
-                    
-                    const status = self.state.timedEraseEnabled ? 'enabled' : 'disabled';
-                    const timeout = BlacksmithUtils?.getSettingSafely(
-                        MODULE.ID,
-                        'drawing.timedEraseTimeout',
-                        30
-                    ) || 30;
-                    const scope = game.user.isGM ? 'all drawings' : 'your drawings';
-                    notify(`Timed erase ${status}`, {
-                        subtitle: self.state.timedEraseEnabled
-                            ? `${scope} auto-delete after ${timeout}s`
-                            : `${scope} stay until cleared`,
-                        icon: 'fa-solid fa-clock',
-                        stackKey: `${MODULE.ID}-timed-erase` // toggling repeatedly replaces in place
-                    });
-                }
+                onClick: () => self.setTimedErase(!self.state.timedEraseEnabled)
             });
             
             // Register line width buttons in switch group (radio-button behavior)
@@ -755,6 +736,7 @@ class DrawingTool {
      * For "hold" mode: activates tool when key is pressed
      */
     onHoldKeyDown() {
+        if (this._fromWindow) return; // the window's press-and-drag is in charge
         if (this._keyDown) return; // already down
         this._keyDown = true;
 
@@ -771,16 +753,17 @@ class DrawingTool {
      * For "hold" mode: finishes drawing and deactivates tool when key is released
      */
     onHoldKeyUp() {
+        if (this._fromWindow) return;
         if (!this._keyDown) return;
         this._keyDown = false;
 
         // If currently drawing, finish it now
         if (this.state.isDrawing) {
-            if (this.state.drawingMode === 'box') {
+            if (this._strokeMode() === 'box') {
                 this.finishBoxDrawing(null);
-            } else if (this.state.drawingMode === 'ellipse') {
+            } else if (this._strokeMode() === 'ellipse') {
                 this.finishEllipseDrawing(null);
-            } else if (this.state.drawingMode === 'line') {
+            } else if (this._strokeMode() === 'line') {
                 this.finishLineDrawing(null);
             } else {
                 // Sketch: get current mouse position
@@ -814,11 +797,11 @@ class DrawingTool {
         if (this.state.active) {
             // Finish any in-progress drawing (equivalent to key-up in hold mode)
             if (this.state.isDrawing) {
-                if (this.state.drawingMode === 'box') {
+                if (this._strokeMode() === 'box') {
                     this.finishBoxDrawing(null);
-                } else if (this.state.drawingMode === 'ellipse') {
+                } else if (this._strokeMode() === 'ellipse') {
                     this.finishEllipseDrawing(null);
-                } else if (this.state.drawingMode === 'line') {
+                } else if (this._strokeMode() === 'line') {
                     this.finishLineDrawing(null);
                 } else {
                     // Sketch: get current mouse position
@@ -881,6 +864,12 @@ class DrawingTool {
         // Remove existing preview if it exists
         this.removePreviewSymbol();
         
+        // The new stamps preview as they will be placed
+        if (isProceduralStamp(this.state.stampStyle)) {
+            this._previewStamp(worldX, worldY);
+            return;
+        }
+
         // Create new preview symbol at mouse position
         // Use a semi-transparent version for preview
         const layer = this.services.canvasLayer;
@@ -1177,7 +1166,8 @@ class DrawingTool {
         if (this.state.active) return true; // Already active
         
         this.state.active = true;
-        
+        this.notifyChange();
+
         // Step off Foundry's own drawing layer so its tools and ours cannot both
         // claim a drag. Switching the active layer is what actually does that.
         if (canvas.drawings) {
@@ -1217,6 +1207,9 @@ class DrawingTool {
         if (!this.state.active) return; // Already inactive
         
         this.state.active = false;
+        this._fromWindow = false;
+        this._scatter = null;
+        this.notifyChange();
         this.detachCanvasHandlers();
         
         // Remove preview symbol if it exists
@@ -1351,6 +1344,11 @@ class DrawingTool {
      * Undo the last drawing created by the current user
      */
     undoLastDrawing() {
+        // What was written to the scene last, if it came after the last temporary drawing
+        if (this._keptIsNewest()) {
+            void this._undoKept();
+            return;
+        }
         if (!this._lastDrawing || !this.services?.canvasLayer) {
             notify('Nothing to undo', {
                 subtitle: 'You have no recent drawings on this scene',
@@ -1474,6 +1472,8 @@ class DrawingTool {
         // Attach pointer event handlers with capture phase to intercept before Foundry
         // Handlers work for both "hold" and "toggle" modes
         this._handlePointerDown = (event) => {
+            // Started from the window, the press is taken on the window instead (_handleWindowDown)
+            if (self._fromWindow) return false;
             // Primary guard: only run when tool is active
             if (!self.state.active) {
                 return false;
@@ -1486,23 +1486,24 @@ class DrawingTool {
             }
             
             // Box/ellipse mode: ignore mouse clicks (drawing starts on mouse move, not on click)
-            if (self.state.drawingMode === 'box' || self.state.drawingMode === 'ellipse') {
+            if (self._strokeMode() === 'box' || self._strokeMode() === 'ellipse') {
                 event.preventDefault();
                 event.stopPropagation();
                 return false;
             }
             
             // If in stamp mode, stamp the selected style on click
-            if (self.state.drawingMode === 'stamp' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
+            if (self._strokeMode() === 'stamp' && self.canUserDraw() && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
                 event.stopPropagation();
                 event.stopImmediatePropagation();
                 self.stampSymbol(self.state.stampStyle, event);
+                self._beginScatter(event);
                 return false;
             }
             
             // Sketch/line/box/ellipse: ignore mouse clicks (start on first move; line/box/ellipse finish on key release)
-            if (['sketch', 'line', 'box', 'ellipse'].includes(self.state.drawingMode)) {
+            if (['sketch', 'line', 'box', 'ellipse'].includes(self._strokeMode())) {
                 event.preventDefault();
                 event.stopPropagation();
                 return false;
@@ -1510,6 +1511,7 @@ class DrawingTool {
         };
         
         this._handlePointerMove = (event) => {
+            if (self._fromWindow) return self._windowPointerMove(event);
             // Primary guard: only run when tool is active
             if (!self.state.active) {
                 return false;
@@ -1518,37 +1520,43 @@ class DrawingTool {
             // For hold mode: require _keyDown to be true
             // For toggle mode: _keyDown remains true while active, so this check still works
             if (self._keyDown) {
-                if (self.state.drawingMode === 'sketch') {
+                if (self._strokeMode() === 'sketch') {
                     // Sketch: start/continue freehand on mouse move
                     if (!self.state.isDrawing) {
                         self.startDrawing(event);
                     } else {
                         self.updateDrawing(event);
                     }
-                } else if (self.state.drawingMode === 'line') {
+                } else if (self._strokeMode() === 'line') {
                     // Line tool: start/update straight segment on mouse move
                     if (!self.state.isDrawing) {
                         self.startLineDrawing(event);
                     } else {
                         self.updateLinePreview(event);
                     }
-                } else if (self.state.drawingMode === 'box') {
+                } else if (self._strokeMode() === 'box') {
                     // Box mode: start/update box drawing on mouse move
                     if (!self.state.isDrawing) {
                         self.startBoxDrawing(event);
                     } else {
                         self.updateBoxPreview(event);
                     }
-                } else if (self.state.drawingMode === 'ellipse') {
+                } else if (self._strokeMode() === 'ellipse') {
                     // Ellipse mode: start/update ellipse drawing on mouse move
                     if (!self.state.isDrawing) {
                         self.startEllipseDrawing(event);
                     } else {
                         self.updateEllipsePreview(event);
                     }
-                } else if (self.state.drawingMode === 'stamp') {
-                    // Stamp mode: show preview symbol following mouse
-                    self.updatePreviewSymbol(event);
+                } else if (self._strokeMode() === 'stamp') {
+                    // Stamp mode: dragging with the button down scatters more of the same stamp;
+                    // otherwise the preview follows the mouse
+                    if (self._scatter && (event.buttons & 1)) {
+                        self._scatterTo(event);
+                    } else {
+                        self._scatter = null;
+                        self.updatePreviewSymbol(event);
+                    }
                 }
             } else {
                 // Remove preview when key is not held (hold mode only)
@@ -1557,13 +1565,15 @@ class DrawingTool {
         };
         
         this._handlePointerUp = (event) => {
+            if (self._fromWindow) return self._windowPointerUp(event);
             // Primary guard: only run when tool is active
             if (!self.state.active) {
                 return false;
             }
-            
+            self._scatter = null;
+
             // Line/box/ellipse: ignore mouse up (drawing finishes when key is released/toggled off)
-            if (self.state.drawingMode === 'line' || self.state.drawingMode === 'box' || self.state.drawingMode === 'ellipse') {
+            if (self._strokeMode() === 'line' || self._strokeMode() === 'box' || self._strokeMode() === 'ellipse') {
                 event.preventDefault();
                 event.stopPropagation();
                 return false;
@@ -1575,6 +1585,18 @@ class DrawingTool {
             }
         };
         
+        // The window's way of drawing takes the press on the window, in the capture phase. Foundry's own
+        // canvas listens in the capture phase on the canvas element, registered before ours, so a
+        // listener on the canvas runs after it and the press has already begun a drag-select box.
+        // The window is above the canvas in the capture phase, and stopping the press there keeps
+        // it from the canvas altogether. Only a press on the canvas itself is taken: one on a
+        // window, the menubar or a dialog is left alone.
+        this._handleWindowDown = (event) => {
+            if (!self._fromWindow || event.target !== canvas.app?.view) return;
+            self._windowPointerDown(event);
+        };
+        window.addEventListener('pointerdown', this._handleWindowDown, true);
+
         // Use capture phase to intercept events before Foundry's handlers
         canvas.app.view.addEventListener('pointerdown', this._handlePointerDown, true);
         canvas.app.view.addEventListener('pointermove', this._handlePointerMove, true);
@@ -1587,6 +1609,10 @@ class DrawingTool {
      * Detach canvas event handlers
      */
     detachCanvasHandlers() {
+        if (this._handleWindowDown) {
+            window.removeEventListener('pointerdown', this._handleWindowDown, true);
+            this._handleWindowDown = null;
+        }
         const view = canvas?.app?.view;
         if (!view) return;
 
@@ -1693,6 +1719,12 @@ class DrawingTool {
         const relativeX = worldCoords.x - this.state.drawingStartPoint.x;
         const relativeY = worldCoords.y - this.state.drawingStartPoint.y;
         this.state.drawingPoints.push([relativeX, relativeY]);
+
+        // A path is previewed as the ribbon it will be, not as a thin line
+        if (this.state.drawingMode === 'terrain') {
+            this._previewTerrain();
+            return;
+        }
         
         // Clear and redraw preview graphics to avoid coordinate issues
         // This ensures clean drawing without weird lines
@@ -1759,6 +1791,35 @@ class DrawingTool {
                 this._previewGraphics = null;
             }
             
+            // A path is laid down as terrain, not kept as a thin sketch
+            if (this.state.drawingMode === 'terrain') {
+                const start = this.state.drawingStartPoint;
+                const absolute = this.state.drawingPoints.map(([px, py]) => [start.x + px, start.y + py]);
+                if (this._previewGraphics && this._previewGraphics.parent) {
+                    this.services.canvasLayer.removeChild(this._previewGraphics);
+                    this._previewGraphics.destroy();
+                    this._previewGraphics = null;
+                }
+                this.state.isDrawing = false;
+                this.state.drawingPoints = [];
+                this.state.drawingStartPoint = null;
+                this.state.currentDrawing = null;
+                this.createTerrainPath(absolute);
+                return;
+            }
+
+            // A wall stroke is written to the scene as walls and a line, not kept as a temporary drawing
+            if (this.state.drawingMode === 'wall') {
+                const start = this.state.drawingStartPoint;
+                const absolute = this.state.drawingPoints.map(([px, py]) => [start.x + px, start.y + py]);
+                this.state.isDrawing = false;
+                this.state.drawingPoints = [];
+                this.state.drawingStartPoint = null;
+                this.state.currentDrawing = null;
+                await this.createWallStroke(absolute);
+                return;
+            }
+
             // Create final drawing on BlacksmithLayer using PIXI graphics
             // This avoids Foundry's Drawing API validation issues
             this.createPIXIDrawing(
@@ -2099,6 +2160,14 @@ class DrawingTool {
             const startY = this.state.lineStartPoint.y;
             const endX = worldCoords.x;
             const endY = worldCoords.y;
+            if (this.state.drawingMode === 'wall') {
+                this.state.isDrawing = false;
+                this.state.lineStartPoint = null;
+                this.state.lastMousePosition = null;
+                this.state.currentDrawing = null;
+                await this.createWallStroke([[startX, startY], [endX, endY]]);
+                return;
+            }
             const points = [[0, 0], [endX - startX, endY - startY]];
             const layer = this.services.canvasLayer;
             const graphics = new PIXI.Graphics();
@@ -2726,7 +2795,11 @@ class DrawingTool {
         
         try {
             // Determine if this is a box, ellipse, line, or symbol drawing
-            if (data.type === 'box' && data.startX !== undefined && data.width !== undefined && data.height !== undefined) {
+            if (data.terrainKind) {
+                this.createRemoteTerrain(data);
+            } else if (data.stampKind) {
+                this.createRemoteStamp(data);
+            } else if (data.type === 'box' && data.startX !== undefined && data.width !== undefined && data.height !== undefined) {
                 this.createRemoteBox(data);
             } else if (data.type === 'ellipse' && data.startX !== undefined && data.width !== undefined && data.height !== undefined) {
                 this.createRemoteEllipse(data);
@@ -3295,7 +3368,7 @@ class DrawingTool {
      * Set brush settings
      * @param {Object} settings - Brush settings to update
      */
-    setBrushSettings(settings) {
+    setBrushSettings(settings, persist = false) {
         if (settings.size !== undefined) {
             this.state.brushSettings.size = Math.max(1, Math.min(20, settings.size));
         }
@@ -3306,6 +3379,11 @@ class DrawingTool {
             this.state.brushSettings.type = settings.type;
         }
         
+        if (persist) {
+            if (settings.size !== undefined) game.settings.set(MODULE.ID, 'toolbar.lineWidth', this.state.brushSettings.size);
+            if (settings.color !== undefined) game.settings.set(MODULE.ID, 'toolbar.color', this.state.brushSettings.color);
+        }
+
         // Update button states when settings change
         if (settings.size !== undefined) {
             this.updateLineWidthButtons();
@@ -3313,8 +3391,80 @@ class DrawingTool {
         if (settings.color !== undefined) {
             this.updateColorButtons();
         }
+        this.notifyChange();
     }
     
+    /** Clear this user's temporary drawings, and say how many went. */
+    clearMine() {
+        // Always clear only the current user's drawings (for both GM and players)
+        const removed = this.clearUserDrawings(game.user.id) ?? 0;
+        notify(
+            removed ? 'Your drawings cleared' : 'Nothing to clear',
+            {
+                subtitle: removed
+                    ? `${removed} temporary drawing${removed === 1 ? '' : 's'} removed`
+                    : 'You have no temporary drawings on this scene',
+                type: removed ? 'info' : 'warn',
+                icon: 'fa-solid fa-eraser',
+                stackKey: `${MODULE.ID}-clear`
+            }
+        );
+    }
+
+    /** GM: clear every user's temporary drawings. */
+    clearEveryone() {
+        if (!game.user.isGM) return;
+        const removed = this._pixiDrawings?.length ?? 0;
+        this.clearAllDrawings();
+        notify(
+            removed ? 'All drawings cleared' : 'Nothing to clear',
+            {
+                subtitle: removed
+                    ? `${removed} temporary drawing${removed === 1 ? '' : 's'} removed from every player`
+                    : 'No temporary drawings on this scene',
+                type: removed ? 'info' : 'warn',
+                icon: 'fa-solid fa-trash-can',
+                stackKey: `${MODULE.ID}-clear-all`
+            }
+        );
+    }
+
+    /** Turn timed erase on or off: drawings delete themselves after the timeout. */
+    setTimedErase(enabled) {
+        this.state.timedEraseEnabled = !!enabled;
+
+        // Save state to settings
+        game.settings.set(MODULE.ID, 'toolbar.timedEraseEnabled', this.state.timedEraseEnabled);
+
+        this.updateTimedEraseButton();
+
+        // Restart cleanup with new interval based on timed erase state
+        if (this._cleanupInterval) {
+            clearInterval(this._cleanupInterval);
+            this._cleanupInterval = null;
+        }
+        // Schedule cleanup with appropriate interval
+        if (this._pixiDrawings && this._pixiDrawings.length > 0) {
+            this.scheduleCleanup();
+        }
+
+        const status = this.state.timedEraseEnabled ? 'enabled' : 'disabled';
+        const timeout = BlacksmithUtils?.getSettingSafely(
+            MODULE.ID,
+            'drawing.timedEraseTimeout',
+            30
+        ) || 30;
+        const scope = game.user.isGM ? 'all drawings' : 'your drawings';
+        notify(`Timed erase ${status}`, {
+            subtitle: this.state.timedEraseEnabled
+                ? `${scope} auto-delete after ${timeout}s`
+                : `${scope} stay until cleared`,
+            icon: 'fa-solid fa-clock',
+            stackKey: `${MODULE.ID}-timed-erase` // toggling repeatedly replaces in place
+        });
+        this.notifyChange();
+    }
+
     /**
      * Update active state of timed erase button in secondary bar
      * Uses Blacksmith's updateSecondaryBarItemActive API
@@ -3342,10 +3492,22 @@ class DrawingTool {
      * @param {string} mode - Drawing mode: 'line', 'box', 'stamp'
      */
     setDrawingMode(mode) {
-        if (['sketch', 'line', 'box', 'ellipse', 'stamp'].includes(mode)) {
+        if (['sketch', 'line', 'box', 'ellipse', 'stamp', 'terrain'].includes(mode) || (mode === 'wall' && this.canMakeWalls())) {
             this.state.drawingMode = mode;
             game.settings.set(MODULE.ID, 'toolbar.drawingMode', mode);
+            this.removePreviewSymbol();
+            this.notifyChange();
         }
+    }
+
+    /**
+     * The kind of stroke the mode makes. Wall mode strokes like a line or a sketch, by its shape.
+     * @returns {'sketch'|'line'|'box'|'ellipse'|'stamp'}
+     */
+    _strokeMode() {
+        const mode = this.state.drawingMode;
+        if (mode === 'terrain') return 'sketch';
+        return mode === 'wall' ? (this.state.wallShape === 'sketch' ? 'sketch' : 'line') : mode;
     }
 
     /**
@@ -3353,10 +3515,11 @@ class DrawingTool {
      * @param {string} style - Stamp style: 'plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'
      */
     setStampStyle(style) {
-        const valid = ['plus', 'x', 'dot', 'arrow', 'arrow-up', 'arrow-down', 'arrow-left', 'square'];
-        if (valid.includes(style)) {
+        if (isStamp(style)) {
             this.state.stampStyle = style;
             game.settings.set(MODULE.ID, 'toolbar.stampStyle', style);
+            this._roll = null;
+            this.notifyChange();
         }
     }
     
@@ -3369,6 +3532,7 @@ class DrawingTool {
             this.state.symbolSize = size;
             // Save to client-scope setting
             game.settings.set(MODULE.ID, 'toolbar.symbolSize', size);
+            this.notifyChange();
         }
     }
     
@@ -3545,6 +3709,10 @@ class DrawingTool {
      * @param {number} y - World Y coordinate
      */
     _createSymbolAt(symbolType, x, y) {
+        if (isProceduralStamp(symbolType)) {
+            this._placeStamp(symbolType, x, y);
+            return;
+        }
         const layer = this.services.canvasLayer;
         const graphics = new PIXI.Graphics();
         
@@ -3971,6 +4139,575 @@ class DrawingTool {
         }
     }
     
+    // ==================================================================
+    // ===== STAMPS =====================================================
+    // ==================================================================
+
+    /** The pixel size of the square a Small, Medium or Large stamp fits in, before the stamp's own scale. */
+    _symbolPixels() {
+        return {
+            small: DrawingTool.strSmallSymbolSize,
+            medium: DrawingTool.strMediumSymbolSize,
+            large: DrawingTool.strLargeSymbolSize
+        }[this.state.symbolSize] ?? DrawingTool.strMediumSymbolSize;
+    }
+
+    /** What the next stamp will look like -- its seed, turn, flip and size -- rolled ahead so the preview is what is placed. */
+    _peekRoll() {
+        if (!this._roll) {
+            const stamp = stampById(this.state.stampStyle);
+            const options = this.state.stamp;
+            this._roll = {
+                seed: 1 + Math.floor(Math.random() * 2147483646),
+                rotation: options.rotate && stamp && !stamp.legacy ? Math.random() * Math.PI * 2 : 0,
+                mirror: options.rotate && Math.random() < 0.5,
+                jitter: options.jitter ? 0.85 + Math.random() * 0.3 : 1
+            };
+        }
+        return this._roll;
+    }
+
+    _takeRoll() {
+        const roll = this._peekRoll();
+        this._roll = null;
+        return roll;
+    }
+
+    /** The colour the stamp is tinted, or null for its own colours. */
+    _stampTint(kind) {
+        return this.state.stamp.natural && isProceduralStamp(kind) ? null : this.state.brushSettings.color;
+    }
+
+    /** Whether this user may write Drawings to the scene. */
+    canKeepOnScene() {
+        return !!(game.user?.isGM || game.user?.can?.('DRAWING_CREATE'));
+    }
+
+    /** Whether this user may make walls: only the GM. */
+    canMakeWalls() {
+        return !!game.user?.isGM;
+    }
+
+    /** A stamp has been put down at a point, and now dragging scatters more of it. */
+    _beginScatter(event) {
+        this._scatter = null;
+        if (!isProceduralStamp(this.state.stampStyle)) return;
+        const point = this.getWorldCoordinates(event);
+        if (point) this._scatter = { x: point.x, y: point.y };
+    }
+
+    _scatterTo(event) {
+        const point = this.getWorldCoordinates(event);
+        if (!point || !this._scatter) return;
+        const kind = this.state.stampStyle;
+        const stamp = stampById(kind);
+        const step = this._symbolPixels() * stamp.scale * this.state.stamp.spacing * 0.6;
+        if (Math.hypot(point.x - this._scatter.x, point.y - this._scatter.y) < step) return;
+        this._scatter = { x: point.x, y: point.y };
+        this.removePreviewSymbol();
+        this._placeStamp(kind, point.x + (Math.random() - 0.5) * step * 0.3, point.y + (Math.random() - 0.5) * step * 0.3);
+    }
+
+    /** The preview that follows the mouse in stamp mode: the stamp as it will be put down, faint. */
+    _previewStamp(x, y) {
+        const layer = this.services.canvasLayer;
+        const kind = this.state.stampStyle;
+        const stamp = stampById(kind);
+        const roll = this._peekRoll();
+        const graphics = new PIXI.Graphics();
+        drawStamp(graphics, buildStamp(kind, roll), stampPalette(kind, this._stampTint(kind)), {
+            x, y, size: this._symbolPixels() * stamp.scale * roll.jitter, alpha: 0.55
+        });
+        layer.addChild(graphics);
+        this._previewSymbol = graphics;
+    }
+
+    /**
+     * Put one of the new stamps at a point: a temporary drawing everyone sees, or, if asked and
+     * allowed, Drawings written to the scene.
+     */
+    _placeStamp(kind, x, y) {
+        const stamp = stampById(kind);
+        if (!stamp || stamp.legacy) return;
+        const roll = this._takeRoll();
+        const size = this._symbolPixels() * stamp.scale * roll.jitter;
+        const tint = this._stampTint(kind);
+        const prims = buildStamp(kind, roll);
+        const palette = stampPalette(kind, tint);
+
+        if (this.state.stamp.keep && this.canKeepOnScene()) {
+            void this._keepStamp(kind, prims, palette, { x, y, size });
+            return;
+        }
+
+        const graphics = new PIXI.Graphics();
+        drawStamp(graphics, prims, palette, { x, y, size });
+        this.services.canvasLayer.addChild(graphics);
+        const drawingId = `stamp-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+        const record = {
+            id: drawingId,
+            graphics,
+            createdAt: Date.now(),
+            expiresAt: this.getExpirationTime(),
+            userId: game.user.id,
+            userName: game.user.name,
+            stampKind: kind,
+            x,
+            y
+        };
+        if (!this._pixiDrawings) this._pixiDrawings = [];
+        this._pixiDrawings.push(record);
+        this._lastDrawing = record;
+        this.scheduleCleanup();
+        this.broadcastDrawingCreation({
+            drawingId,
+            userId: game.user.id,
+            userName: game.user.name,
+            stampKind: kind,
+            seed: roll.seed,
+            rotation: roll.rotation,
+            mirror: roll.mirror,
+            size,
+            tint,
+            x,
+            y,
+            createdAt: record.createdAt,
+            expiresAt: record.expiresAt
+        });
+    }
+
+    /** A stamp from another client, drawn from the seed it was made with. */
+    createRemoteStamp(data) {
+        if (!isProceduralStamp(data.stampKind)) return;
+        const graphics = new PIXI.Graphics();
+        drawStamp(graphics, buildStamp(data.stampKind, data), stampPalette(data.stampKind, data.tint), {
+            x: data.x, y: data.y, size: data.size
+        });
+        this.services.canvasLayer.addChild(graphics);
+        if (!this._pixiDrawings) this._pixiDrawings = [];
+        this._pixiDrawings.push({
+            id: data.drawingId,
+            graphics,
+            createdAt: data.createdAt || Date.now(),
+            expiresAt: data.expiresAt || null,
+            userId: data.userId,
+            userName: data.userName || 'Unknown',
+            stampKind: data.stampKind,
+            x: data.x,
+            y: data.y
+        });
+        this.scheduleCleanup();
+    }
+
+    /** Write a stamp to the scene as Drawings, as one thing to take back. */
+    async _keepStamp(kind, prims, palette, { x, y, size }) {
+        const scene = canvas.scene;
+        if (!scene) return;
+        const group = foundry.utils.randomID();
+        const docs = stampDrawingData(prims, palette, {
+            x, y, size,
+            flags: { [MODULE.ID]: { stamp: { id: group, kind } } },
+            solid: CONST.DRAWING_FILL_TYPES.SOLID,
+            none: CONST.DRAWING_FILL_TYPES.NONE
+        });
+        await this._keepDrawings(docs, 'stamp');
+    }
+
+    /** Write Drawings to the scene, as one thing to take back. `what` is 'stamp' or 'path'. */
+    async _keepDrawings(docs, what) {
+        const scene = canvas.scene;
+        if (!scene) return;
+        try {
+            const made = await scene.createEmbeddedDocuments('Drawing', docs);
+            this._pushKept({ kind: what, drawingIds: (made ?? []).map(doc => doc.id) });
+        } catch (error) {
+            console.error(`${MODULE.NAME}: could not keep the ${what} on the scene`, error);
+            notify(`Could not keep the ${what}`, {
+                subtitle: 'The scene refused the drawing -- check you may create drawings here',
+                type: 'warn',
+                icon: what === 'path' ? 'fa-solid fa-road' : 'fa-solid fa-stamp',
+                stackKey: `${MODULE.ID}-keep`
+            });
+        }
+    }
+
+    // ==================================================================
+    // ===== TERRAIN PATHS ==============================================
+    // ==================================================================
+
+    /** How wide a path is, in pixels: its width in grid squares, by the grid. */
+    _pathWidthPixels() {
+        const grid = Number(canvas.grid?.size) || 100;
+        return Math.max(12, this.state.stamp.pathWidth * grid);
+    }
+
+    /** The kind of path being laid, falling back to dirt if what was saved no longer exists. */
+    _terrainKind() {
+        return terrainById(this.state.stamp.terrain) ? this.state.stamp.terrain : 'dirt';
+    }
+
+    /** The ribbon of the path so far, faint, as the pointer drags. */
+    _previewTerrain() {
+        const graphics = this._previewGraphics;
+        if (!graphics) return;
+        const start = this.state.drawingStartPoint;
+        const width = this._pathWidthPixels();
+        const path = smoothPath(this.state.drawingPoints.map(([px, py]) => [start.x + px, start.y + py]), { spacing: Math.max(6, width * 0.25) });
+        graphics.clear();
+        const kind = this._terrainKind();
+        drawStamp(graphics, buildTerrain(kind, path, { width, maxTexture: 0 }), terrainPalette(kind), { x: 0, y: 0, size: 1, alpha: 0.7, shadow: false });
+    }
+
+    /**
+     * Lay a path down: a temporary drawing everyone sees, or, if asked and allowed, Drawings written
+     * to the scene.
+     * @param {number[][]} points  [[x, y], ...] in scene pixels, the stroke as dragged.
+     */
+    createTerrainPath(points) {
+        const kind = this._terrainKind();
+        const width = this._pathWidthPixels();
+        const path = smoothPath(points, { spacing: Math.max(6, width * 0.25) });
+        if (path.length < 4) return;
+        const seed = 1 + Math.floor(Math.random() * 2147483646);
+        const palette = terrainPalette(kind);
+        const keep = this.state.stamp.keep && this.canKeepOnScene();
+        const prims = buildTerrain(kind, path, { width, seed, maxTexture: keep ? MAX_TEXTURE.scene : MAX_TEXTURE.canvas });
+
+        if (keep) {
+            const docs = stampDrawingData(prims, palette, {
+                x: 0, y: 0, size: 1,
+                flags: { [MODULE.ID]: { terrain: { id: foundry.utils.randomID(), kind } } },
+                solid: CONST.DRAWING_FILL_TYPES.SOLID,
+                none: CONST.DRAWING_FILL_TYPES.NONE
+            });
+            void this._keepDrawings(docs, 'path');
+            return;
+        }
+
+        const graphics = new PIXI.Graphics();
+        drawStamp(graphics, prims, palette, { x: 0, y: 0, size: 1, shadow: false });
+        this.services.canvasLayer.addChild(graphics);
+        const drawingId = `terrain-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+        const record = {
+            id: drawingId, graphics, createdAt: Date.now(), expiresAt: this.getExpirationTime(),
+            userId: game.user.id, userName: game.user.name, terrainKind: kind
+        };
+        if (!this._pixiDrawings) this._pixiDrawings = [];
+        this._pixiDrawings.push(record);
+        this._lastDrawing = record;
+        this.scheduleCleanup();
+        this.broadcastDrawingCreation({
+            drawingId, userId: game.user.id, userName: game.user.name,
+            terrainKind: kind, path, width, seed,
+            createdAt: record.createdAt, expiresAt: record.expiresAt
+        });
+    }
+
+    /** A path from another client, drawn from the line and seed it was made with. */
+    createRemoteTerrain(data) {
+        if (!terrainById(data.terrainKind) || !Array.isArray(data.path)) return;
+        const graphics = new PIXI.Graphics();
+        const prims = buildTerrain(data.terrainKind, data.path, { width: data.width, seed: data.seed, maxTexture: MAX_TEXTURE.canvas });
+        drawStamp(graphics, prims, terrainPalette(data.terrainKind), { x: 0, y: 0, size: 1, shadow: false });
+        this.services.canvasLayer.addChild(graphics);
+        if (!this._pixiDrawings) this._pixiDrawings = [];
+        this._pixiDrawings.push({
+            id: data.drawingId, graphics,
+            createdAt: data.createdAt || Date.now(), expiresAt: data.expiresAt || null,
+            userId: data.userId, userName: data.userName || 'Unknown', terrainKind: data.terrainKind
+        });
+        this.scheduleCleanup();
+    }
+
+    /** Choose a kind of path from the window, and start laying it. */
+    chooseTerrain(kind) {
+        if (!terrainById(kind)) return;
+        this.setStampOption('terrain', kind);
+        this.setDrawingMode('terrain');
+        this.updateModeButtons();
+        this.startFromWindow();
+        this.notifyChange();
+    }
+
+    // ==================================================================
+    // ===== WALLS ======================================================
+    // ==================================================================
+
+    /** A point put where walls may go, as Foundry's own wall tool would, or left alone with snapping off. */
+    _wallSnap(point) {
+        if (!this.state.wallSnap) return point;
+        const at = { x: point[0], y: point[1] };
+        const target = canvas.walls?.getSnappedPoint
+            ? canvas.walls.getSnappedPoint(at)
+            : canvas.grid.getSnappedPoint(at, { mode: CONST.GRID_SNAPPING_MODES.VERTEX });
+        return [target.x, target.y];
+    }
+
+    /**
+     * A wall stroke, made: the walls it describes, and a line over them in the brush's colour so
+     * the walls can be seen on the map. Both are written to the scene, and undo takes both back.
+     * @param {number[][]} points  [[x, y], ...] in scene pixels, the stroke as drawn.
+     */
+    async createWallStroke(points) {
+        const scene = canvas.scene;
+        if (!scene) return;
+        if (!this.canMakeWalls()) {
+            notify('Only the GM can draw walls', {
+                subtitle: 'Players can still sketch, box and stamp',
+                type: 'warn',
+                icon: 'fa-solid fa-border-none',
+                stackKey: `${MODULE.ID}-wall`
+            });
+            return;
+        }
+        const grid = Number(canvas.grid?.size) || 100;
+        const segments = wallStrokeSegments({
+            shape: this.state.wallShape,
+            points,
+            snap: point => this._wallSnap(point),
+            epsilon: Math.max(2, grid * 0.12),
+            closeDistance: grid * 0.4
+        });
+        if (!segments.length) return;
+
+        const group = foundry.utils.randomID();
+        const flags = { [MODULE.ID]: { drawnWall: { id: group } } };
+        const levels = scene.levels?.size > 1 && canvas.level?.id ? { levels: [canvas.level.id] } : {};
+        const wallData = segments.map(([a, b]) => ({ c: [a[0], a[1], b[0], b[1]], flags, ...levels }));
+        const channels = parseColor(this.state.brushSettings.color) ?? [0, 0, 0];
+        const color = `#${channels.map(c => c.toString(16).padStart(2, '0')).join('')}`;
+        const line = strokeDrawingData(segmentsPath(segments), {
+            color,
+            alpha: this.extractAlphaFromRgba(this.state.brushSettings.color),
+            width: this.state.brushSettings.size,
+            flags,
+            none: CONST.DRAWING_FILL_TYPES.NONE
+        });
+        try {
+            const walls = await scene.createEmbeddedDocuments('Wall', wallData);
+            const lines = await scene.createEmbeddedDocuments('Drawing', [line]);
+            this._pushKept({
+                kind: 'wall',
+                wallIds: (walls ?? []).map(doc => doc.id),
+                drawingIds: (lines ?? []).map(doc => doc.id)
+            });
+        } catch (error) {
+            console.error(`${MODULE.NAME}: could not draw the wall`, error);
+            notify('Could not draw the wall', {
+                subtitle: 'The scene refused the wall -- see the console',
+                type: 'warn',
+                icon: 'fa-solid fa-border-none',
+                stackKey: `${MODULE.ID}-wall`
+            });
+        }
+    }
+
+    // ==================================================================
+    // ===== WHAT IS ON THE SCENE, AND TAKING IT BACK ===================
+    // ==================================================================
+
+    _pushKept(entry) {
+        this._kept.push({ ...entry, createdAt: Date.now(), userId: game.user.id });
+        this.notifyChange();
+    }
+
+    /** Whether there is something written to the scene that undo would take back before any temporary drawing. */
+    _keptIsNewest() {
+        const kept = this._kept.at(-1);
+        return !!kept && (!this._lastDrawing || kept.createdAt >= this._lastDrawing.createdAt);
+    }
+
+    /** Take back the last thing written to the scene: a wall stroke, or a stamp kept. */
+    async _undoKept() {
+        const entry = this._kept.pop();
+        const scene = canvas.scene;
+        if (!entry || !scene) return;
+        try {
+            const exists = (collection, ids) => (ids ?? []).filter(id => collection.has(id));
+            const walls = exists(scene.walls, entry.wallIds);
+            const drawings = exists(scene.drawings, entry.drawingIds);
+            if (walls.length) await scene.deleteEmbeddedDocuments('Wall', walls);
+            if (drawings.length) await scene.deleteEmbeddedDocuments('Drawing', drawings);
+        } catch (error) {
+            console.error(`${MODULE.NAME}: could not take it back`, error);
+        }
+        notify({ wall: 'Wall undone', path: 'Path undone' }[entry.kind] ?? 'Stamp undone', {
+            subtitle: { wall: 'The walls and their line were removed', path: 'The path was removed from the scene' }[entry.kind] ?? 'The stamp was removed from the scene',
+            icon: 'fa-solid fa-undo',
+            stackKey: `${MODULE.ID}-undo`
+        });
+        this.notifyChange();
+    }
+
+    /** Whether undo has something to take back. */
+    canUndo() {
+        return !!(this._kept.length || this._lastDrawing);
+    }
+
+    // ==================================================================
+    // ===== THE TOOLS WINDOW ===========================================
+    // ==================================================================
+
+    /** Open the drawing tools window, or bring the one that is open forward. */
+    async openWindow(tab = null) {
+        const { DrawingToolsWindow } = await import('./window-drawing.js');
+        return DrawingToolsWindow.open(this, tab);
+    }
+
+    /** The window, if it is open. */
+    get window() {
+        return foundry.applications?.instances?.get(`${MODULE.ID}-drawing-tools`) ?? null;
+    }
+
+    /** Something the window shows has changed: draw it again, once, however many changes came together. */
+    notifyChange() {
+        const open = this.window;
+        if (!open) return;
+        clearTimeout(this._changeTimer);
+        this._changeTimer = setTimeout(() => open.render?.(), 30);
+    }
+
+    /**
+     * Start drawing from the window. The hotkey's way -- hold the key and the pointer draws as it
+     * moves -- is wrong for a window, where a stroke should start when the button is pressed, so
+     * from here a stroke is press, drag, release (see _windowPointerDown), and right-drag still pans.
+     */
+    startFromWindow() {
+        this._fromWindow = true;
+        if (this.state.active) {
+            this.notifyChange();
+            return true;
+        }
+        this.toggleFromHotkey();
+        this.notifyChange();
+        return this.state.active;
+    }
+
+    /** The button went down on the map in the window's way of drawing: begin whatever the tool draws. */
+    _windowPointerDown(event) {
+        if (!this.state.active) return false;
+        // Only the left button draws. The others, and Ctrl and Alt, are Foundry's to pan, select and open menus with.
+        if (event.button !== 0 || event.ctrlKey || event.altKey || event.metaKey) return false;
+        if (!this.canUserDraw()) return false;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        const mode = this._strokeMode();
+        if (mode === 'stamp') {
+            this.stampSymbol(this.state.stampStyle, event);
+            this._beginScatter(event);
+            return false;
+        }
+        const start = { sketch: 'startDrawing', line: 'startLineDrawing', box: 'startBoxDrawing', ellipse: 'startEllipseDrawing' }[mode];
+        if (!start) return false;
+        this._pressedAt = { x: event.clientX, y: event.clientY };
+        // Hold the pointer, so the stroke goes on and ends properly if it leaves the canvas.
+        try { canvas.app.view.setPointerCapture?.(event.pointerId); } catch (error) { /* not every pointer can be held */ }
+        this[start](event);
+        return false;
+    }
+
+    _windowPointerMove(event) {
+        if (!this.state.active) return false;
+        const mode = this._strokeMode();
+        if (this.state.isDrawing) {
+            const update = { sketch: 'updateDrawing', line: 'updateLinePreview', box: 'updateBoxPreview', ellipse: 'updateEllipsePreview' }[mode];
+            if (update) this[update](event);
+        } else if (mode === 'stamp') {
+            if (this._scatter && (event.buttons & 1)) this._scatterTo(event);
+            else {
+                this._scatter = null;
+                this.updatePreviewSymbol(event);
+            }
+        }
+        return false;
+    }
+
+    _windowPointerUp(event) {
+        if (!this.state.active) return false;
+        this._scatter = null;
+        try { canvas.app.view.releasePointerCapture?.(event.pointerId); } catch (error) { /* it was not held */ }
+        if (!this.state.isDrawing) return false;
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        const pressed = this._pressedAt;
+        this._pressedAt = null;
+        // A click with no drag draws nothing: not a speck, not a zero-length line, not a wall.
+        if (pressed && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < 4) {
+            this.cancelDrawing();
+            return false;
+        }
+        const finish = { sketch: 'finishDrawing', line: 'finishLineDrawing', box: 'finishBoxDrawing', ellipse: 'finishEllipseDrawing' }[this._strokeMode()];
+        if (finish) void this[finish](event);
+        return false;
+    }
+
+    /** Stop drawing from the window. */
+    stopFromWindow() {
+        if (!this.state.active) return;
+        this.toggleFromHotkey();
+        this._fromWindow = false;
+        this.notifyChange();
+    }
+
+    /** The window has closed: drawing it started stops with it. */
+    onWindowClosed() {
+        if (this._fromWindow && this.state.active) this.toggleFromHotkey();
+        this._fromWindow = false;
+    }
+
+    /** Choose a tool from the window and, if nothing is drawing yet, start. */
+    chooseMode(mode) {
+        this.setDrawingMode(mode);
+        this.updateModeButtons();
+        this.startFromWindow();
+        this.notifyChange();
+    }
+
+    /** Choose a stamp from the window. */
+    chooseStamp(kind) {
+        if (!isStamp(kind)) return;
+        this.setStampStyle(kind);
+        this.setDrawingMode('stamp');
+        this.updateModeButtons();
+        this.updateStampStyleButtons();
+        this._roll = null;
+        this.removePreviewSymbol();
+        this.startFromWindow();
+        this.notifyChange();
+    }
+
+    /**
+     * Change one of the stamp options: natural, keep, rotate, jitter, spacing.
+     * @param {string} name
+     * @param {boolean|number} value
+     */
+    setStampOption(name, value) {
+        if (!(name in this.state.stamp)) return;
+        const current = this.state.stamp[name];
+        this.state.stamp[name] = typeof current === 'number' ? Number(value) : typeof current === 'string' ? String(value) : !!value;
+        this._roll = null;
+        game.settings.set(MODULE.ID, 'toolbar.stampOptions', { ...this.state.stamp });
+        this.notifyChange();
+    }
+
+    /** Change one of the wall options: shape ('line' or 'sketch') and snap. */
+    setWallOption(name, value) {
+        if (name === 'shape') this.state.wallShape = value === 'sketch' ? 'sketch' : 'line';
+        else if (name === 'snap') this.state.wallSnap = !!value;
+        else return;
+        game.settings.set(MODULE.ID, 'toolbar.wallOptions', { shape: this.state.wallShape, snap: this.state.wallSnap });
+        this.notifyChange();
+    }
+
+    setLineStyle(style) {
+        if (!['solid', 'dotted', 'dashed'].includes(style)) return;
+        this.state.lineStyle = style;
+        game.settings.set(MODULE.ID, 'toolbar.lineStyle', style);
+        this.updateLineStyleButtons();
+        this.notifyChange();
+    }
+
     /**
      * Get list of all current drawings with metadata
      * @returns {Array} Array of drawing metadata objects

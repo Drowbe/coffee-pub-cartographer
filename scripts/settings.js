@@ -314,6 +314,27 @@ export const registerSettings = () => {
 		type: String
 	});
 
+	// The stamp options chosen in the drawing tools window: natural colours, keep on the scene,
+	// turn and flip, vary size, scatter spacing. One object, since they only ever travel together.
+	game.settings.register(MODULE.ID, 'toolbar.stampOptions', {
+		name: '', // Hidden setting
+		hint: '',
+		scope: 'user',
+		config: false, // Hidden from settings UI
+		default: {},
+		type: Object
+	});
+
+	// The wall options chosen in the drawing tools window: { shape: 'line' | 'sketch', snap }.
+	game.settings.register(MODULE.ID, 'toolbar.wallOptions', {
+		name: '', // Hidden setting
+		hint: '',
+		scope: 'user',
+		config: false, // Hidden from settings UI
+		default: {},
+		type: Object
+	});
+
 	// Symbol size selection (symbols group)
 	game.settings.register(MODULE.ID, 'toolbar.symbolSize', {
 		name: '', // Hidden setting

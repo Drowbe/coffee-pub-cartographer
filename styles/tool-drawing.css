@@ -12,3 +12,129 @@
 
 /* Add drawing tool styles here */
 
+
+/* ------------------------------------ */
+/* --- DRAWING TOOLS WINDOW ----------- */
+/* ------------------------------------ */
+
+/* The window is built from Blacksmith's tool-window components -- tabs, the segmented control,
+   sections, toggles, sliders, buttons -- which carry their own styling and follow Light, Dark
+   and Glass. What is here is only what no shared component covers: the colour swatches, the grid
+   of stamps, and a row of a label and its control. Colours come from the --blacksmith-tool-*
+   family. */
+
+.cartographer-drawing-window .cartographer-drawing-panel {
+    padding: 8px 10px 10px;
+    font-size: 0.9em;
+    /* Blacksmith's stack lines its items up at the start, which would shrink every section to the
+       width of what is in it; the sections are meant to run the width of the window. */
+    align-items: stretch;
+}
+
+.cartographer-drawing-window .cartographer-drawing-panel > .blacksmith-tool-section {
+    width: 100%;
+    min-width: 0;
+}
+
+/* Label and control sit side by side; nothing is pushed to the far edge. A slider carries its own
+   value readout. */
+.cartographer-drawing-window .cartographer-drawing-row {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.cartographer-drawing-window .cartographer-drawing-label {
+    color: var(--blacksmith-tool-text-muted);
+}
+
+.cartographer-drawing-window .cartographer-drawing-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.cartographer-drawing-window .cartographer-drawing-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.cartographer-drawing-window .cartographer-drawing-swatch {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 2px solid var(--blacksmith-tool-divider);
+    border-radius: 50%;
+    background: var(--swatch, #000);
+    cursor: pointer;
+}
+
+.cartographer-drawing-window .cartographer-drawing-swatch:hover {
+    border-color: var(--blacksmith-tool-text-muted);
+}
+
+.cartographer-drawing-window .cartographer-drawing-swatch.is-active {
+    border-color: var(--blacksmith-tool-text, #fff);
+    box-shadow: 0 0 0 2px var(--blacksmith-tool-accent, rgba(255, 255, 255, 0.4));
+}
+
+.cartographer-drawing-window .cartographer-stamp-grid {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 6px;
+}
+
+/* A stamp is a button, and Foundry gives every button a fixed height, which squashes a picture over a
+   name; it is let to be as tall as what it holds. */
+.cartographer-drawing-window .cartographer-stamp {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 2px;
+    width: auto;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 4px 2px 3px;
+    overflow: visible;
+    line-height: 1.1;
+    border: 1px solid var(--blacksmith-tool-divider);
+    border-radius: 4px;
+    background: var(--blacksmith-tool-surface-sunken, rgba(0, 0, 0, 0.2));
+    color: inherit;
+    cursor: pointer;
+}
+
+.cartographer-drawing-window .cartographer-stamp:hover {
+    border-color: var(--blacksmith-tool-text-muted);
+}
+
+.cartographer-drawing-window .cartographer-stamp.is-active {
+    border-color: var(--blacksmith-tool-accent, #fff);
+    box-shadow: inset 0 0 0 1px var(--blacksmith-tool-accent, #fff);
+}
+
+.cartographer-drawing-window .cartographer-stamp-art {
+    display: block;
+    width: 48px;
+    height: 48px;
+}
+
+.cartographer-drawing-window .cartographer-stamp-art svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.cartographer-drawing-window .cartographer-stamp-name {
+    font-size: 0.8em;
+    line-height: 1.1;
+    text-align: center;
+}
