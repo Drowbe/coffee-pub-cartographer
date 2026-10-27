@@ -122,7 +122,7 @@ away, so it hints at ground rather than filling the scene with it. Click to put 
 few pixels along the way, so they run together into a continuous area, and a fast drag leaves no gaps. A
 Medium patch is about a square and a half across, and **Scatter spacing** on the Stamps tab widens or
 tightens the dabs. One drag is one stroke: Undo takes the whole of it back, and, kept on the scene, it is
-written as one when you let go. Only the first dab of a kept stroke has texture, to keep the scene light.
+written as one when you let go. What you see while you drag is what is written; to keep the scene light, each dab after the first keeps only a few specks of texture.
 
 ## Utilities
 

@@ -21,6 +21,9 @@ import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } fr
 /** The most stamps one drag puts down, so a long stroke cannot bury the scene. */
 const MAX_SCATTER = 400;
 
+/** How many specks of texture a dab of ground keeps after the first, when a stroke is kept on the scene. */
+const KEPT_SPECKS = 5;
+
 class DrawingTool {
     // Color palette constants - defined once, can be moved to settings later
     static strColor1 = 'rgba(38, 38, 38, 0.7)';   // Black
@@ -4284,13 +4287,13 @@ class DrawingTool {
         const later = !!stroke && stroke.count++ > 0;
 
         if (this.state.stamp.keep && this.canKeepOnScene()) {
-            // Painted over the first, a dab of ground needs no texture of its own: the stroke is a
-            // great many Drawings, and the first dab's texture is enough to read as ground.
-            const kept = later && stamp.category === 'ground' ? prims.filter(prim => !prim.speck) : prims;
+            // A stroke of ground is a great many Drawings, so after the first dab each keeps only a few
+            // specks of its texture. What is shown while the button is down is exactly what is written.
+            let specks = 0;
+            const kept = later && stamp.category === 'ground' ? prims.filter(prim => !prim.speck || ++specks <= KEPT_SPECKS) : prims;
             if (stroke) {
-                // Shown faintly while the button is down; written, as one, when it comes up.
                 const live = new PIXI.Graphics();
-                drawStamp(live, prims, palette, { x, y, size });
+                drawStamp(live, kept, palette, { x, y, size });
                 this.services.canvasLayer.addChild(live);
                 stroke.live.push(live);
             }
