@@ -110,18 +110,19 @@ path follows your stroke, smoothed, with the ground's texture scattered over it:
 - **Boardwalk** -- planks across the path.
 - **Stream** -- water with ripples, for a ford or a brook.
 
-**Width** is in grid squares -- narrow is half a square, wide is two. **Keep on the scene** works as it
-does for stamps: off, the path is temporary and everyone sees it; on, it is written to the scene as Foundry
+**Width** is in grid squares -- narrow is half a square, wide is two -- and sits under the paths. **Keep on the
+scene** is at the top of the tab, and covers paths and patches alike. It works as it does for stamps: off, the path is temporary and everyone sees it; on, it is written to the scene as Foundry
 Drawings. A kept path holds fewer specks of texture than a temporary one, to keep the scene light.
 Undo takes back a whole path.
 
 ### Ground patches
 
 Below the paths on the Terrain tab, a ground patch is a small area of ground, like the pond but for dirt: a loose blob whose edge fades
-away, so it hints at ground rather than filling the scene with it. Click to put one down; drag to
-scatter a few. They are large against other stamps, so a Medium patch is about a square and a half
-across. Each is made of several see-through layers, so a patch kept on the scene is a handful of
-Drawings, not one.
+away, so it hints at ground rather than filling the scene with it. Click to put one down, or **hold the button and drag to paint**: a dab goes down every
+few pixels along the way, so they run together into a continuous area, and a fast drag leaves no gaps. A
+Medium patch is about a square and a half across, and **Scatter spacing** on the Stamps tab widens or
+tightens the dabs. One drag is one stroke: Undo takes the whole of it back, and, kept on the scene, it is
+written as one when you let go. Only the first dab of a kept stroke has texture, to keep the scene light.
 
 ## Utilities
 

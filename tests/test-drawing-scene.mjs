@@ -21,6 +21,8 @@ const slice = (from, to) => {
 };
 const methods = slice('    // ===== STAMPS ====', '    // ===== THE TOOLS WINDOW');
 const toolButton = slice('    addDrawingTool(controls) {', '    /** Open the drawing tools window, or bring');
+const undo = slice('    undoLastDrawing() {', '    /**\n     * Clean up drawings from a specific player');
+const MAX_SCATTER = Number(src.match(/const MAX_SCATTER = (\d+)/)[1]);
 const pointer = slice('    /** The button went down on the map', '    /** Stop drawing from the window. */');
 const strokeMode = slice('    _strokeMode() {', '    /**\n     * Set the stamp style');
 
@@ -84,7 +86,7 @@ const canvas = {
     walls: null,
     level: null
 };
-globalThis.PIXI = { Graphics: class { constructor() { this.calls = []; return new Proxy(this, { get: (t, n) => (n in t ? t[n] : (...a) => t.calls.push([n, ...a])) }); } } };
+globalThis.PIXI = { Graphics: class { constructor() { this.calls = []; this.destroyed = false; return new Proxy(this, { get: (t, n) => (n === 'parent' ? undefined : n === 'destroy' ? () => { t.destroyed = true; } : n in t ? t[n] : (...a) => t.calls.push([n, ...a])) }); } } };
 
 class DrawingTool {
     static strSmallSymbolSize = 40;
@@ -97,6 +99,7 @@ ${strokeMode}
 ${methods}
 ${pointer}
 ${toolButton}
+${undo}
 };
 })()`);
 
@@ -119,6 +122,8 @@ const make = () => {
         scheduleCleanup() { this.scheduled = true; },
         broadcastDrawingCreation(data) { added.push(data); },
         removePreviewSymbol() {},
+        _fadeOutAndRemove(graphics) { graphics.parent?.removeChild(graphics); },
+        broadcastDrawingDeletion(clear, user, id) { (this.broadcastDeleted ??= []).push(id); },
         deleteDrawingById(id) { this.deleted = [...(this.deleted ?? []), id]; this._pixiDrawings = this._pixiDrawings.filter(d => d.id !== id); },
         getWorldCoordinates: event => ({ x: event.x, y: event.y })
     });
@@ -388,7 +393,7 @@ console.log('\nscattering');
     tool._scatterTo({ x: 100 + step * 1.5, y: 100 });
     check('a move of enough places another', tool._pixiDrawings.length === 1);
     tool._scatterTo({ x: 100 + step * 3.5, y: 100 });
-    check('and again further on', tool._pixiDrawings.length === 2);
+    check('and again further on, one for each step along the way', tool._pixiDrawings.length === 3);
     const wide = make();
     wide.state.stamp.spacing = 3;
     wide._beginScatter({ x: 0, y: 0 });
@@ -684,6 +689,76 @@ console.log('\nthe scene');
     check('a player cannot change the scene', scene.updates.length === 0 && !tool.canSetScene());
     isGM = true;
     check('a GM can', tool.canSetScene());
+}
+
+console.log('\npainting ground: a drag that does not stop');
+{
+    scene = makeScene();
+    added.length = 0;
+    const tool = make();
+    tool.state.drawingMode = 'stamp';
+    tool.state.stampStyle = 'patch-dirt';
+    tool.state.stamp.jitter = false;
+    const treeStep = make()._scatterStep('tree');
+    const patchStep = tool._scatterStep('patch-dirt');
+    check('ground is painted at a fraction of its size, so dabs run together', patchStep === 80 * 2.0 * 0.2 && patchStep < 80 * 2.0 * 0.5);
+    check('where a tree is put down further apart', treeStep === 80 * 1.5 * 0.6);
+    check('wider spacing spreads it, and it never falls below a few pixels', (() => { const t = make(); t.state.stamp.spacing = 3; return t._scatterStep('patch-dirt') === patchStep * 3 && (() => { t.state.symbolSize = 'small'; t.state.stamp.spacing = 0.01; return t._scatterStep('patch-dirt') >= 6; })(); })());
+    tool._beginScatter({ x: 0, y: 0 });
+    tool.stampSymbol = () => tool._placeStamp('patch-dirt', 0, 0);
+    tool.stampSymbol();
+    tool._scatterTo({ x: patchStep * 10.5, y: 0 });
+    check('one fast drag across ten steps leaves a dab at each, with no gaps', tool._pixiDrawings.length === 11);
+    const xs = tool._pixiDrawings.map(d => d.x).sort((a, b) => a - b);
+    check('they are evenly along the drag', xs.slice(1).every((x, i) => x - xs[i] < patchStep * 1.2 && x - xs[i] > patchStep * 0.8));
+    check('they are one stroke', new Set(tool._pixiDrawings.map(d => d.group)).size === 1 && !!tool._pixiDrawings[0].group);
+    tool._scatterTo({ x: patchStep * 10.9, y: 0 });
+    check('a little further than the last dab places nothing until a step is made', tool._pixiDrawings.length === 11);
+    const before = tool._pixiDrawings.length;
+    tool._scatterTo({ x: 1e6, y: 0 });
+    check('one stroke is held to a cap, so it cannot bury the scene', tool._pixiDrawings.length <= MAX_SCATTER + 1 && tool._pixiDrawings.length > before);
+    tool._endScatter();
+    check('letting go ends the stroke', tool._scatter === null);
+    tool._lastDrawing = tool._pixiDrawings.at(-1);
+    tool.undoLastDrawing();
+    check('undo takes back the whole stroke, not a dab', tool._pixiDrawings.length === 0);
+    check('and tells everyone, dab by dab', tool.broadcastDeleted.length > 300);
+}
+{
+    scene = makeScene();
+    const tool = make();
+    tool.state.stampStyle = 'patch-dirt';
+    tool.state.stamp.keep = true;
+    tool.state.stamp.jitter = false;
+    const step = tool._scatterStep('patch-dirt');
+    tool._beginScatter({ x: 0, y: 0 });
+    tool._placeStamp('patch-dirt', 0, 0);
+    tool._scatterTo({ x: step * 4.2, y: 0 });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    check('kept ground is not written while the button is down', scene.creates.length === 0 && tool._kept.length === 0);
+    check('it is drawn faintly meanwhile, a dab at a time', tool.services.canvasLayer.added.length === 5 && tool._scatter.live.length === 5);
+    const firstDocs = tool._scatter.docs.length;
+    tool._endScatter();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const written = scene.creates.filter(([type]) => type === 'Drawing');
+    check('when it comes up the whole stroke is written in one batch', written.length === 1 && written[0][1].length === tool._kept[0].drawingIds.length);
+    check('and is one thing to undo', tool._kept.length === 1 && tool._kept[0].kind === 'stamp');
+    check('the faint stand-ins are taken away', tool.services.canvasLayer.added.length === 5 && tool.services.canvasLayer.added.every(g => g.destroyed));
+    const patches = written[0][1];
+    const perFirst = stampDrawingData(buildStamp('patch-dirt', {}), stampPalette('patch-dirt'), { x: 0, y: 0, size: 160 }).length;
+    check('later dabs leave out the specks, so a long stroke stays light', patches.length < perFirst * 5 && patches.length > perFirst);
+    check('every dab is its own group, so the eraser can carve the ground', new Set(patches.map(d => d.flags[MODULE.ID].stamp.id)).size === 5);
+    await tool._undoKept();
+    check('undo takes the whole stroke off the scene', scene.drawings.size === 0);
+}
+{
+    scene = makeScene();
+    const tool = make();
+    tool.state.stampStyle = 'tree';
+    tool.state.stamp.keep = true;
+    tool._placeStamp('tree', 100, 100);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    check('a single stamp, no stroke, is still written at once', scene.creates.filter(([type]) => type === 'Drawing').length === 1);
 }
 
 console.log('\nwhat the user may do');

@@ -18,6 +18,9 @@ import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } fr
  * Handles temporary player drawings on the canvas for planning purposes
  * This is the first tool in the Cartographer multi-tool module
  */
+/** The most stamps one drag puts down, so a long stroke cannot bury the scene. */
+const MAX_SCATTER = 400;
+
 class DrawingTool {
     // Color palette constants - defined once, can be moved to settings later
     static strColor1 = 'rgba(38, 38, 38, 0.7)';   // Black
@@ -1213,7 +1216,7 @@ class DrawingTool {
         
         this.state.active = false;
         this._fromWindow = false;
-        this._scatter = null;
+        this._endScatter();
         this.notifyChange();
         this.detachCanvasHandlers();
         
@@ -1383,8 +1386,13 @@ class DrawingTool {
             this._fadeOutAndRemove(drawingToRemove.graphics, 300);
         }
         
-        // Remove from array
-        this._pixiDrawings = this._pixiDrawings.filter(d => d.id !== drawingToRemove.id);
+        // A stroke of stamps -- a drag -- is one thing to undo
+        const stroke = drawingToRemove.group ? this._pixiDrawings.filter(d => d.group === drawingToRemove.group && d.id !== drawingToRemove.id) : [];
+        for (const other of stroke) {
+            if (other.graphics?.parent) this._fadeOutAndRemove(other.graphics, 300);
+        }
+        const gone = new Set([drawingToRemove.id, ...stroke.map(d => d.id)]);
+        this._pixiDrawings = this._pixiDrawings.filter(d => !gone.has(d.id));
         
         // Clear last drawing reference
         this._lastDrawing = null;
@@ -1398,7 +1406,7 @@ class DrawingTool {
         }
         
         // Broadcast specific drawing deletion to other clients (by ID, not all user drawings)
-        this.broadcastDrawingDeletion(false, game.user.id, drawingToRemove.id);
+        for (const id of gone) this.broadcastDrawingDeletion(false, game.user.id, id);
         
         notify('Drawing undone', {
             subtitle: this._lastDrawing ? 'Click again to undo the one before it' : 'That was your last drawing',
@@ -1502,8 +1510,8 @@ class DrawingTool {
                 event.preventDefault();
                 event.stopPropagation();
                 event.stopImmediatePropagation();
-                self.stampSymbol(self.state.stampStyle, event);
                 self._beginScatter(event);
+                self.stampSymbol(self.state.stampStyle, event);
                 return false;
             }
             
@@ -1559,7 +1567,7 @@ class DrawingTool {
                     if (self._scatter && (event.buttons & 1)) {
                         self._scatterTo(event);
                     } else {
-                        self._scatter = null;
+                        self._endScatter();
                         self.updatePreviewSymbol(event);
                     }
                 }
@@ -1575,7 +1583,7 @@ class DrawingTool {
             if (!self.state.active) {
                 return false;
             }
-            self._scatter = null;
+            self._endScatter();
 
             // Line/box/ellipse: ignore mouse up (drawing finishes when key is released/toggled off)
             if (self._strokeMode() === 'line' || self._strokeMode() === 'box' || self._strokeMode() === 'ellipse') {
@@ -4194,24 +4202,56 @@ class DrawingTool {
         return !!game.user?.isGM;
     }
 
-    /** A stamp has been put down at a point, and now dragging scatters more of it. */
+    /**
+     * A stamp is being put down at a point, and now dragging goes on putting down more of it. The
+     * stroke is remembered as one thing: undone together, and, for a stamp kept on the scene, written
+     * together when the button comes up, with what has been put down drawn faintly until then.
+     */
     _beginScatter(event) {
-        this._scatter = null;
+        this._endScatter();
         if (!isProceduralStamp(this.state.stampStyle)) return;
         const point = this.getWorldCoordinates(event);
-        if (point) this._scatter = { x: point.x, y: point.y };
+        if (point) this._scatter = { x: point.x, y: point.y, group: foundry.utils.randomID(), count: 0, docs: [], live: [] };
+    }
+
+    /** The stroke is over: what is to be written to the scene is written, as one thing. */
+    _endScatter() {
+        const stroke = this._scatter;
+        this._scatter = null;
+        if (!stroke) return;
+        const clear = () => {
+            for (const graphics of stroke.live) {
+                graphics.parent?.removeChild(graphics);
+                graphics.destroy?.();
+            }
+        };
+        if (stroke.docs.length) void this._keepDrawings(stroke.docs, 'stamp').finally(clear);
+        else clear();
+    }
+
+    /** How far apart a drag puts stamps down. Ground is painted: dabs close enough to run together. */
+    _scatterStep(kind) {
+        const stamp = stampById(kind);
+        const apart = stamp.category === 'ground' ? 0.2 : 0.6;
+        return Math.max(6, this._symbolPixels() * stamp.scale * this.state.stamp.spacing * apart);
     }
 
     _scatterTo(event) {
         const point = this.getWorldCoordinates(event);
-        if (!point || !this._scatter) return;
+        const stroke = this._scatter;
+        if (!point || !stroke) return;
         const kind = this.state.stampStyle;
-        const stamp = stampById(kind);
-        const step = this._symbolPixels() * stamp.scale * this.state.stamp.spacing * 0.6;
-        if (Math.hypot(point.x - this._scatter.x, point.y - this._scatter.y) < step) return;
-        this._scatter = { x: point.x, y: point.y };
+        const step = this._scatterStep(kind);
+        const loose = stampById(kind).category === 'ground' ? 0.1 : 0.3;
         this.removePreviewSymbol();
-        this._placeStamp(kind, point.x + (Math.random() - 0.5) * step * 0.3, point.y + (Math.random() - 0.5) * step * 0.3);
+        // Every step along the way gets one, so a fast drag leaves no gaps.
+        let distance = Math.hypot(point.x - stroke.x, point.y - stroke.y);
+        while (distance >= step && stroke.count < MAX_SCATTER) {
+            stroke.x += ((point.x - stroke.x) / distance) * step;
+            stroke.y += ((point.y - stroke.y) / distance) * step;
+            this._placeStamp(kind, stroke.x + (Math.random() - 0.5) * step * loose, stroke.y + (Math.random() - 0.5) * step * loose);
+            distance = Math.hypot(point.x - stroke.x, point.y - stroke.y);
+        }
     }
 
     /** The preview that follows the mouse in stamp mode: the stamp as it will be put down, faint. */
@@ -4240,9 +4280,21 @@ class DrawingTool {
         const tint = this._stampTint(kind);
         const prims = buildStamp(kind, roll);
         const palette = stampPalette(kind, tint);
+        const stroke = this._scatter;
+        const later = !!stroke && stroke.count++ > 0;
 
         if (this.state.stamp.keep && this.canKeepOnScene()) {
-            void this._keepStamp(kind, prims, palette, { x, y, size });
+            // Painted over the first, a dab of ground needs no texture of its own: the stroke is a
+            // great many Drawings, and the first dab's texture is enough to read as ground.
+            const kept = later && stamp.category === 'ground' ? prims.filter(prim => !prim.speck) : prims;
+            if (stroke) {
+                // Shown faintly while the button is down; written, as one, when it comes up.
+                const live = new PIXI.Graphics();
+                drawStamp(live, prims, palette, { x, y, size });
+                this.services.canvasLayer.addChild(live);
+                stroke.live.push(live);
+            }
+            void this._keepStamp(kind, kept, palette, { x, y, size }, stroke);
             return;
         }
 
@@ -4258,6 +4310,7 @@ class DrawingTool {
             userId: game.user.id,
             userName: game.user.name,
             stampKind: kind,
+            group: stroke?.group,
             x,
             y
         };
@@ -4306,7 +4359,7 @@ class DrawingTool {
     }
 
     /** Write a stamp to the scene as Drawings, as one thing to take back. */
-    async _keepStamp(kind, prims, palette, { x, y, size }) {
+    async _keepStamp(kind, prims, palette, { x, y, size }, stroke = null) {
         const scene = canvas.scene;
         if (!scene) return;
         const group = foundry.utils.randomID();
@@ -4316,6 +4369,11 @@ class DrawingTool {
             solid: CONST.DRAWING_FILL_TYPES.SOLID,
             none: CONST.DRAWING_FILL_TYPES.NONE
         });
+        // In a stroke, they wait for its end and are written together.
+        if (stroke) {
+            stroke.docs.push(...docs);
+            return;
+        }
         await this._keepDrawings(docs, 'stamp');
     }
 
@@ -4825,8 +4883,8 @@ class DrawingTool {
             return false;
         }
         if (mode === 'stamp') {
-            this.stampSymbol(this.state.stampStyle, event);
             this._beginScatter(event);
+            this.stampSymbol(this.state.stampStyle, event);
             return false;
         }
         const start = { sketch: 'startDrawing', line: 'startLineDrawing', box: 'startBoxDrawing', ellipse: 'startEllipseDrawing' }[mode];
@@ -4852,7 +4910,7 @@ class DrawingTool {
         } else if (mode === 'stamp') {
             if (this._scatter && (event.buttons & 1)) this._scatterTo(event);
             else {
-                this._scatter = null;
+                this._endScatter();
                 this.updatePreviewSymbol(event);
             }
         }
@@ -4861,7 +4919,7 @@ class DrawingTool {
 
     _windowPointerUp(event) {
         if (!this.state.active) return false;
-        this._scatter = null;
+        this._endScatter();
         try { canvas.app.view.releasePointerCapture?.(event.pointerId); } catch (error) { /* it was not held */ }
         if (this._erasing) {
             this._erasing = false;

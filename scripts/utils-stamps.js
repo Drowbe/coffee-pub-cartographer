@@ -320,7 +320,7 @@ function patch(texture) {
             const reach = Math.sqrt(rng()) * 0.3;
             const r = between(rng, size[0], size[1]);
             const tone = texture === 'pebble' ? ['light', 'dark', 'accent2'][Math.floor(rng() * 3)] : (rng() < 0.6 ? 'accent' : 'light');
-            prims.push(poly(ngon(Math.cos(angle) * reach, Math.sin(angle) * reach, r, r, 6, rng() * TAU), tone, { alpha: texture === 'pebble' ? 0.85 : 0.55 }));
+            prims.push(poly(ngon(Math.cos(angle) * reach, Math.sin(angle) * reach, r, r, 6, rng() * TAU), tone, { alpha: texture === 'pebble' ? 0.85 : 0.55, speck: true }));
         }
         return prims;
     };
