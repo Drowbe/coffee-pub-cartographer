@@ -6,7 +6,7 @@ import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
 import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor } from './utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData } from './utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup } from './utils-drawing.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
 
 // ================================================================== 
@@ -96,6 +96,11 @@ class DrawingTool {
         // What the next stamp will look like, and where a drag of stamps was last put down
         this._roll = null;
         this._scatter = null;
+        // The eraser: whether it is down, what it has taken this stroke, and the work still going on
+        this._erasing = false;
+        this._erased = new Set();
+        this._eraseBatch = { Wall: [], Drawing: [] };
+        this._eraseQueue = Promise.resolve();
     }
     
     /**
@@ -3492,9 +3497,10 @@ class DrawingTool {
      * @param {string} mode - Drawing mode: 'line', 'box', 'stamp'
      */
     setDrawingMode(mode) {
-        if (['sketch', 'line', 'box', 'ellipse', 'stamp', 'terrain'].includes(mode) || (mode === 'wall' && this.canMakeWalls())) {
+        if (['sketch', 'line', 'box', 'ellipse', 'stamp', 'terrain', 'erase'].includes(mode) || (mode === 'wall' && this.canMakeWalls())) {
             this.state.drawingMode = mode;
-            game.settings.set(MODULE.ID, 'toolbar.drawingMode', mode);
+            // The eraser is only ever the window's: it is not remembered, or the hotkey would wake up holding it.
+            if (mode !== 'erase') game.settings.set(MODULE.ID, 'toolbar.drawingMode', mode);
             this.removePreviewSymbol();
             this.notifyChange();
         }
@@ -4390,7 +4396,7 @@ class DrawingTool {
         const drawingId = `terrain-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
         const record = {
             id: drawingId, graphics, createdAt: Date.now(), expiresAt: this.getExpirationTime(),
-            userId: game.user.id, userName: game.user.name, terrainKind: kind
+            userId: game.user.id, userName: game.user.name, terrainKind: kind, path, width
         };
         if (!this._pixiDrawings) this._pixiDrawings = [];
         this._pixiDrawings.push(record);
@@ -4414,7 +4420,7 @@ class DrawingTool {
         this._pixiDrawings.push({
             id: data.drawingId, graphics,
             createdAt: data.createdAt || Date.now(), expiresAt: data.expiresAt || null,
-            userId: data.userId, userName: data.userName || 'Unknown', terrainKind: data.terrainKind
+            userId: data.userId, userName: data.userName || 'Unknown', terrainKind: data.terrainKind, path: data.path, width: data.width
         });
         this.scheduleCleanup();
     }
@@ -4522,6 +4528,21 @@ class DrawingTool {
         const entry = this._kept.pop();
         const scene = canvas.scene;
         if (!entry || !scene) return;
+        if (entry.kind === 'erase') {
+            try {
+                if (entry.restore.Wall.length) await scene.createEmbeddedDocuments('Wall', entry.restore.Wall, { keepId: true });
+                if (entry.restore.Drawing.length) await scene.createEmbeddedDocuments('Drawing', entry.restore.Drawing, { keepId: true });
+            } catch (error) {
+                console.error(`${MODULE.NAME}: could not put back what was erased`, error);
+            }
+            notify('Erase undone', {
+                subtitle: 'What the eraser took off the scene is back',
+                icon: 'fa-solid fa-undo',
+                stackKey: `${MODULE.ID}-undo`
+            });
+            this.notifyChange();
+            return;
+        }
         try {
             const exists = (collection, ids) => (ids ?? []).filter(id => collection.has(id));
             const walls = exists(scene.walls, entry.wallIds);
@@ -4542,6 +4563,183 @@ class DrawingTool {
     /** Whether undo has something to take back. */
     canUndo() {
         return !!(this._kept.length || this._lastDrawing);
+    }
+
+    // ==================================================================
+    // ===== THE ERASER =================================================
+    // ==================================================================
+
+    /** How far from the pointer the eraser reaches, in pixels. */
+    _eraserRadius() {
+        return Math.max(10, (Number(canvas.grid?.size) || 100) * 0.3);
+    }
+
+    /** Whether the eraser is on a temporary drawing: near its line if it is a line, on its bounds if it is a shape. */
+    _hitsRecord(record, x, y, reach) {
+        if (Array.isArray(record.points) && record.startX !== undefined && record.type === undefined) {
+            const pts = [];
+            for (const [px, py] of record.points) pts.push(record.startX + px, record.startY + py);
+            return distanceToPolyline(pts, x, y) <= reach + (record.strokeWidth || 6) / 2;
+        }
+        if (Array.isArray(record.path)) return distanceToPolyline(record.path, x, y) <= reach + (record.width || 0) / 2;
+        const bounds = record.graphics?.getLocalBounds?.();
+        if (!bounds) return false;
+        return x >= bounds.x - reach && x <= bounds.x + bounds.width + reach && y >= bounds.y - reach && y <= bounds.y + bounds.height + reach;
+    }
+
+    /** The eraser's circle, following the pointer. */
+    _previewEraser(event) {
+        const point = this.getWorldCoordinates(event);
+        if (!point || !this.services?.canvasLayer) return;
+        this.removePreviewSymbol();
+        const graphics = new PIXI.Graphics();
+        graphics.lineStyle(2, 0xffffff, 0.9);
+        graphics.beginFill(0xd04030, 0.18);
+        graphics.drawCircle(point.x, point.y, this._eraserRadius());
+        graphics.endFill();
+        this.services.canvasLayer.addChild(graphics);
+        this._previewSymbol = graphics;
+    }
+
+    _eraseAtEvent(event) {
+        const point = this.getWorldCoordinates(event);
+        if (point) this._eraseAt(point.x, point.y);
+    }
+
+    /**
+     * Erase what the eraser is on: temporary drawings, and what was written to the scene as a stamp, a
+     * path or a wall stroke -- the whole of it, with the walls of a wall stroke. A user erases their
+     * own; the GM erases anyone's. Anything not drawn with these tools is left alone.
+     */
+    _eraseAt(x, y) {
+        const reach = this._eraserRadius();
+        for (const record of [...(this._pixiDrawings ?? [])]) {
+            if (!game.user.isGM && record.userId !== game.user.id) continue;
+            if (this._hitsRecord(record, x, y, reach)) this.deleteDrawingById(record.id, true);
+        }
+        const scene = canvas.scene;
+        if (!scene) return;
+        const hit = new Map();
+        for (const doc of scene.drawings) {
+            if (!game.user.isGM && !doc.isOwner) continue;
+            const group = keptGroup(doc.flags, MODULE.ID);
+            if (!group || this._erased.has(group.key) || hit.has(group.key)) continue;
+            if (drawingHit(doc, x, y, reach, CONST.DRAWING_FILL_TYPES.NONE)) hit.set(group.key, group);
+        }
+        if (!hit.size) return;
+        for (const key of hit.keys()) this._erased.add(key);
+        this._eraseQueue = this._eraseQueue.then(() => this._eraseGroups([...hit.values()]));
+    }
+
+    /** Take groups off the scene, remembering them so the erase can be undone. */
+    async _eraseGroups(groups) {
+        const scene = canvas.scene;
+        if (!scene) return;
+        const keys = new Set(groups.map(group => group.key));
+        const drawings = scene.drawings.contents.filter(doc => keys.has(keptGroup(doc.flags, MODULE.ID)?.key));
+        const walls = game.user.isGM ? scene.walls.contents.filter(doc => keys.has(keptGroup(doc.flags, MODULE.ID)?.key)) : [];
+        try {
+            if (walls.length) await scene.deleteEmbeddedDocuments('Wall', walls.map(doc => doc.id));
+            if (drawings.length) await scene.deleteEmbeddedDocuments('Drawing', drawings.map(doc => doc.id));
+            // What went, kept as data, for Undo.
+            this._eraseBatch.Wall.push(...walls.map(doc => doc.toObject()));
+            this._eraseBatch.Drawing.push(...drawings.map(doc => doc.toObject()));
+        } catch (error) {
+            console.error(`${MODULE.NAME}: could not erase`, error);
+        }
+    }
+
+    /** The stroke is over: what it erased is one thing for Undo to put back. */
+    _commitErase() {
+        this._eraseQueue = this._eraseQueue.then(() => {
+            const batch = this._eraseBatch;
+            this._eraseBatch = { Wall: [], Drawing: [] };
+            this._erased.clear();
+            if (batch.Wall.length || batch.Drawing.length) this._pushKept({ kind: 'erase', restore: batch });
+        });
+        return this._eraseQueue;
+    }
+
+    /** GM: take everything drawn here as a stamp, a path or a wall stroke off the scene. */
+    async eraseAllKept() {
+        const scene = canvas.scene;
+        if (!scene || !game.user.isGM) return;
+        const groups = new Map();
+        for (const doc of [...scene.drawings.contents, ...scene.walls.contents]) {
+            const group = keptGroup(doc.flags, MODULE.ID);
+            if (group) groups.set(group.key, group);
+        }
+        if (!groups.size) {
+            notify('Nothing to erase', { subtitle: 'No stamps, paths or wall strokes are on this scene', type: 'warn', icon: 'fa-solid fa-eraser', stackKey: `${MODULE.ID}-erase` });
+            return;
+        }
+        const sure = await foundry.applications.api.DialogV2.confirm({
+            window: { title: 'Erase everything drawn here?' },
+            content: `<p>This removes every stamp, path and wall stroke drawn with Cartographer's tools on this scene, with the walls of the wall strokes. Undo puts them back.</p>`,
+            rejectClose: false
+        });
+        if (!sure) return;
+        this._erased.clear();
+        await this._eraseGroups([...groups.values()]);
+        await this._commitErase();
+        notify('Erased', { subtitle: `${groups.size} thing${groups.size === 1 ? '' : 's'} removed from the scene`, icon: 'fa-solid fa-eraser', stackKey: `${MODULE.ID}-erase` });
+    }
+
+    /** Pick up the eraser from the window, and start. */
+    chooseErase() {
+        this.setDrawingMode('erase');
+        this.updateModeButtons();
+        this.startFromWindow();
+        this.notifyChange();
+    }
+
+    /** Drawing has stopped: the eraser is put down, and the tool goes back to the one remembered. */
+    _leaveErase() {
+        if (this.state.drawingMode !== 'erase') return;
+        this._erasing = false;
+        const saved = game.settings.get(MODULE.ID, 'toolbar.drawingMode');
+        this.state.drawingMode = ['sketch', 'line', 'box', 'ellipse', 'stamp', 'terrain', 'wall'].includes(saved) ? saved : 'sketch';
+        this.removePreviewSymbol();
+        this.notifyChange();
+    }
+
+    // ==================================================================
+    // ===== THE SCENE ==================================================
+    // ==================================================================
+
+    /** Whether this user may change how the scene is seen: only the GM. */
+    canSetScene() {
+        return !!game.user?.isGM && !!canvas.scene;
+    }
+
+    /** How the scene is seen: whether tokens see, whether it is lit everywhere, and how dark it is. */
+    sceneState() {
+        const scene = canvas.scene;
+        return {
+            tokenVision: !!scene?.tokenVision,
+            globalLight: !!scene?.environment?.globalLight?.enabled,
+            darkness: Number(scene?.environment?.darknessLevel ?? 0)
+        };
+    }
+
+    /**
+     * Change how the scene is seen.
+     * @param {'tokenVision'|'globalLight'|'darkness'} name
+     */
+    async setSceneOption(name, value) {
+        if (!this.canSetScene()) return;
+        const update = {
+            tokenVision: { tokenVision: !!value },
+            globalLight: { 'environment.globalLight.enabled': !!value },
+            darkness: { 'environment.darknessLevel': Math.max(0, Math.min(1, Number(value) || 0)) }
+        }[name];
+        if (!update) return;
+        try {
+            await canvas.scene.update(update);
+        } catch (error) {
+            console.error(`${MODULE.NAME}: could not change the scene`, error);
+        }
+        this.notifyChange();
     }
 
     // ==================================================================
@@ -4593,6 +4791,12 @@ class DrawingTool {
         event.stopPropagation();
         event.stopImmediatePropagation?.();
         const mode = this._strokeMode();
+        if (mode === 'erase') {
+            this._erasing = true;
+            try { canvas.app.view.setPointerCapture?.(event.pointerId); } catch (error) { /* not every pointer can be held */ }
+            this._eraseAtEvent(event);
+            return false;
+        }
         if (mode === 'stamp') {
             this.stampSymbol(this.state.stampStyle, event);
             this._beginScatter(event);
@@ -4610,6 +4814,11 @@ class DrawingTool {
     _windowPointerMove(event) {
         if (!this.state.active) return false;
         const mode = this._strokeMode();
+        if (mode === 'erase') {
+            if (this._erasing && (event.buttons & 1)) this._eraseAtEvent(event);
+            this._previewEraser(event);
+            return false;
+        }
         if (this.state.isDrawing) {
             const update = { sketch: 'updateDrawing', line: 'updateLinePreview', box: 'updateBoxPreview', ellipse: 'updateEllipsePreview' }[mode];
             if (update) this[update](event);
@@ -4627,6 +4836,11 @@ class DrawingTool {
         if (!this.state.active) return false;
         this._scatter = null;
         try { canvas.app.view.releasePointerCapture?.(event.pointerId); } catch (error) { /* it was not held */ }
+        if (this._erasing) {
+            this._erasing = false;
+            this._commitErase();
+            return false;
+        }
         if (!this.state.isDrawing) return false;
         event.preventDefault?.();
         event.stopPropagation?.();
@@ -4647,6 +4861,7 @@ class DrawingTool {
         if (!this.state.active) return;
         this.toggleFromHotkey();
         this._fromWindow = false;
+        this._leaveErase();
         this.notifyChange();
     }
 
@@ -4654,6 +4869,7 @@ class DrawingTool {
     onWindowClosed() {
         if (this._fromWindow && this.state.active) this.toggleFromHotkey();
         this._fromWindow = false;
+        this._leaveErase();
     }
 
     /** Choose a tool from the window and, if nothing is drawing yet, start. */

@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import {
     stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup } from '../scripts/utils-drawing.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
 const src = fs.readFileSync('scripts/manager-drawing.js', 'utf8');
@@ -30,17 +30,23 @@ const CONST = {
     DRAWING_FILL_TYPES: { NONE: 0, SOLID: 1 },
     GRID_SNAPPING_MODES: { VERTEX: 1 }
 };
-const foundry = { utils: { randomID: (() => { let n = 0; return () => `id${++n}`; })() } };
+const foundry = { utils: { randomID: (() => { let n = 0; return () => `id${++n}`; })() }, get applications() { return foundryApplications; } };
 let isGM = true;
 let canCreate = true;
+let savedMode = 'box';
+let confirmAnswer = true;
 const game = {
-    get user() { return { id: 'u1', name: 'Una', isGM, can: () => canCreate }; }
+    get user() { return { id: 'u1', name: 'Una', isGM, can: () => canCreate }; },
+    settings: { get: () => savedMode, set() {} }
 };
+const foundryApplications = { api: { DialogV2: { confirm: async () => confirmAnswer } } };
 
 class Collection {
     constructor() { this.map = new Map(); }
     has(id) { return this.map.has(id); }
     get size() { return this.map.size; }
+    get contents() { return [...this.map.values()]; }
+    [Symbol.iterator]() { return this.contents[Symbol.iterator](); }
 }
 const makeScene = () => {
     let counter = 0;
@@ -50,12 +56,19 @@ const makeScene = () => {
         levels: { size: 1 },
         creates: [],
         failNext: null,
-        async createEmbeddedDocuments(type, data) {
+        async createEmbeddedDocuments(type, data, options = {}) {
             if (scene.failNext === type) { scene.failNext = null; throw new Error('refused'); }
             scene.creates.push([type, data]);
             const collection = type === 'Wall' ? scene.walls : scene.drawings;
-            return data.map(d => { const id = `${type}${++counter}`; collection.map.set(id, d); return { id }; });
+            return data.map(d => {
+                const id = options.keepId && d._id ? d._id : `${type}${++counter}`;
+                const doc = { ...d, id, isOwner: true, toObject() { return { ...d, _id: id }; } };
+                collection.map.set(id, doc);
+                return doc;
+            });
         },
+        updates: [],
+        async update(changes) { scene.updates.push(changes); },
         async deleteEmbeddedDocuments(type, ids) {
             const collection = type === 'Wall' ? scene.walls : scene.drawings;
             for (const id of ids) collection.map.delete(id);
@@ -97,12 +110,14 @@ const make = () => {
         },
         services: { canvasLayer: { added: [], addChild(g) { this.added.push(g); } } },
         _pixiDrawings: [], _kept: [], _roll: null, _lastDrawing: null,
+        _erased: new Set(), _eraseBatch: { Wall: [], Drawing: [] }, _eraseQueue: Promise.resolve(), _erasing: false,
         notifyChange() { this.changes = (this.changes ?? 0) + 1; },
         extractAlphaFromRgba: color => Number((color.match(/,\s*([\d.]+)\)$/) ?? [])[1] ?? 1),
         getExpirationTime: () => null,
         scheduleCleanup() { this.scheduled = true; },
         broadcastDrawingCreation(data) { added.push(data); },
         removePreviewSymbol() {},
+        deleteDrawingById(id) { this.deleted = [...(this.deleted ?? []), id]; this._pixiDrawings = this._pixiDrawings.filter(d => d.id !== id); },
         getWorldCoordinates: event => ({ x: event.x, y: event.y })
     });
     return tool;
@@ -390,7 +405,7 @@ console.log('\ndrawing from the window: press, drag, release');
         const tool = make();
         tool.state.active = true;
         tool.state.isDrawing = false;
-        for (const name of ['startDrawing', 'startLineDrawing', 'startBoxDrawing', 'startEllipseDrawing', 'updateDrawing', 'updateLinePreview', 'updateBoxPreview', 'updateEllipsePreview', 'finishDrawing', 'finishLineDrawing', 'finishBoxDrawing', 'finishEllipseDrawing', 'cancelDrawing', 'stampSymbol']) {
+        for (const name of ['startDrawing', 'startLineDrawing', 'startBoxDrawing', 'startEllipseDrawing', 'updateDrawing', 'updateLinePreview', 'updateBoxPreview', 'updateEllipsePreview', 'finishDrawing', 'finishLineDrawing', 'finishBoxDrawing', 'finishEllipseDrawing', 'cancelDrawing', 'stampSymbol', '_eraseAtEvent', '_previewEraser', '_commitErase']) {
             tool[name] = () => { calls.push(name); if (name.startsWith('start') && name !== 'stampSymbol') tool.state.isDrawing = true; if (name.startsWith('finish') || name === 'cancelDrawing') tool.state.isDrawing = false; };
         }
         tool.canUserDraw = () => true;
@@ -466,6 +481,25 @@ console.log('\ndrawing from the window: press, drag, release');
     {
         calls.length = 0;
         const tool = recorder();
+        tool.state.drawingMode = 'erase';
+        tool._windowPointerMove(event({ buttons: 0 }));
+        check('the eraser shows its circle before it is pressed, and erases nothing', calls.join() === '_previewEraser');
+        calls.length = 0;
+        tool._windowPointerDown(event());
+        check('pressing erases there at once', calls.join() === '_eraseAtEvent' && tool._erasing === true);
+        calls.length = 0;
+        tool._windowPointerMove(event({ clientX: 140 }));
+        check('dragging erases along the way', calls.join() === '_eraseAtEvent,_previewEraser');
+        calls.length = 0;
+        tool._windowPointerUp(event());
+        check('letting go closes the stroke, as one thing to undo', calls.join() === '_commitErase' && tool._erasing === false);
+        calls.length = 0;
+        tool._windowPointerMove(event({ buttons: 0, clientX: 300 }));
+        check('moving about afterwards erases nothing', calls.join() === '_previewEraser');
+    }
+    {
+        calls.length = 0;
+        const tool = recorder();
         tool.state.drawingMode = 'stamp';
         tool.state.stampStyle = 'tree';
         tool._windowPointerMove(event({ buttons: 0 }));
@@ -484,6 +518,170 @@ console.log('\nthe press is taken before the canvas sees it');
     check('and the listener is taken off again', src.includes("window.removeEventListener('pointerdown', this._handleWindowDown, true)"));
     check('only a press on the canvas itself is taken', /_handleWindowDown = \(event\) => \{\s*if \(!self\._fromWindow \|\| event\.target !== canvas\.app\?\.view\) return;/.test(src));
     check('the canvas\'s own press handler leaves the window\'s way alone, so a press is not handled twice', /_handlePointerDown = \(event\) => \{[^}]*if \(self\._fromWindow\) return false;/s.test(src));
+}
+
+console.log('\nthe eraser');
+{
+    const strokeAndErase = async (setup, at) => {
+        scene = makeScene();
+        const tool = make();
+        await setup(tool);
+        tool._eraseAt(at[0], at[1]);
+        await tool._commitErase();
+        return tool;
+    };
+    {
+        const tool = await strokeAndErase(t => t.createWallStroke([[0, 0], [400, 0]]), [200, 8]);
+        check('erasing on a wall stroke takes the wall and its line', scene.walls.size === 0 && scene.drawings.size === 0);
+        const entry = tool._kept.at(-1);
+        check('and is one thing to undo, holding both', entry.kind === 'erase' && entry.restore.Wall.length === 1 && entry.restore.Drawing.length === 1);
+        await tool._undoKept();
+        check('undo puts back the wall and the line, with their own ids', scene.walls.size === 1 && scene.drawings.size === 1 && scene.walls.has(entry.restore.Wall[0]._id));
+        check('what comes back is what went: the same wall', [...scene.walls.map.values()][0].c.join() === '0,0,400,0');
+    }
+    {
+        await strokeAndErase(t => t.createWallStroke([[0, 0], [400, 0]]), [200, 300]);
+        check('erasing away from it takes nothing', scene.walls.size === 1 && scene.drawings.size === 1);
+    }
+    {
+        const tool = await strokeAndErase(async t => { t.state.stamp.keep = true; t._placeStamp('shrub', 640, 480); await new Promise(r => setTimeout(r, 10)); }, [640, 480]);
+        check('erasing on a kept stamp takes every piece of it', scene.drawings.size === 0 && tool._kept.at(-1).kind === 'erase');
+    }
+    {
+        scene = makeScene();
+        const tool = make();
+        tool.state.stamp.keep = true;
+        tool._placeStamp('shrub', 640, 480);
+        await new Promise(r => setTimeout(r, 10));
+        tool._placeStamp('tree', 1500, 480);
+        await new Promise(r => setTimeout(r, 10));
+        const before = scene.drawings.size;
+        tool._eraseAt(640, 480);
+        await tool._commitErase();
+        check('only the stamp under it goes; the other stays', scene.drawings.size > 0 && scene.drawings.size < before);
+    }
+    {
+        scene = makeScene();
+        const tool = make();
+        await scene.createEmbeddedDocuments('Drawing', [{ x: 0, y: 0, shape: { type: 'p', width: 100, height: 100, points: [0, 0, 100, 0, 100, 100, 0, 100] }, fillType: 1, fillAlpha: 1, strokeWidth: 0, strokeAlpha: 0, flags: {} }]);
+        tool._eraseAt(50, 50);
+        await tool._commitErase();
+        check('a Drawing the tools did not make is left alone', scene.drawings.size === 1 && tool._kept.length === 0);
+    }
+    {
+        scene = makeScene();
+        const tool = make();
+        tool.state.stamp.terrain = 'dirt';
+        tool.state.stamp.keep = true;
+        const stroke = [];
+        for (let i = 0; i <= 20; i++) stroke.push([100 + i * 20, 300]);
+        tool.createTerrainPath(stroke);
+        await new Promise(r => setTimeout(r, 10));
+        tool._eraseAt(300, 310);
+        await tool._commitErase();
+        check('a kept path goes from anywhere along it', scene.drawings.size === 0);
+    }
+    {
+        scene = makeScene();
+        const tool = make();
+        await tool.createWallStroke([[0, 0], [400, 0]]);
+        for (const doc of scene.drawings) doc.isOwner = false;
+        isGM = false;
+        tool._eraseAt(200, 0);
+        await tool._commitErase();
+        check('a player cannot erase what is not theirs', scene.drawings.size === 1 && scene.walls.size === 1);
+        isGM = true;
+    }
+    {
+        scene = makeScene();
+        const tool = make();
+        tool._pixiDrawings = [
+            { id: 'a', userId: 'u1', startX: 0, startY: 0, points: [[0, 0], [200, 0]], strokeWidth: 6 },
+            { id: 'b', userId: 'u1', startX: 0, startY: 200, points: [[0, 0], [200, 0]], strokeWidth: 6 },
+            { id: 'c', userId: 'u2', startX: 0, startY: 0, points: [[0, 0], [200, 0]], strokeWidth: 6 },
+            { id: 'd', userId: 'u1', type: 'box', graphics: { getLocalBounds: () => ({ x: 400, y: 400, width: 100, height: 100 }) } },
+            { id: 'e', userId: 'u1', terrainKind: 'dirt', path: [0, 600, 300, 600], width: 80 }
+        ];
+        tool._eraseAt(100, 10);
+        check('the eraser takes a sketch it is near, and not one further off', tool.deleted.includes('a') && !tool.deleted.includes('b'));
+        isGM = false;
+        tool._eraseAt(450, 450);
+        check('and a box by its bounds', tool.deleted.includes('d'));
+        tool._eraseAt(150, 590);
+        check('and a path by its line and width', tool.deleted.includes('e'));
+        tool._pixiDrawings.push({ id: 'f', userId: 'u2', startX: 0, startY: 800, points: [[0, 0], [200, 0]], strokeWidth: 6 });
+        tool._eraseAt(100, 800);
+        check('a player cannot take another player\'s sketch', !tool.deleted.includes('f'));
+        isGM = true;
+        tool._eraseAt(100, 800);
+        check('the GM can', tool.deleted.includes('f'));
+    }
+    {
+        const tool = make();
+        check('the eraser reaches about a third of a grid square', tool._eraserRadius() === 30);
+    }
+    {
+        scene = makeScene();
+        const tool = make();
+        await tool.createWallStroke([[0, 0], [400, 0]]);
+        await tool.createWallStroke([[0, 300], [400, 300]]);
+        confirmAnswer = false;
+        await tool.eraseAllKept();
+        check('erase all asks first, and does nothing if refused', scene.walls.size === 2 && scene.drawings.size === 2);
+        confirmAnswer = true;
+        await tool.eraseAllKept();
+        check('erase all takes every stroke, walls and lines', scene.walls.size === 0 && scene.drawings.size === 0);
+        const entry = tool._kept.at(-1);
+        check('as one thing to undo', entry.kind === 'erase' && entry.restore.Wall.length === 2 && entry.restore.Drawing.length === 2);
+        await tool._undoKept();
+        check('which puts them all back', scene.walls.size === 2 && scene.drawings.size === 2);
+        isGM = false;
+        scene.creates.length = 0;
+        await tool.eraseAllKept();
+        check('a player cannot erase all', scene.walls.size === 2);
+        isGM = true;
+        scene = makeScene();
+        notices.length = 0;
+        await make().eraseAllKept();
+        check('with nothing drawn it says so', notices.some(n => /Nothing to erase/.test(n.title)));
+    }
+    {
+        const tool = make();
+        tool.state.drawingMode = 'erase';
+        savedMode = 'box';
+        tool._leaveErase();
+        check('putting the eraser down goes back to the tool that was remembered', tool.state.drawingMode === 'box');
+        tool._leaveErase();
+        check('and does nothing when it was not the eraser', tool.state.drawingMode === 'box');
+        savedMode = 'nonsense';
+        tool.state.drawingMode = 'erase';
+        tool._leaveErase();
+        check('a remembered tool that is not a tool becomes a sketch', tool.state.drawingMode === 'sketch');
+        check('the eraser is never remembered', /if \(mode !== 'erase'\) game\.settings\.set\(MODULE\.ID, 'toolbar\.drawingMode', mode\)/.test(src));
+    }
+}
+
+console.log('\nthe scene');
+{
+    scene = makeScene();
+    scene.tokenVision = true;
+    scene.environment = { globalLight: { enabled: false }, darknessLevel: 0.3 };
+    const tool = make();
+    check('the scene is read as it is', JSON.stringify(tool.sceneState()) === JSON.stringify({ tokenVision: true, globalLight: false, darkness: 0.3 }));
+    await tool.setSceneOption('tokenVision', false);
+    await tool.setSceneOption('globalLight', true);
+    await tool.setSceneOption('darkness', '0.6');
+    check('each change is one update of the right field', JSON.stringify(scene.updates) === JSON.stringify([{ tokenVision: false }, { 'environment.globalLight.enabled': true }, { 'environment.darknessLevel': 0.6 }]));
+    await tool.setSceneOption('darkness', 7);
+    check('darkness is held between none and full', scene.updates.at(-1)['environment.darknessLevel'] === 1);
+    scene.updates.length = 0;
+    await tool.setSceneOption('nonsense', 1);
+    check('an unknown option changes nothing', scene.updates.length === 0);
+    isGM = false;
+    await tool.setSceneOption('tokenVision', false);
+    check('a player cannot change the scene', scene.updates.length === 0 && !tool.canSetScene());
+    isGM = true;
+    check('a GM can', tool.canSetScene());
 }
 
 console.log('\nwhat the user may do');

@@ -132,7 +132,9 @@ together; how each stamp and path looks at Small, Medium and Large and at each w
 scale in `scripts/utils-stamps.js` suits it; that the preview shows exactly what lands; that a drag
 scatters at a sensible spacing; that the window follows the bar and the bar the window; that
 Start and Stop and closing the window leave the draw hotkey working; and what a player sees -- no
-Wall tool, and Keep on the scene off unless the world lets them create Drawings. Verify by doing each
+Wall tool, and Keep on the scene off unless the world lets them create Drawings. Also the eraser (that it
+finds the right thing, and that Undo restores walls and Drawings with their ids), and that the scene's
+vision, global illumination and darkness controls change the scene on v14. Verify by doing each
 as a GM and as a player.
 
 **Save a temporary drawing as a persistent Drawing**, using a workflow similar to Notes with pins.

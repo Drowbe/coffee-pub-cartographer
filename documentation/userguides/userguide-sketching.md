@@ -23,8 +23,8 @@ always draw.
 ## The drawing tools window
 
 Click **Tools** in the **Drawing Tools** section of the Cartographer bar, or choose **Drawing Tools**
-from the Cartographer button's right-click menu. A window opens with three tabs, **Drawing**,
-**Stamps** and **Terrain**, holding the same controls as the bar and more. The buttons in the bar stay where they are, and the
+from the Cartographer button's right-click menu. A window opens with four tabs, **Drawing**,
+**Stamps**, **Terrain** and **Utilities**, holding the same controls as the bar and more. The buttons in the bar stay where they are, and the
 two follow each other: choose a tool in one and the other shows it.
 
 Picking a tool or a stamp in the window starts drawing at once, and in the window a stroke is plain
@@ -77,6 +77,7 @@ the colour you choose and are never the same twice:
 
 - **Trees** -- a tree and a pine.
 - **Plants** -- a shrub, a tuft of grass and flowers.
+- **Ground patches** -- small soft areas of dirt, gravel, sand, mud or snow, described below.
 - **Rocks** -- a rock and a pile of boulders.
 - **Features** -- a stump, a log, a pond and a campfire.
 - **Markers** -- the plus, X, dot, arrows and square the tool has always had.
@@ -98,6 +99,14 @@ The options under the stamps:
   or delete it with Foundry's own Drawing tools. It needs permission to create Drawings, which the GM
   always has; a player the world does not allow to create them gets a temporary stamp.
 
+### Ground patches
+
+A ground patch is a small area of ground, like the pond but for dirt: a loose blob whose edge fades
+away, so it hints at ground rather than filling the scene with it. Click to put one down; drag to
+scatter a few. They are large against other stamps, so a Medium patch is about a square and a half
+across. Each is made of several see-through layers, so a patch kept on the scene is a handful of
+Drawings, not one.
+
 ## Paths and ground
 
 The **Terrain** tab lays makeshift paths and ground. Click a kind, then **drag along the map**; the
@@ -112,6 +121,22 @@ path follows your stroke, smoothed, with the ground's texture scattered over it:
 does for stamps: off, the path is temporary and everyone sees it; on, it is written to the scene as Foundry
 Drawings. A kept path holds fewer specks of texture than a temporary one, to keep the scene light.
 Undo takes back a whole path.
+
+## Utilities
+
+The **Utilities** tab holds the things that are not drawing.
+
+- **Eraser** -- press and drag over what you drew to take it away. It removes sketches, lines,
+  boxes, ellipses, stamps, paths and wall strokes, a whole one at a time, and the walls of a wall
+  stroke with it. It leaves anything it did not draw alone. A circle shows how far it reaches. You erase
+  your own; the GM erases anyone's. What it takes off the scene comes back with **Undo**; a
+  temporary drawing does not.
+- **Erase all** (GM) -- after asking, removes every stamp, path and wall stroke on the scene.
+  Undo puts them back.
+- **Clear mine**, **Clear everyone's** (GM) and **Timed erase** -- the temporary drawings, as in the
+  bar.
+- **Scene** (GM) -- **Token vision**, **Global illumination** and **Darkness** for the scene you are
+  on, for working a map without leaving the window. These change the scene for everyone.
 
 ## Draw walls
 

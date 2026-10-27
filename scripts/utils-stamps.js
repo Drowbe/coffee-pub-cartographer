@@ -291,6 +291,41 @@ function campfire(rng) {
     return prims;
 }
 
+/**
+ * A soft patch of ground: a loose blob laid down in layers, each smaller and more solid than the
+ * last, so the edge fades out and the middle is ground. It hints at dirt or sand rather than
+ * filling a space with it. `texture` is what is scattered over the middle.
+ */
+function patch(texture) {
+    return rng => {
+        const a = rng() * TAU;
+        const b = rng() * TAU;
+        const c = rng() * TAU;
+        const blob = [];
+        const steps = 28;
+        for (let i = 0; i < steps; i++) {
+            const angle = (i / steps) * TAU;
+            const r = 0.46 * (0.8 + 0.09 * Math.sin(2 * angle + a) + 0.07 * Math.sin(3 * angle + b) + 0.05 * Math.sin(5 * angle + c));
+            blob.push(Math.cos(angle) * r, Math.sin(angle) * r);
+        }
+        const prims = [];
+        for (const [scale, alpha] of [[1, 0.1], [0.88, 0.15], [0.76, 0.22], [0.64, 0.3], [0.52, 0.4]]) {
+            prims.push(poly(place(blob, { scale }), 'base', { alpha }));
+        }
+        prims.push(poly(place(blob, { scale: 0.4, dx: -0.03, dy: -0.03 }), 'light', { alpha: 0.18 }));
+        const count = { grain: 16, pebble: 12, dust: 20, flake: 18 }[texture] ?? 14;
+        const size = { grain: [0.012, 0.026], pebble: [0.022, 0.045], dust: [0.008, 0.016], flake: [0.01, 0.022] }[texture] ?? [0.012, 0.026];
+        for (let i = 0; i < count; i++) {
+            const angle = rng() * TAU;
+            const reach = Math.sqrt(rng()) * 0.3;
+            const r = between(rng, size[0], size[1]);
+            const tone = texture === 'pebble' ? ['light', 'dark', 'accent2'][Math.floor(rng() * 3)] : (rng() < 0.6 ? 'accent' : 'light');
+            prims.push(poly(ngon(Math.cos(angle) * reach, Math.sin(angle) * reach, r, r, 6, rng() * TAU), tone, { alpha: texture === 'pebble' ? 0.85 : 0.55 }));
+        }
+        return prims;
+    };
+}
+
 // The tidy markers the tool has always had. They are drawn by the drawing tool's own code; the
 // geometry here is only for the pictures in the window.
 const markerPlus = () => [line([-0.32, 0, 0.32, 0], 0.16, 'base'), line([0, -0.32, 0, 0.32], 0.16, 'base')];
@@ -303,6 +338,7 @@ const markerSquare = () => [poly(place([-0.32, -0.32, 0.32, -0.32, 0.32, 0.32, -
 export const STAMP_CATEGORIES = [
     { id: 'trees', labelKey: 'categoryTrees' },
     { id: 'plants', labelKey: 'categoryPlants' },
+    { id: 'ground', labelKey: 'categoryGround' },
     { id: 'rocks', labelKey: 'categoryRocks' },
     { id: 'features', labelKey: 'categoryFeatures' },
     { id: 'markers', labelKey: 'categoryMarkers' }
@@ -324,6 +360,16 @@ export const STAMPS = [
         palette: { dark: '#4a7a2e', base: '#6a9c3c', light: '#9acb5a', accent: '#8b5e34', accent2: '#c0452f' } },
     { id: 'flowers', category: 'plants', icon: 'fa-solid fa-flower', labelKey: 'stampFlowers', scale: 0.6, build: flowers,
         palette: { dark: '#3f6e2a', base: '#5d9238', light: '#8cc063', accent: '#f2d04a', accent2: '#e8739a' } },
+    { id: 'patch-dirt', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchDirt', scale: 2.0, build: patch('grain'),
+        palette: { dark: '#6e5233', base: '#8f6d47', light: '#b08d63', accent: '#5a4128', accent2: '#c4a77c' } },
+    { id: 'patch-gravel', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchGravel', scale: 2.0, build: patch('pebble'),
+        palette: { dark: '#77726a', base: '#9a958c', light: '#c4c0b8', accent: '#5f5b55', accent2: '#aca79e' } },
+    { id: 'patch-sand', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchSand', scale: 2.0, build: patch('dust'),
+        palette: { dark: '#bba873', base: '#dccb94', light: '#efe3b8', accent: '#a8945c', accent2: '#e6d7a4' } },
+    { id: 'patch-mud', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchMud', scale: 2.0, build: patch('grain'),
+        palette: { dark: '#3f3022', base: '#5e4a35', light: '#7a6249', accent: '#2e2218', accent2: '#8a7152' } },
+    { id: 'patch-snow', category: 'ground', icon: 'fa-solid fa-circle', labelKey: 'stampPatchSnow', scale: 2.0, build: patch('flake'),
+        palette: { dark: '#c5d0d8', base: '#e9eef2', light: '#ffffff', accent: '#b8c6d1', accent2: '#d6e0e7' } },
     { id: 'rock', category: 'rocks', icon: 'fa-solid fa-gem', labelKey: 'stampRock', scale: 0.7, build: rock,
         palette: { dark: '#575757', base: '#7d7d7d', light: '#b0b0b0', accent: '#8b5e34', accent2: '#c0452f' } },
     { id: 'boulders', category: 'rocks', icon: 'fa-solid fa-mountain', labelKey: 'stampBoulders', scale: 1.15, build: boulders,

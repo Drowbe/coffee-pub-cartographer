@@ -24,7 +24,8 @@ const APP_ID = `${MODULE.ID}-drawing-tools`;
 const TABS = [
     { id: 'draw', icon: 'fa-solid fa-pen-ruler', labelKey: 'tabDrawing' },
     { id: 'stamps', icon: 'fa-solid fa-stamp', labelKey: 'tabStamps' },
-    { id: 'terrain', icon: 'fa-solid fa-road', labelKey: 'tabTerrain' }
+    { id: 'terrain', icon: 'fa-solid fa-road', labelKey: 'tabTerrain' },
+    { id: 'utilities', icon: 'fa-solid fa-screwdriver-wrench', labelKey: 'tabUtilities' }
 ];
 /** How wide a path is, in grid squares. */
 const PATH_WIDTHS = [
@@ -96,6 +97,8 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         'drawing-terrain': (_event, target, app) => app.manager.chooseTerrain(target.dataset.kind),
         'drawing-path-width': (_event, target, app) => app.manager.setStampOption('pathWidth', Number(target.dataset.width)),
         'drawing-size': (_event, target, app) => app.manager.setSymbolSize(target.dataset.size),
+        'drawing-erase': (_event, _target, app) => app.manager.chooseErase(),
+        'drawing-erase-all': (_event, _target, app) => void app.manager.eraseAllKept(),
         'drawing-undo': (_event, _target, app) => app.manager.undoLastDrawing(),
         'drawing-clear': (_event, _target, app) => app.manager.clearMine(),
         'drawing-clear-all': (_event, _target, app) => app.manager.clearEveryone(),
@@ -235,7 +238,7 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
 
     _buildBody() {
         const tab = TABS.some(entry => entry.id === this.tab) ? this.tab : 'draw';
-        const content = { stamps: () => this._buildStamps(), terrain: () => this._buildTerrain(), draw: () => this._buildDraw() }[tab]();
+        const content = { stamps: () => this._buildStamps(), terrain: () => this._buildTerrain(), utilities: () => this._buildUtilities(), draw: () => this._buildDraw() }[tab]();
         return `${this._buildTabs(tab)}
             <div class="blacksmith-tool-stack cartographer-drawing-panel">${content}</div>`;
     }
@@ -278,12 +281,32 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
             this._segmented('drawing-weight', localize('weight'), WEIGHTS, state.brushSettings.size, 'size')
             + this._segmented('drawing-style', localize('style'), LINE_STYLES, state.lineStyle, 'style'));
         sections += this._section('fa-solid fa-palette', localize('color'), this._buildColors());
+        sections += this._hint(localize('holdHint'));
+        return sections;
+    }
+
+    /** The Utilities tab: erasing, and how the scene is seen. */
+    _buildUtilities() {
+        const localize = key => this._localize(key);
+        const { state } = this.manager;
+        const gm = !!game.user?.isGM;
+        const erase = [this._button({ action: 'drawing-erase', icon: 'fa-solid fa-eraser', label: localize('eraserHint'), text: localize('eraser'), active: state.drawingMode === 'erase' })];
+        if (gm) erase.push(this._button({ action: 'drawing-erase-all', icon: 'fa-solid fa-trash-can', label: localize('eraseAllHint'), text: localize('eraseAll') }));
+        let sections = this._section('fa-solid fa-eraser', localize('erase'),
+            `<div class="cartographer-drawing-buttons">${erase.join('')}</div>` + this._hint(localize('eraseHint')));
         const clear = [this._button({ action: 'drawing-clear', icon: 'fa-solid fa-eraser', label: localize('clearOwnHint'), text: localize('clearOwn') })];
-        if (game.user?.isGM) clear.push(this._button({ action: 'drawing-clear-all', icon: 'fa-solid fa-trash-can', label: localize('clearAllHint'), text: localize('clearAll') }));
+        if (gm) clear.push(this._button({ action: 'drawing-clear-all', icon: 'fa-solid fa-trash-can', label: localize('clearAllHint'), text: localize('clearAll') }));
         sections += this._section('fa-solid fa-broom', localize('tidy'),
             `<div class="cartographer-drawing-buttons">${clear.join('')}</div>`
-            + this._toggle('timedErase', localize('timedErase'), state.timedEraseEnabled, { hint: localize('timedEraseHint') })
-            + this._hint(localize('holdHint')));
+            + this._toggle('timedErase', localize('timedErase'), state.timedEraseEnabled, { hint: localize('timedEraseHint') }));
+        if (this.manager.canSetScene()) {
+            const scene = this.manager.sceneState();
+            sections += this._section('fa-solid fa-lightbulb', localize('scene'),
+                this._toggle('tokenVision', localize('sceneVision'), scene.tokenVision, { hint: localize('sceneVisionHint') })
+                + this._toggle('globalLight', localize('sceneGlobalLight'), scene.globalLight, { hint: localize('sceneGlobalLightHint') })
+                + this._slider('darkness', localize('sceneDarkness'), localize('sceneDarknessHint'), { min: 0, max: 1, step: 0.05, value: scene.darkness })
+                + this._hint(localize('sceneHint')));
+        }
         return sections;
     }
 
@@ -306,7 +329,7 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         for (const category of STAMP_CATEGORIES) {
             const stamps = STAMPS.filter(stamp => stamp.category === category.id);
             if (!stamps.length) continue;
-            const icon = { trees: 'fa-solid fa-tree', plants: 'fa-solid fa-seedling', rocks: 'fa-solid fa-mountain', features: 'fa-solid fa-campground', markers: 'fa-solid fa-location-dot' }[category.id];
+            const icon = { trees: 'fa-solid fa-tree', plants: 'fa-solid fa-seedling', ground: 'fa-solid fa-circle-half-stroke', rocks: 'fa-solid fa-mountain', features: 'fa-solid fa-campground', markers: 'fa-solid fa-location-dot' }[category.id];
             sections += this._section(icon, localize(category.labelKey),
                 `<div class="cartographer-stamp-grid">${stamps.map(stamp => this._buildStamp(stamp, tint)).join('')}</div>`);
         }
@@ -354,6 +377,8 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         else if (name === 'spacing') manager.setStampOption('spacing', target.value);
         else if (name === 'wallSnap') manager.setWallOption('snap', target.checked);
         else if (name === 'timedErase') manager.setTimedErase(target.checked);
+        else if (name === 'tokenVision' || name === 'globalLight') void manager.setSceneOption(name, target.checked);
+        else if (name === 'darkness') void manager.setSceneOption('darkness', target.value);
     }
 
     _onRender(context, options) {
@@ -363,10 +388,13 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         if (!this._controlsBound && this.element) {
             this.element.addEventListener('change', event => this._onControl(event));
             this._controlsBound = true;
+            // The scene's vision, lighting and darkness are changed from elsewhere too: keep up.
+            this._sceneHook = Hooks.on('updateScene', () => this.render());
         }
     }
 
     _onClose(options) {
+        if (this._sceneHook !== undefined) Hooks.off('updateScene', this._sceneHook);
         this.manager?.onWindowClosed(this);
         return super._onClose?.(options);
     }

@@ -52,7 +52,8 @@ const tool = (overrides = {}) => Object.assign(new FakeTool(), {
         brushSettings: { size: 6, color: 'rgba(186, 60, 49, 0.7)', type: 'pen' },
         stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 }, wallShape: 'line', wallSnap: true
     },
-    canMakeWalls: () => isGM, canKeepOnScene: () => isGM, canUndo: () => true
+    canMakeWalls: () => isGM, canKeepOnScene: () => isGM, canUndo: () => true,
+    canSetScene: () => isGM, sceneState: () => ({ tokenVision: true, globalLight: false, darkness: 0.25 })
 }, overrides);
 const build = (manager, tab) => { const w = new Harness(manager); w.tab = tab; return w; };
 
@@ -68,7 +69,7 @@ const count = (html, pattern) => (html.match(pattern) ?? []).length;
 console.log('every tab builds, for a GM and a player');
 for (const gm of [true, false]) {
     isGM = gm;
-    for (const tab of ['draw', 'stamps', 'terrain']) {
+    for (const tab of ['draw', 'stamps', 'terrain', 'utilities']) {
         const w = build(tool(), tab);
         const body = w._buildBody();
         const all = body + w._buildFooterLeft() + w._buildFooterRight();
@@ -89,8 +90,6 @@ isGM = true;
     check('six swatches: the player and five colours', count(body, /cartographer-drawing-swatch[ "]/g) === 6);
     check('exactly one swatch is active', count(body, /cartographer-drawing-swatch is-active/g) === 1);
     check('the active swatch is the red one', /is-active" role="radio" aria-checked="true" data-action="drawing-color" data-color="rgba\(186, 60, 49, 0\.7\)"/.test(body));
-    check('both clear buttons for a GM', has(body, 'data-action="drawing-clear"') && has(body, 'data-action="drawing-clear-all"'));
-    check('timed erase is a toggle', has(body, 'name="timedErase"'));
     const wall = build(tool({ state: { ...tool().state, drawingMode: 'wall' } }), 'draw')._buildBody();
     check('with wall chosen the shape and snap appear', has(wall, 'data-shape="line"') && has(wall, 'data-shape="sketch"') && has(wall, 'name="wallSnap"'));
     check('the snap is checked when on, and not when off', /name="wallSnap" checked|name="wallSnap"[^>]*checked/.test(wall)
@@ -102,7 +101,6 @@ isGM = true;
     isGM = false;
     const body = build(tool(), 'draw')._buildBody();
     check('a player is not offered wall', !has(body, 'data-mode="wall"') && has(body, 'data-mode="box"'));
-    check('a player has only their own clear', has(body, 'data-action="drawing-clear"') && !has(body, 'data-action="drawing-clear-all"'));
     const asked = build(tool({ state: { ...tool().state, drawingMode: 'wall' } }), 'draw')._buildBody();
     check('a player whose saved tool is wall sees no wall options', !has(asked, 'name="wallSnap"'));
     isGM = true;
@@ -131,6 +129,22 @@ console.log('\nthe Stamps tab');
     const off = build(tool({ state: { ...tool().state, stamp: { ...tool().state.stamp, natural: false } } }), 'stamps')._buildBody();
     check('with natural colours off a stamp is drawn in the brush colour', off !== body && has(off, '#ba3c31'));
     check('the markers are always in the brush colour', has(body, stampSvg('plus', { tint: 'rgba(186, 60, 49, 0.7)' })));
+}
+
+console.log('\nthe Utilities tab');
+{
+    const body = build(tool(), 'utilities')._buildBody();
+    check('the eraser, and erase-all for a GM', has(body, 'data-action="drawing-erase"') && has(body, 'data-action="drawing-erase-all"'));
+    check('the eraser is not active until it is the tool', !/is-active" data-action="drawing-erase"/.test(body));
+    check('it is active when it is the tool', /is-active" data-action="drawing-erase"/.test(build(tool({ state: { ...tool().state, drawingMode: 'erase' } }), 'utilities')._buildBody()));
+    check('both clear buttons for a GM, and timed erase', has(body, 'data-action="drawing-clear"') && has(body, 'data-action="drawing-clear-all"') && has(body, 'name="timedErase"'));
+    check('the scene controls for a GM, as the scene is', /name="tokenVision"[^>]*checked/.test(body) && !/name="globalLight"[^>]*checked/.test(body) && /name="darkness" min="0" max="1" step="0.05" value="0.25"/.test(body));
+    isGM = false;
+    const player = build(tool(), 'utilities')._buildBody();
+    check('a player has the eraser and their own clear, and nothing more', has(player, 'data-action="drawing-erase"') && has(player, 'data-action="drawing-clear"') && !has(player, 'data-action="drawing-clear-all"') && !has(player, 'data-action="drawing-erase-all"'));
+    check('a player is not offered the scene controls', !has(player, 'name="tokenVision"') && !has(player, 'name="darkness"') && !has(player, 'name="globalLight"'));
+    isGM = true;
+    check('the Drawing tab no longer carries the tidying', !has(build(tool(), 'draw')._buildBody(), 'data-action="drawing-clear"'));
 }
 
 console.log('\nthe Terrain tab');

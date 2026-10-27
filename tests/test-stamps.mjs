@@ -10,7 +10,7 @@ import {
     STAMPS, STAMP_CATEGORIES, TONES, buildStamp, stampPalette, stampSvg, drawStamp, stampDrawingData,
     isProceduralStamp, isStamp, stampById, parseColor, makeRng
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, polygonShape } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, polygonShape, distanceToPolyline, insidePolygon, drawingHit, keptGroup } from '../scripts/utils-drawing.js';
 import { TERRAINS, terrainById, terrainPalette, smoothPath, buildTerrain, terrainSvg, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
 let failures = 0;
@@ -117,6 +117,46 @@ console.log('\nwritten to the scene');
     const ring = stump.find(d => d.fillType === 0);
     check('a line is a Drawing with no fill and a stroke', !!ring && ring.strokeWidth >= 1 && ring.strokeAlpha > 0);
     check('what is on top stays on top: sort follows the order', docs.every((d, i) => d.sort === i));
+}
+
+console.log('\nground patches');
+{
+    const patches = STAMPS.filter(s => s.category === 'ground');
+    check('there are ground patches, in their own category', patches.length >= 4 && STAMP_CATEGORIES.some(c => c.id === 'ground'));
+    check('they include dirt, gravel and sand', ['patch-dirt', 'patch-gravel', 'patch-sand'].every(id => isProceduralStamp(id)));
+    for (const patch of patches) {
+        const prims = buildStamp(patch.id, { seed: 4 });
+        const layers = prims.filter(p => p.k === 'poly' && p.tone === 'base');
+        check(`${patch.id}: layers of the ground, each more solid than the last`, layers.length >= 4 && layers.every((p, i) => i === 0 || p.alpha > layers[i - 1].alpha));
+        check(`${patch.id}: the outer edge is faint, so it fades`, layers[0].alpha <= 0.12);
+        check(`${patch.id}: each layer is inside the one before it`, layers.every((p, i) => { if (!i) return true; const reach = pts => Math.max(...pts.map(Math.abs)); return reach(p.pts) < reach(layers[i - 1].pts); }));
+        check(`${patch.id}: it has texture over the middle`, prims.length > layers.length + 5);
+        check(`${patch.id}: it is large against other stamps`, patch.scale >= 1.8);
+        check(`${patch.id}: it has no shadow`, prims.every(p => !p.shadow));
+        check(`${patch.id}: its texture stays inside its edge`, prims.filter(p => !layers.includes(p) && p.k === 'poly' && p.alpha !== 0.18).every(p => Math.hypot(p.pts[0], p.pts[1]) < 0.4));
+    }
+    check('written to the scene, the layers keep their fade as fill alpha', (() => { const docs = stampDrawingData(buildStamp('patch-dirt', { seed: 4 }), stampPalette('patch-dirt'), { x: 500, y: 500, size: 160 }); return docs[0].fillAlpha <= 0.12 && docs[4].fillAlpha >= 0.35 && docs.every(d => d.strokeWidth === 0); })());
+}
+
+console.log('\nfinding what is under the eraser');
+{
+    check('a point is its distance from a line', Math.abs(distanceToPolyline([0, 0, 100, 0], 50, 30) - 30) < 1e-9);
+    check('beyond the end of a segment it is the distance to the end', Math.abs(distanceToPolyline([0, 0, 100, 0], 130, 40) - 50) < 1e-9);
+    check('from a run of segments it is the nearest one', distanceToPolyline([0, 0, 100, 0, 100, 100], 90, 60) === 10);
+    check('from one point it is the distance to it', distanceToPolyline([10, 10], 13, 14) === 5);
+    check('from nothing it is infinite', distanceToPolyline([], 0, 0) === Infinity);
+    const square = [0, 0, 100, 0, 100, 100, 0, 100];
+    check('inside a polygon is inside', insidePolygon(square, 50, 50) && !insidePolygon(square, 150, 50) && !insidePolygon(square, 50, -5));
+    const filled = { x: 200, y: 200, shape: { type: 'p', points: square }, fillType: 1, fillAlpha: 0.5, strokeWidth: 0, strokeAlpha: 0 };
+    check('the eraser is on a filled shape inside it', drawingHit(filled, 250, 250, 10));
+    check('or within its reach of the edge', drawingHit(filled, 195, 250, 10) && !drawingHit(filled, 180, 250, 10));
+    const open = { x: 0, y: 0, shape: { type: 'p', points: [0, 0, 400, 0] }, fillType: 0, fillAlpha: 0, strokeWidth: 20, strokeAlpha: 1 };
+    check('on an open line it is within its reach and half its width', drawingHit(open, 200, 35, 30) && !drawingHit(open, 200, 45, 30));
+    check('a hollow shape is not hit from inside', !drawingHit({ ...filled, fillType: 0, fillAlpha: 0, strokeWidth: 4, strokeAlpha: 1 }, 250, 250, 10));
+    check('nothing without a polygon is hit', !drawingHit({ x: 0, y: 0, shape: { type: 'r' } }, 0, 0, 10) && !drawingHit(null, 0, 0, 10));
+    const m = 'coffee-pub-cartographer';
+    check('a stamp, a path and a wall stroke are each a group', keptGroup({ [m]: { stamp: { id: 'a' } } }, m).key === 'stamp:a' && keptGroup({ [m]: { terrain: { id: 'b' } } }, m).key === 'terrain:b' && keptGroup({ [m]: { drawnWall: { id: 'c' } } }, m).key === 'drawnWall:c');
+    check('anything else is not', keptGroup({}, m) === null && keptGroup(undefined, m) === null && keptGroup({ other: { stamp: { id: 'a' } } }, m) === null && keptGroup({ [m]: { autoWall: { run: 1 } } }, m) === null);
 }
 
 console.log('\nterrain paths');
