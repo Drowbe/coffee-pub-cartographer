@@ -123,7 +123,7 @@ function startSession(manager, over = {}) {
     const pixels = picture();
     const session = {
         seeds: [], mode: 'wall', result: null, segments: [],
-        options: { mode: 'wall', tab: 'map', drawTool: 'point', drawKind: 'wall', joinEnds: true, joinDistance: 0.25, match: 20, smoothing: 0.3, widest: 1, snap: false,
+        options: { mode: 'wall', tab: 'map', drawTool: 'point', drawKind: 'wall', joinEnds: true, joinDistance: 0.25, match: 20, smoothing: 0.3, widest: 1, freeform: true,
             doorState: 'closed', doorSound: '', doorAnimation: '', windowDistance: 2, windowAttenuation: true, ...over },
         image: { key: 'background', label: 'Scene background', pixels, lab: utils.labBuffer(pixels), surface: { width: WIDTH, height: HEIGHT },
             ...utils.transformFromCorners([0, 0], [WIDTH, 0], [0, HEIGHT], WIDTH, HEIGHT) },
@@ -186,7 +186,7 @@ console.log('\nsnapping and joining');
 {
     canvas = makeCanvas(makeScene([{ c: [20, 100, 200, 100] }]));
     const manager = build();
-    const session = startSession(manager, { snap: true });
+    const session = startSession(manager, { freeform: false });
     session.seeds = [[100, 45]];
     manager._run(session);
     const onGrid = session.segments.flatMap(s => s).filter(([x, y]) => x % GRID === 0 && y % GRID === 0).length;
@@ -201,7 +201,7 @@ console.log('\nsnapping and joining');
 
     // With joining off it does not.
     session.options.joinEnds = false;
-    session.options.snap = false;
+    session.options.freeform = true;
     session.segments = [[[100, 20], [160, 20]]];
     manager._onPointerDown(event(160, 20));
     manager._onDragMove(event(196, 96));
@@ -218,6 +218,25 @@ console.log('\nsnapping and joining');
 }
 
 // ---------------------------------------------------------------- a door
+console.log('\nsnapping is Foundry\'s own');
+{
+    canvas = makeCanvas(makeScene());
+    const manager = build();
+    const session = startSession(manager, { freeform: false });
+    check('with no walls layer, a point goes to the nearest grid corner', JSON.stringify(manager._snapPoint([113, 62])) === '[100,50]', JSON.stringify(manager._snapPoint([113, 62])));
+
+    // Foundry's wall tool snaps to finer points than the grid's corners, so this does too.
+    canvas.walls = { getSnappedPoint: p => ({ x: Math.round(p.x / 25) * 25, y: Math.round(p.y / 25) * 25 }) };
+    check('with the walls layer, a point goes where Foundry\'s wall tool would put it', JSON.stringify(manager._snapPoint([113, 62])) === '[125,50]', JSON.stringify(manager._snapPoint([113, 62])));
+    check('drawing by hand uses it', JSON.stringify(manager._drawTarget([113, 62]).point) === '[125,50]');
+    check('Shift places a point freely', JSON.stringify(manager._drawTarget([113, 62], true).point) === '[113,62]');
+    session.result = { segments: [[[113, 62], [213, 62]]] };
+    session.image = { ...session.image, toScene: p => p };
+    check('walls found are put on those points, not left off them', JSON.stringify(manager._sceneSegments(session)) === '[[[125,50],[225,50]]]', JSON.stringify(manager._sceneSegments(session)));
+    session.options.freeform = true;
+    check('and left where they are when snapping is off', JSON.stringify(manager._sceneSegments(session)) === '[[[113,62],[213,62]]]');
+}
+
 console.log('\na door and a window');
 {
     canvas = makeCanvas(makeScene([{ c: [20, 100, 150, 100] }, { c: [250, 100, 380, 100] }]));

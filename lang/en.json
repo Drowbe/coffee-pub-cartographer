@@ -620,7 +620,7 @@
 		"autowall.smoothingHint": "How plain the walls are, in grid squares. Higher gives fewer, straighter walls and drops short stubs; lower follows the painted wall more closely.",
 		"autowall.widest": "Widest wall",
 		"autowall.widestHint": "The widest a wall may be, in grid squares. Anything wider is taken to be a room, not a wall, and is refused.",
-		"autowall.snap": "Snap to grid corners",
+		"autowall.snap": "Snap to grid",
 		"autowall.add": "Add walls",
 		"autowall.cancel": "Cancel",
 		"autowall.added": "Added {count} walls.",
@@ -629,7 +629,7 @@
 		"autowall.noImage": "This scene has no still background image to read the walls from.",
 		"autowall.failed": "The walls could not be added. See the console.",
 		"autowall.outside": "That click is outside the map image. If it is on the map, the image is not lining up with the scene; the console says what was read.",
-		"autowall.collapsed": "Found some wall there, but nothing long enough to keep. Turn off Snap to grid corners, lower Smoothing, or click a longer stretch.",
+		"autowall.collapsed": "Found some wall there, but nothing long enough to keep. Switch to Freeform, lower Smoothing, or click a longer stretch.",
 		"autowall.modeWall": "Walls",
 		"autowall.modeDoor": "Doors",
 		"autowall.modeWindow": "Windows",
@@ -661,7 +661,7 @@
 		"autowall.tabOptions": "Options",
 		"autowall.joinEnds": "Join walls where they meet",
 		"autowall.joinEndsHint": "For the whole scene, not only this tool: a wall end let go near another snaps onto it, and moving a joint moves the walls on each side of it. Hold Shift to place an end freely. Also the Join Walls Where They Meet setting.",
-		"autowall.snapHint": "Walls snap to the nearest grid corner when moved, and as they are found.",
+		"autowall.snapHint": "Snap to grid places wall ends on the same points as Foundry's own wall tool: the grid's corners, centres and side midpoints, and the steps between them. Freeform places them exactly where you put them. Holding Shift while you place or drag an end is freeform for that end, whichever is chosen.",
 		"autowall.joinDistance": "Join distance",
 		"autowall.joinDistanceHint": "How near, in grid squares, an end must be let go to another to join it, and wall ends must be for Clean up walls to join them. Also the Join Distance setting.",
 		"autowall.cleanup": "Clean up walls",
@@ -699,7 +699,10 @@
 		"autowall.drawFirst": "Click to place the first point. Click the end of a wall that is already there to carry on from it.",
 		"autowall.drawNext": "Last point {x}, {y}. Click to add a wall to it, or click the start to close the shape. Enter or Esc ends this chain; Backspace takes back the last wall; Shift places a point freely.",
 		"autowall.drawSketching": "Drag to draw a line freehand. When you let go it becomes straight walls, joined to wall ends it starts or ends at. Smoothing sets how plain they are.",
-		"autowall.drawStroke": "Drew {count} walls."
+		"autowall.drawStroke": "Drew {count} walls.",
+		"autowall.snapFree": "Freeform",
+		"autowall.snapMode": "How walls are placed",
+		"autowall.placing": "Placing"
 	}
 }
 

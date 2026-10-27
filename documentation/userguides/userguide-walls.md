@@ -146,7 +146,7 @@ so you click a shape out one corner at a time.
 - **Enter** ends the chain; the next click begins another. **Escape** ends it too, and with no chain
   turns drawing off. **Backspace** takes back the last wall and stands where it began.
 - **Shift** places a point exactly where you click, with no joining or snapping.
-- With **Snap to grid corners** on (Options), points that are not joined to a wall end snap to the grid.
+- Points that are not joined to a wall end snap to the grid, unless **Freeform** is chosen (Options) or Shift is held.
 
 **Sketch.** Drag to draw a line freehand. When you let go it is turned into straight walls, as few as
 keep to your line; **Smoothing** sets how plain they are. A stroke that starts or ends near a wall end
@@ -190,7 +190,12 @@ The **Options** tab holds the settings that apply to every mode:
 - **Join walls where they meet** -- the setting described above, on the same switch: an end you drag
   and let go near another wall end snaps onto it, and moving a joint moves the walls on each side. In
   this tool's own preview, two walls joined this way that then run on straight become one wall.
-- **Snap to grid corners** -- walls found, and walls you drag, snap to the nearest grid corner.
+- **Snap to grid or Freeform** -- how walls are placed. **Snap to grid** is the default, as in Foundry:
+  walls found, drawn and dragged land on the same points Foundry's own wall tool snaps to, which are
+  the grid's corners, centres and side midpoints, and the steps between them, finer on a larger grid
+  (quarter squares on a grid of 100 pixels); Foundry's Force Snap Vertices is honoured. **Freeform**
+  places them exactly where you put them. Holding **Shift** while you place or drag an end is freeform
+  for that end, as it is in Foundry, whichever is chosen.
 - **Join distance** -- how near, in grid squares, an end must be let go to another to join it, and
   wall ends must be for Clean up to join them. The default is 0.3 of a square. If ends that nearly meet are left, the result says how many are within
   a square, so you know to raise this.
@@ -224,7 +229,7 @@ drawn by hand, and earlier runs, are not touched. Each run can be undone in turn
 - **"That area is too wide to be a wall"** -- the same, caught by width. Click a thinner part, lower
   Match, or raise **Widest wall** if the wall really is that thick.
 - **"Found some wall there, but nothing long enough to keep"** -- what it found was too short once
-  straightened or snapped. Turn off Snap to grid corners, lower **Smoothing**, or click a longer
+  straightened or snapped. Switch to Freeform, lower **Smoothing**, or click a longer
   stretch.
 - **"That click is outside the map image"** -- the click was off the picture. If it was on the map,
   something is wrong with how the image is placed on the scene; the browser console line beginning

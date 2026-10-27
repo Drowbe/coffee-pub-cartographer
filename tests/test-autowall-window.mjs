@@ -34,7 +34,7 @@ const LIMITS = {
     match: { min: 8, max: 36, step: 1 }, smoothing: { min: 0.05, max: 1, step: 0.05 }, widest: { min: 0.25, max: 3, step: 0.05 },
     windowDistance: { min: 0.5, max: 6, step: 0.5 }, joinDistance: { min: 0.05, max: 1, step: 0.05 }
 };
-const options = { mode: 'wall', tab: 'map', drawTool: 'point', drawKind: 'wall', joinEnds: true, joinDistance: 0.25, match: 20, smoothing: 0.3, widest: 1, snap: false,
+const options = { mode: 'wall', tab: 'map', drawTool: 'point', drawKind: 'wall', joinEnds: true, joinDistance: 0.25, match: 20, smoothing: 0.3, widest: 1, freeform: false,
     doorState: 'closed', doorSound: 'wood', doorAnimation: '', windowDistance: 2, windowAttenuation: true };
 const manager = (mode, tab, undo = false) => ({
     session: { mode, options: { ...options, mode, tab }, draw: { active: false } },
@@ -79,7 +79,7 @@ for (const mode of ['wall', 'door', 'window']) {
 }
 {
     const w = new Harness(manager('wall', 'options'));
-    check('the Options tab is not about one mode, so it has no selector', !has(w._buildBody(w.manager.session), 'blacksmith-tool-segmented'));
+    check('the Options tab is not about one mode, so it has no mode selector', !has(w._buildBody(w.manager.session), 'name="autowall-mode"'));
 }
 
 console.log('\nthe controls each place has');
@@ -98,9 +98,10 @@ console.log('\nthe controls each place has');
 
     const options_ = new Harness(manager('wall', 'options'));
     const html = options_._buildBody(options_.manager.session);
-    check('Options: join, join distance, snap', JSON.stringify(names(html)) === JSON.stringify(['joinDistance', 'joinEnds', 'snap']), JSON.stringify(names(html)));
-    check('Options: the on-or-off settings are Blacksmith\'s toggle, the set ones checked',
-        count(html, /class="blacksmith-toggle-input"/g) === 2 && /name="joinEnds" checked/.test(html) && !/name="snap" checked/.test(html));
+    check('Options: join, and join distance', JSON.stringify(names(html)) === JSON.stringify(['joinDistance', 'joinEnds']), JSON.stringify(names(html)));
+    check('Options: snap to grid or freeform, as a choice of two, snap to grid by default', count(html, /name="autowall-snap"/g) === 2 && /data-snap="grid" checked/.test(html) && !/data-snap="free" checked/.test(html), html.match(/<div class="blacksmith-tool-segmented[\s\S]*?<\/div>/)?.[0]);
+    check('Options: the on-or-off setting is Blacksmith\'s toggle, and set',
+        count(html, /class="blacksmith-toggle-input"/g) === 1 && /name="joinEnds" checked/.test(html));
     check('Options: Clean up, with Undo off when there is nothing to undo', has(html, 'data-action="autowall-cleanup"') && /autowall-cleanup-undo"[^>]*disabled/.test(html));
     check('Options: the buttons are Blacksmith\'s', count(html, /class="blacksmith-tool-btn"/g) === 2);
     check('Options: the clean-up result has a place', has(html, 'data-role="cleanup"'));

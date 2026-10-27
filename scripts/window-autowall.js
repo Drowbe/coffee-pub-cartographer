@@ -52,6 +52,7 @@ export class AutoWallWindow extends BlacksmithToolWindowBaseV2 {
     static ACTION_HANDLERS = {
         'autowall-mode': (_event, target, app) => app.manager.setMode(target.dataset.mode),
         'autowall-tab': (_event, target, app) => app.manager.setTab(target.dataset.tab),
+        'autowall-snap': (_event, target, app) => app.manager.setSnap(target.dataset.snap),
         'autowall-draw-tool': (_event, target, app) => app.manager.setDrawTool(target.dataset.tool),
         'autowall-draw-kind': (_event, target, app) => app.manager.setDrawKind(target.dataset.kind),
         'autowall-draw-toggle': (_event, _target, app) => app.manager.toggleDraw(),
@@ -260,16 +261,20 @@ export class AutoWallWindow extends BlacksmithToolWindowBaseV2 {
     _buildOptions() {
         const localize = key => this._localize(key);
         const undo = this.manager.canUndoCleanup();
+        const placing = this._segmented('autowall-snap', localize('snapMode'), [
+            { id: 'grid', icon: 'fa-solid fa-border-all', labelKey: 'snap' },
+            { id: 'free', icon: 'fa-solid fa-hand', labelKey: 'snapFree' }
+        ], this.manager.session.options.freeform ? 'free' : 'grid', 'snap') + `<div class="blacksmith-tool-hint">${this._escape(localize('snapHint'))}</div>`;
         const joining = this._toggle('joinEnds', localize('joinEnds'), localize('joinEndsHint'))
-            + this._slider('joinDistance', localize('joinDistance'), localize('joinDistanceHint'))
-            + this._toggle('snap', localize('snap'), localize('snapHint'));
+            + this._slider('joinDistance', localize('joinDistance'), localize('joinDistanceHint'));
         const cleanup = `<div class="blacksmith-tool-hint">${this._escape(localize('cleanupHint'))}</div>
                 <div class="cartographer-autowall-buttons">
                     ${this._button({ action: 'autowall-cleanup', icon: 'fa-solid fa-broom', label: localize('cleanupHint'), text: localize('cleanup') })}
                     ${this._button({ action: 'autowall-cleanup-undo', icon: 'fa-solid fa-rotate-left', label: localize('cleanupUndo'), text: localize('cleanupUndo'), disabled: !undo })}
                 </div>
                 <div class="cartographer-autowall-status" data-role="cleanup"></div>`;
-        return this._section('fa-solid fa-link', localize('joining'), joining)
+        return this._section('fa-solid fa-border-all', localize('placing'), placing)
+            + this._section('fa-solid fa-link', localize('joining'), joining)
             + this._section('fa-solid fa-broom', localize('cleanupTitle'), cleanup);
     }
 

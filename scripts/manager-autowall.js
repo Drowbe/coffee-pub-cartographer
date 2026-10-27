@@ -47,7 +47,7 @@ const STORE_KEY = `${MODULE.ID}.autowall.options.v2`;
 
 /** What the controls start at, and the limits they move between. */
 const DEFAULTS = {
-    mode: 'wall', tab: 'map', drawTool: 'point', drawKind: 'wall', joinEnds: true, joinDistance: 0.3, match: 20, smoothing: 0.3, widest: 1, snap: false,
+    mode: 'wall', tab: 'map', drawTool: 'point', drawKind: 'wall', joinEnds: true, joinDistance: 0.3, match: 20, smoothing: 0.3, widest: 1, freeform: false,
     doorState: 'closed', doorSound: '', doorAnimation: '',
     windowDistance: 2, windowAttenuation: true
 };
@@ -499,7 +499,7 @@ class AutoWallManager {
         console.info(`${MODULE.NAME}: auto-wall run`, {
             ms: Math.round(performance.now() - started), seeds: session.seeds.map(seed => seed.map(Math.round)),
             seedsInImage: [first, ...rest].map(seed => seed.map(Math.round)), options: { ...this._tracerOptions(session), lab: undefined },
-            count: result.count, capped: result.capped, tooThick: result.tooThick, segments: result.segments.length, sceneSegments: session.segments.length, snap: session.options.snap
+            count: result.count, capped: result.capped, tooThick: result.tooThick, segments: result.segments.length, sceneSegments: session.segments.length, freeform: session.options.freeform
         });
         this._drawPreview(session);
         this._drawThumb(session);
@@ -649,19 +649,28 @@ class AutoWallManager {
         }
     }
 
-    /** The result in scene pixels, snapped to the grid if asked, with no wall of no length. */
+    /**
+     * A point put where Foundry's own wall tool would put it: on its snap points, which are the
+     * grid's corners, centres and side midpoints and the steps between them, finer as the grid is
+     * larger. Foundry's Force Snap Vertices, when on, is honoured. Without the walls layer, the
+     * grid's corners.
+     */
+    _snapPoint(point) {
+        const at = { x: point[0], y: point[1] };
+        const target = canvas.walls?.getSnappedPoint
+            ? canvas.walls.getSnappedPoint(at)
+            : canvas.grid.getSnappedPoint(at, { mode: CONST.GRID_SNAPPING_MODES.VERTEX });
+        return [Math.round(target.x), Math.round(target.y)];
+    }
+
+    /** The result in scene pixels, on Foundry's wall snap points if asked, with no wall of no length. */
     _sceneSegments(session) {
         const { image, options, result } = session;
-        const size = Number(canvas.scene.grid.size) || 100;
         const snapped = new Map();
         const place = point => {
-            if (!options.snap) return point;
+            if (options.freeform) return point;
             const key = `${Math.round(point[0])},${Math.round(point[1])}`;
-            if (!snapped.has(key)) {
-                const target = canvas.grid.getSnappedPoint({ x: point[0], y: point[1] }, { mode: CONST.GRID_SNAPPING_MODES.VERTEX });
-                const near = Math.hypot(target.x - point[0], target.y - point[1]) <= size * 0.2;
-                snapped.set(key, near ? [target.x, target.y] : point);
-            }
+            if (!snapped.has(key)) snapped.set(key, this._snapPoint(point));
             return snapped.get(key);
         };
         return (result?.segments ?? [])
@@ -867,12 +876,24 @@ class AutoWallManager {
         writeOptions(session.options);
         if (input.name === 'joinEnds' || input.name === 'joinDistance') void game.settings.set(MODULE.ID, `walls.${input.name}`, session.options[input.name]);
         this._showValue(input.name);
-        if (input.name === 'snap') {
-            if (!session.result || session.mode !== 'wall') return;
+        if (['match', 'smoothing', 'widest'].includes(input.name)) this._schedule();
+    }
+
+    /** Snap to Foundry's wall snap points, or place walls exactly where they are put. */
+    setSnap(value) {
+        const session = this.session;
+        if (!session) return;
+        const freeform = value === 'free';
+        if (session.options.freeform === freeform) return;
+        session.options.freeform = freeform;
+        writeOptions(session.options);
+        // What was found is put on the snap points, or taken off them, as it is chosen.
+        if (session.result && session.mode === 'wall' && session.options.tab === 'map') {
             session.segments = this._sceneSegments(session);
             this._drawSegments(session);
             this._reportResult(session);
-        } else if (['match', 'smoothing', 'widest'].includes(input.name)) this._schedule();
+        }
+        void this.window?.render();
     }
 
     /** The line at the top of the Map tab. A warning keeps Add off; an ok or a note leaves it on. */
@@ -1017,7 +1038,12 @@ class AutoWallManager {
 
     /** Whether an event is on the map itself and not on something drawn over it. */
     _onCanvas(event) {
-        return !event.target || event.target === canvas?.app?.view;
+        const target = event.target;
+        if (!target || target === canvas?.app?.view) return true;
+        // Something drawn over the map that is not Foundry's interface (a layer that lets the map
+        // through) still lets the pointer reach the map; a window, the sidebar or a menu does not.
+        if (typeof target.closest !== 'function') return false;
+        return !target.closest('.application, .window-app, dialog, #sidebar, #ui-left, #ui-right, #ui-top, #ui-bottom, #hotbar, #players, #navigation, #controls, #context-menu, .context-menu, .tooltip, .blacksmith-tool-window');
     }
 
     _scenePoint(event) {
@@ -1085,12 +1111,11 @@ class AutoWallManager {
         // An end let go near another joins it, when asked to; failing that, walls may snap to the grid.
         const reach = HANDLE_PIXELS * 1.5 / (canvas.stage?.scale?.x || 1);
         const own = session.segments.flat().filter(end => Math.hypot(end[0] - drag.at[0], end[1] - drag.at[1]) > 1.5);
-        const end = session.options.joinEnds ? this._nearestEnd(point, reach, drag.ends.concat(own)) : null;
+        // Shift is Foundry's own way of placing an end freely, and holds back the joining as well.
+        const free = event.shiftKey || session.options.freeform;
+        const end = session.options.joinEnds && !event.shiftKey ? this._nearestEnd(point, reach, drag.ends.concat(own)) : null;
         if (end) point = [...end];
-        else if (session.mode === 'wall' && session.options.snap) {
-            const target = canvas.grid.getSnappedPoint({ x: point[0], y: point[1] }, { mode: CONST.GRID_SNAPPING_MODES.VERTEX });
-            point = [target.x, target.y];
-        }
+        else if (session.mode === 'wall' && !free) point = this._snapPoint(point);
         point = point.map(Math.round);
         for (const segment of session.segments) {
             for (const end of segment) {
@@ -1250,10 +1275,7 @@ class AutoWallManager {
             const end = this._nearestEnd(point, options.joinDistance * grid, this._wallEnds());
             if (end) return { point: [...end], node: true };
         }
-        if (!shift && options.snap) {
-            const target = canvas.grid.getSnappedPoint({ x: point[0], y: point[1] }, { mode: CONST.GRID_SNAPPING_MODES.VERTEX });
-            return { point: [Math.round(target.x), Math.round(target.y)], node: false };
-        }
+        if (!shift && !options.freeform) return { point: this._snapPoint(point), node: false };
         return { point: [Math.round(point[0]), Math.round(point[1])], node: false };
     }
 
