@@ -25,8 +25,8 @@ always draw.
 Click **Drawing Tools** (the pen and ruler) among Foundry's own scene controls down the left of the
 canvas -- with the drawing tools, or with the token tools if you have no drawing tools -- or click **Tools** in
 the **Drawing Tools** section of the Cartographer bar, or choose **Drawing Tools** from the Cartographer
-button's right-click menu. Clicking the scene control again closes the window. A window opens with four tabs, **Drawing**,
-**Stamps**, **Terrain** and **Utilities**, holding the same controls as the bar and more. The buttons in the bar stay where they are, and the
+button's right-click menu. Clicking the scene control again closes the window. A window opens with five tabs, **Drawing**,
+**Stamps**, **Terrain**, **Walls** (the GM's) and **Utilities**, holding the same controls as the bar and more. The buttons in the bar stay where they are, and the
 two follow each other: choose a tool in one and the other shows it.
 
 Picking a tool or a stamp in the window starts drawing at once, and in the window a stroke is plain
@@ -142,8 +142,19 @@ The **Utilities** tab holds the things that are not drawing.
 
 ## Draw walls
 
-**Wall** is the last tool on the Drawing tab, for the GM only. A wall stroke makes both the line you
-can see and the wall underneath it, so a quick map is playable at once:
+The **Walls** tab, which only the GM has, draws real walls with a line over them, so a quick map is
+playable at once. Click a kind, then press, drag and let go on the map:
+
+- **Wall** -- a plain wall, which stops movement, sight, light and sound.
+- **Invisible** -- stops movement and nothing else.
+- **Terrain** -- stops movement, and cuts sight, light and sound short.
+- **Ethereal** -- stops sight, light and sound, and lets tokens walk through.
+- **Door** and **Secret door** -- doors, drawn **Closed**, **Open** or **Locked** as you choose.
+- **Window** -- sight and light pass close up and fade over two squares; movement and sound are stopped.
+
+Each kind is written the way Foundry's own wall tools write it, and the line over it is a colour of its
+own, with a dark edge so it shows on a pale map, so you can tell the kinds apart. The walls themselves
+are Foundry's, and show, as any wall does, when the Walls controls are selected.
 
 - **Straight** -- one wall, from where you press to where you let go.
 - **Freehand** -- the stroke is straightened into a run of walls, and closed into a ring if it ends
@@ -151,9 +162,9 @@ can see and the wall underneath it, so a quick map is playable at once:
 
 **Snap to the grid** puts wall ends on the points Foundry's own wall tool snaps to; turn it off to
 place them exactly. Walls follow the same **Join Walls Where They Meet** setting as the walls
-tool, so a wall let go near another's end joins it. The line is drawn in your brush colour and
-weight as a Foundry Drawing, and is kept: unlike a sketch, a wall does not clear itself. **Undo**
-takes back the walls and their line together.
+tool, so a wall let go near another's end joins it. The line is a Foundry Drawing, at the
+weight you choose, and is kept: unlike a sketch, a wall does not clear itself. **Undo** takes back the
+walls and their line together.
 
 ## What everyone else sees
 

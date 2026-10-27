@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import {
     stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData } from '../scripts/utils-drawing.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
 const src = fs.readFileSync('scripts/manager-drawing.js', 'utf8');
@@ -24,7 +24,9 @@ const toolButton = slice('    addDrawingTool(controls) {', '    /** Open the dra
 const undo = slice('    undoLastDrawing() {', '    /**\n     * Clean up drawings from a specific player');
 const MAX_SCATTER = Number(src.match(/const MAX_SCATTER = (\d+)/)[1]);
 const KEPT_SPECKS = Number(src.match(/const KEPT_SPECKS = (\d+)/)[1]);
+const WALL_CASING = src.match(/const WALL_CASING = '([^']+)'/)[1];
 const pointer = slice('    /** The button went down on the map', '    /** Stop drawing from the window. */');
+const wallOptions = slice('    setWallOption(name, value) {', '    setLineStyle(style) {');
 const strokeMode = slice('    _strokeMode() {', '    /**\n     * Set the stamp style');
 
 const MODULE = { ID: 'coffee-pub-cartographer', NAME: 'Cartographer' };
@@ -32,7 +34,10 @@ const notices = [];
 const notify = (title, options) => notices.push({ title, ...options });
 const CONST = {
     DRAWING_FILL_TYPES: { NONE: 0, SOLID: 1 },
-    GRID_SNAPPING_MODES: { VERTEX: 1 }
+    GRID_SNAPPING_MODES: { VERTEX: 1 },
+    EDGE_SENSE_TYPES: { NONE: 0, LIMITED: 10, NORMAL: 20, PROXIMITY: 30, DISTANCE: 40 },
+    WALL_DOOR_TYPES: { NONE: 0, DOOR: 1, SECRET: 2 },
+    WALL_DOOR_STATES: { CLOSED: 0, OPEN: 1, LOCKED: 2 }
 };
 const foundry = { utils: { randomID: (() => { let n = 0; return () => `id${++n}`; })() }, get applications() { return foundryApplications; } };
 let isGM = true;
@@ -85,7 +90,8 @@ const canvas = {
     get scene() { return scene; },
     grid: { size: 100, getSnappedPoint: ({ x, y }) => ({ x: Math.round(x / 50) * 50, y: Math.round(y / 50) * 50 }) },
     walls: null,
-    level: null
+    level: null,
+    dimensions: { distance: 5 }
 };
 globalThis.PIXI = { Graphics: class { constructor() { this.calls = []; this.destroyed = false; return new Proxy(this, { get: (t, n) => (n === 'parent' ? undefined : n === 'destroy' ? () => { t.destroyed = true; } : n in t ? t[n] : (...a) => t.calls.push([n, ...a])) }); } } };
 
@@ -98,6 +104,7 @@ const Harness = eval(`(() => {
 return class Harness {
 ${strokeMode}
 ${methods}
+${wallOptions}
 ${pointer}
 ${toolButton}
 ${undo}
@@ -112,7 +119,7 @@ const make = () => {
             drawingMode: 'wall', stampStyle: 'tree', symbolSize: 'medium', timedEraseEnabled: false,
             brushSettings: { size: 6, color: 'rgba(186, 60, 49, 0.7)', type: 'pen' },
             stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 },
-            wallShape: 'line', wallSnap: true
+            wallShape: 'line', wallSnap: true, wallKind: 'wall', wallDoor: 'closed'
         },
         services: { canvasLayer: { added: [], addChild(g) { this.added.push(g); } } },
         _pixiDrawings: [], _kept: [], _roll: null, _lastDrawing: null,
@@ -155,13 +162,16 @@ console.log('\na wall stroke');
     await tool.createWallStroke([[12, 8], [388, 14]]);
     const walls = scene.creates.filter(([type]) => type === 'Wall');
     const lines = scene.creates.filter(([type]) => type === 'Drawing');
-    check('one wall and one line are written', walls.length === 1 && walls[0][1].length === 1 && lines.length === 1 && lines[0][1].length === 1);
+    check('one wall, and its line with the dark one under it, are written', walls.length === 1 && walls[0][1].length === 1 && lines.length === 1 && lines[0][1].length === 2);
     check('the wall is where the snap put it', walls[0][1][0].c.join() === '0,0,400,0');
-    check('the wall and the line carry the same group flag', walls[0][1][0].flags[MODULE.ID].drawnWall.id === lines[0][1][0].flags[MODULE.ID].drawnWall.id);
-    check('the line is in the brush colour, at its width and opacity', lines[0][1][0].strokeColor === '#ba3c31' && lines[0][1][0].strokeWidth === 6 && lines[0][1][0].strokeAlpha === 0.7);
-    check('the line is open: no fill', lines[0][1][0].fillType === 0);
-    check('the line runs along the wall', lines[0][1][0].shape.points.join() === '0,0,400,0' && lines[0][1][0].x === 0 && lines[0][1][0].y === 0);
-    check('it is one thing to take back, with both kinds in it', tool._kept.length === 1 && tool._kept[0].wallIds.length === 1 && tool._kept[0].drawingIds.length === 1);
+    check('the wall and the line carry the same group flag', walls[0][1][0].flags[MODULE.ID].drawnWall.id === lines[0][1][1].flags[MODULE.ID].drawnWall.id);
+    check('the line is the colour of the kind, at the brush\'s width', lines[0][1][1].strokeColor === wallKindById('wall').color && lines[0][1][1].strokeWidth === 6 && lines[0][1][1].strokeAlpha === 1);
+    check('a plain wall is written as Foundry\'s defaults: no sense fields at all', !('door' in walls[0][1][0]) && !('light' in walls[0][1][0]) && !('threshold' in walls[0][1][0]));
+    check('the line is open: no fill', lines[0][1].every(d => d.fillType === 0));
+    check('the line runs along the wall', lines[0][1].every(d => d.shape.points.join() === '0,0,400,0' && d.x === 0 && d.y === 0));
+    check('under the line is a darker, wider one, so the wall shows on any map', lines[0][1][0].strokeColor === WALL_CASING && lines[0][1][0].strokeWidth === 10 && lines[0][1][0].sort < lines[0][1][1].sort);
+    check('both carry the same group flag, so the eraser takes both', lines[0][1][0].flags[MODULE.ID].drawnWall.id === lines[0][1][1].flags[MODULE.ID].drawnWall.id);
+    check('it is one thing to take back, with both kinds in it', tool._kept.length === 1 && tool._kept[0].wallIds.length === 1 && tool._kept[0].drawingIds.length === 2);
     check('the window is told', tool.changes >= 1);
 }
 {
@@ -218,15 +228,95 @@ console.log('\na wall stroke');
     check('if the line is refused the user is told, and nothing is recorded to undo', notices.some(n => /Could not draw/.test(n.title)) && tool._kept.length === 0);
 }
 
+console.log('\nkinds of wall');
+{
+    const written = async (kind, setup = () => {}) => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.wallKind = kind;
+        setup(tool);
+        await tool.createWallStroke([[0, 0], [400, 0]]);
+        return { tool, wall: scene.creates.find(([type]) => type === 'Wall')[1][0], line: scene.creates.find(([type]) => type === 'Drawing')[1][1], casing: scene.creates.find(([type]) => type === 'Drawing')[1][0] };
+    };
+    const sense = CONST.EDGE_SENSE_TYPES;
+    {
+        const { wall } = await written('invisible');
+        check('an invisible wall stops movement and nothing else', wall.move === sense.NORMAL && wall.sight === sense.NONE && wall.light === sense.NONE && wall.sound === sense.NONE);
+    }
+    {
+        const { wall } = await written('terrain');
+        check('a terrain wall cuts sight, light and sound short, and stops movement', wall.sight === sense.LIMITED && wall.light === sense.LIMITED && wall.sound === sense.LIMITED && wall.move === sense.NORMAL);
+    }
+    {
+        const { wall } = await written('ethereal');
+        check('an ethereal wall stops sight, light and sound, and not movement', wall.move === sense.NONE && wall.sight === sense.NORMAL && wall.light === sense.NORMAL);
+    }
+    {
+        const { wall } = await written('door');
+        check('a door is a door, closed', wall.door === CONST.WALL_DOOR_TYPES.DOOR && wall.ds === CONST.WALL_DOOR_STATES.CLOSED && wall.move === sense.NORMAL);
+    }
+    {
+        const { wall } = await written('door', t => { t.state.wallDoor = 'open'; });
+        check('an open door is drawn open', wall.ds === CONST.WALL_DOOR_STATES.OPEN);
+    }
+    {
+        const { wall } = await written('door', t => { t.state.wallDoor = 'locked'; });
+        check('a locked door is drawn locked', wall.ds === CONST.WALL_DOOR_STATES.LOCKED);
+    }
+    {
+        const { wall } = await written('secret', t => { t.state.wallDoor = 'locked'; });
+        check('a secret door is a secret door, in the state chosen', wall.door === CONST.WALL_DOOR_TYPES.SECRET && wall.ds === CONST.WALL_DOOR_STATES.LOCKED);
+    }
+    {
+        const { wall } = await written('window');
+        check('a window lets light and sight through close up, fading over two squares', wall.light === sense.PROXIMITY && wall.sight === sense.PROXIMITY && wall.threshold.light === 10 && wall.threshold.sight === 10 && wall.threshold.attenuation === true);
+        check('and still stops movement and sound', wall.move === sense.NORMAL && wall.sound === sense.NORMAL);
+    }
+    for (const kind of ['wall', 'invisible', 'terrain', 'ethereal', 'door', 'secret', 'window']) {
+        const { wall, line } = await written(kind);
+        check(`${kind}: the wall and its line carry the kind, and the line is its colour`, wall.flags[MODULE.ID].drawnWall.kind === kind && line.strokeColor === wallKindById(kind).color);
+    }
+    {
+        const { wall } = await written('nonsense');
+        check('an unknown kind is a plain wall', !('door' in wall) && !('light' in wall) && wall.flags[MODULE.ID].drawnWall.kind === 'wall');
+    }
+    {
+        const { tool } = await written('door');
+        const entry = tool._kept.at(-1);
+        await tool._undoKept();
+        check('undoing a door takes the door and its line', scene.walls.size === 0 && scene.drawings.size === 0 && entry.kind === 'wall');
+    }
+    {
+        scene = makeScene();
+        const tool = make();
+        const saved = [];
+        game.settings.set = (...args) => saved.push(args);
+        tool.state.drawingMode = 'sketch';
+        tool.setWallOption('kind', 'door');
+        tool.setWallOption('door', 'locked');
+        tool.setWallOption('kind', 'nonsense');
+        tool.setWallOption('door', 'ajar');
+        check('the kind and the door state are chosen, and nonsense is refused', tool.state.wallKind === 'door' && tool.state.wallDoor === 'locked');
+        check('and remembered with the shape and snap', JSON.stringify(saved.at(-1)[2]) === JSON.stringify({ shape: 'line', snap: true, kind: 'door', door: 'locked' }));
+        game.settings.set = () => {};
+        tool.state.drawingMode = 'sketch';
+        isGM = false;
+        tool.setDrawingMode = mode => { tool.mode = mode; };
+        tool.chooseWall('door');
+        check('a player cannot pick a kind of wall', tool.mode === undefined);
+        isGM = true;
+    }
+}
+
 console.log('\nundo');
 {
     scene = makeScene();
     const tool = make();
     await tool.createWallStroke([[0, 0], [300, 0]]);
     await tool.createWallStroke([[0, 100], [300, 100]]);
-    check('two strokes, two things to take back', tool._kept.length === 2 && scene.walls.size === 2 && scene.drawings.size === 2);
+    check('two strokes, two things to take back', tool._kept.length === 2 && scene.walls.size === 2 && scene.drawings.size === 4);
     await tool._undoKept();
-    check('undo takes back the last wall and its line, and no more', scene.walls.size === 1 && scene.drawings.size === 1 && tool._kept.length === 1);
+    check('undo takes back the last wall and its line, and no more', scene.walls.size === 1 && scene.drawings.size === 2 && tool._kept.length === 1);
     const remaining = [...scene.walls.map.values()][0];
     check('and it is the first that is left', remaining.c.join() === '0,0,300,0');
     await tool._undoKept();
@@ -542,14 +632,14 @@ console.log('\nthe eraser');
         const tool = await strokeAndErase(t => t.createWallStroke([[0, 0], [400, 0]]), [200, 8]);
         check('erasing on a wall stroke takes the wall and its line', scene.walls.size === 0 && scene.drawings.size === 0);
         const entry = tool._kept.at(-1);
-        check('and is one thing to undo, holding both', entry.kind === 'erase' && entry.restore.Wall.length === 1 && entry.restore.Drawing.length === 1);
+        check('and is one thing to undo, holding both', entry.kind === 'erase' && entry.restore.Wall.length === 1 && entry.restore.Drawing.length === 2);
         await tool._undoKept();
-        check('undo puts back the wall and the line, with their own ids', scene.walls.size === 1 && scene.drawings.size === 1 && scene.walls.has(entry.restore.Wall[0]._id));
+        check('undo puts back the wall and the line, with their own ids', scene.walls.size === 1 && scene.drawings.size === 2 && scene.walls.has(entry.restore.Wall[0]._id));
         check('what comes back is what went: the same wall', [...scene.walls.map.values()][0].c.join() === '0,0,400,0');
     }
     {
         await strokeAndErase(t => t.createWallStroke([[0, 0], [400, 0]]), [200, 300]);
-        check('erasing away from it takes nothing', scene.walls.size === 1 && scene.drawings.size === 1);
+        check('erasing away from it takes nothing', scene.walls.size === 1 && scene.drawings.size === 2);
     }
     {
         const tool = await strokeAndErase(async t => { t.state.stamp.keep = true; t._placeStamp('shrub', 640, 480); await new Promise(r => setTimeout(r, 10)); }, [640, 480]);
@@ -597,7 +687,7 @@ console.log('\nthe eraser');
         isGM = false;
         tool._eraseAt(200, 0);
         await tool._commitErase();
-        check('a player cannot erase what is not theirs', scene.drawings.size === 1 && scene.walls.size === 1);
+        check('a player cannot erase what is not theirs', scene.drawings.size === 2 && scene.walls.size === 1);
         isGM = true;
     }
     {
@@ -635,14 +725,14 @@ console.log('\nthe eraser');
         await tool.createWallStroke([[0, 300], [400, 300]]);
         confirmAnswer = false;
         await tool.eraseAllKept();
-        check('erase all asks first, and does nothing if refused', scene.walls.size === 2 && scene.drawings.size === 2);
+        check('erase all asks first, and does nothing if refused', scene.walls.size === 2 && scene.drawings.size === 4);
         confirmAnswer = true;
         await tool.eraseAllKept();
         check('erase all takes every stroke, walls and lines', scene.walls.size === 0 && scene.drawings.size === 0);
         const entry = tool._kept.at(-1);
-        check('as one thing to undo', entry.kind === 'erase' && entry.restore.Wall.length === 2 && entry.restore.Drawing.length === 2);
+        check('as one thing to undo', entry.kind === 'erase' && entry.restore.Wall.length === 2 && entry.restore.Drawing.length === 4);
         await tool._undoKept();
-        check('which puts them all back', scene.walls.size === 2 && scene.drawings.size === 2);
+        check('which puts them all back', scene.walls.size === 2 && scene.drawings.size === 4);
         isGM = false;
         scene.creates.length = 0;
         await tool.eraseAllKept();

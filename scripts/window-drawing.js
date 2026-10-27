@@ -15,6 +15,7 @@
 import { MODULE } from './const.js';
 import { STAMPS, STAMP_CATEGORIES, stampSvg, parseColor } from './utils-stamps.js';
 import { TERRAINS, terrainSvg } from './utils-terrain.js';
+import { WALL_KINDS, wallKindSvg, isDoorKind } from './utils-drawing.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
@@ -25,6 +26,7 @@ const TABS = [
     { id: 'draw', icon: 'fa-solid fa-pen-ruler', labelKey: 'tabDrawing' },
     { id: 'stamps', icon: 'fa-solid fa-stamp', labelKey: 'tabStamps' },
     { id: 'terrain', icon: 'fa-solid fa-road', labelKey: 'tabTerrain' },
+    { id: 'walls', icon: 'fa-solid fa-border-none', labelKey: 'tabWalls', gmOnly: true },
     { id: 'utilities', icon: 'fa-solid fa-screwdriver-wrench', labelKey: 'tabUtilities' }
 ];
 /** The stamps that are ground, not things standing on it: they are shown with the paths. */
@@ -35,13 +37,18 @@ const PATH_WIDTHS = [
     { id: '1', icon: 'fa-solid fa-grip-lines', labelKey: 'widthMedium' },
     { id: '2', icon: 'fa-solid fa-bars', labelKey: 'widthWide' }
 ];
-/** What a drag draws. Wall is the GM's: it writes real walls. */
+/** What a drag draws on the Drawing tab. Walls have a tab of their own. */
 const TOOLS = [
     { id: 'sketch', icon: 'fa-solid fa-pen', labelKey: 'toolSketch' },
     { id: 'line', icon: 'fa-solid fa-slash-forward', labelKey: 'toolLine' },
     { id: 'box', icon: 'fa-regular fa-square', labelKey: 'toolBox' },
-    { id: 'ellipse', icon: 'fa-regular fa-circle', labelKey: 'toolEllipse' },
-    { id: 'wall', icon: 'fa-solid fa-border-none', labelKey: 'toolWall', gmOnly: true }
+    { id: 'ellipse', icon: 'fa-regular fa-circle', labelKey: 'toolEllipse' }
+];
+/** The state a door is drawn in. */
+const DOOR_STATES = [
+    { id: 'closed', icon: 'fa-solid fa-door-closed', labelKey: 'doorClosed' },
+    { id: 'open', icon: 'fa-solid fa-door-open', labelKey: 'doorOpen' },
+    { id: 'locked', icon: 'fa-solid fa-lock', labelKey: 'doorLocked' }
 ];
 const WALL_SHAPES = [
     { id: 'line', icon: 'fa-solid fa-slash-forward', labelKey: 'wallStraight' },
@@ -91,6 +98,8 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
     static ACTION_HANDLERS = {
         'drawing-tab': (_event, target, app) => app.setTab(target.dataset.tab),
         'drawing-mode': (_event, target, app) => app.manager.chooseMode(target.dataset.mode),
+        'drawing-wall': (_event, target, app) => app.manager.chooseWall(target.dataset.kind),
+        'drawing-wall-door': (_event, target, app) => app.manager.setWallOption('door', target.dataset.door),
         'drawing-wall-shape': (_event, target, app) => app.manager.setWallOption('shape', target.dataset.shape),
         'drawing-weight': (_event, target, app) => app.manager.setBrushSettings({ size: Number(target.dataset.size) }, true),
         'drawing-style': (_event, target, app) => app.manager.setLineStyle(target.dataset.style),
@@ -232,15 +241,20 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
     }
 
     /** The tabs, at the top of the window, as Blacksmith's underline tabs. */
+    /** The tabs this user has: walls are the GM's. */
+    _tabs() {
+        return TABS.filter(entry => !entry.gmOnly || this.manager.canMakeWalls());
+    }
+
     _buildTabs(tab) {
-        const buttons = TABS.map(entry => `<button type="button" class="blacksmith-tool-tab${entry.id === tab ? ' is-active' : ''}" role="tab" aria-selected="${entry.id === tab}" data-action="drawing-tab" data-tab="${entry.id}">
+        const buttons = this._tabs().map(entry => `<button type="button" class="blacksmith-tool-tab${entry.id === tab ? ' is-active' : ''}" role="tab" aria-selected="${entry.id === tab}" data-action="drawing-tab" data-tab="${entry.id}">
                 <i class="${entry.icon}"></i><span>${this._escape(this._localize(entry.labelKey))}</span></button>`).join('');
         return `<nav class="blacksmith-tool-tabs is-fill" role="tablist">${buttons}</nav>`;
     }
 
     _buildBody() {
-        const tab = TABS.some(entry => entry.id === this.tab) ? this.tab : 'draw';
-        const content = { stamps: () => this._buildStamps(), terrain: () => this._buildTerrain(), utilities: () => this._buildUtilities(), draw: () => this._buildDraw() }[tab]();
+        const tab = this._tabs().some(entry => entry.id === this.tab) ? this.tab : 'draw';
+        const content = { walls: () => this._buildWalls(), stamps: () => this._buildStamps(), terrain: () => this._buildTerrain(), utilities: () => this._buildUtilities(), draw: () => this._buildDraw() }[tab]();
         return `${this._buildTabs(tab)}
             <div class="blacksmith-tool-stack cartographer-drawing-panel">${content}</div>`;
     }
@@ -270,21 +284,35 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
     _buildDraw() {
         const localize = key => this._localize(key);
         const { state } = this.manager;
-        const gm = this.manager.canMakeWalls();
-        const tools = TOOLS.filter(tool => !tool.gmOnly || gm);
-        let sections = this._section('fa-solid fa-pen', localize('tool'), this._segmented('drawing-mode', localize('tool'), tools, state.drawingMode, 'mode'));
-        if (state.drawingMode === 'wall' && gm) {
-            sections += this._section('fa-solid fa-border-none', localize('wall'),
-                this._segmented('drawing-wall-shape', localize('wallShape'), WALL_SHAPES, state.wallShape, 'shape')
-                + this._toggle('wallSnap', localize('wallSnap'), state.wallSnap, { hint: localize('wallSnapHint') })
-                + this._hint(localize('wallHint')));
-        }
+        let sections = this._section('fa-solid fa-pen', localize('tool'), this._segmented('drawing-mode', localize('tool'), TOOLS, state.drawingMode, 'mode'));
         sections += this._section('fa-solid fa-grip-lines', localize('line'),
             this._segmented('drawing-weight', localize('weight'), WEIGHTS, state.brushSettings.size, 'size')
             + this._segmented('drawing-style', localize('style'), LINE_STYLES, state.lineStyle, 'style'));
         sections += this._section('fa-solid fa-palette', localize('color'), this._buildColors());
         sections += this._hint(localize('holdHint'));
         return sections;
+    }
+
+    /** The Walls tab (the GM's): the kinds of wall, and how they are drawn. */
+    _buildWalls() {
+        const localize = key => this._localize(key);
+        const { state } = this.manager;
+        const tiles = WALL_KINDS.map(kind => {
+            const active = state.drawingMode === 'wall' && state.wallKind === kind.id;
+            const label = this._escape(localize(kind.labelKey));
+            return `<button type="button" class="cartographer-stamp${active ? ' is-active' : ''}" data-action="drawing-wall" data-kind="${kind.id}" data-tooltip="${label}" aria-label="${label}" aria-pressed="${active}">
+                <span class="cartographer-stamp-art">${wallKindSvg(kind.id)}</span><span class="cartographer-stamp-name">${label}</span></button>`;
+        }).join('');
+        const door = isDoorKind(state.wallKind)
+            ? this._segmented('drawing-wall-door', localize('doorState'), DOOR_STATES, state.wallDoor, 'door')
+            : '';
+        const how = this._segmented('drawing-wall-shape', localize('wallShape'), WALL_SHAPES, state.wallShape, 'shape')
+            + this._toggle('wallSnap', localize('wallSnap'), state.wallSnap, { hint: localize('wallSnapHint') })
+            + door
+            + this._segmented('drawing-weight', localize('weight'), WEIGHTS, state.brushSettings.size, 'size')
+            + this._hint(localize('wallHint'));
+        return this._section('fa-solid fa-border-none', localize('wallKind'), `<div class="cartographer-stamp-grid">${tiles}</div>`)
+            + this._section('fa-solid fa-pen-ruler', localize('wallHow'), how);
     }
 
     /** The Utilities tab: erasing, and how the scene is seen. */

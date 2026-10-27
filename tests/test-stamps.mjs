@@ -10,7 +10,7 @@ import {
     STAMPS, STAMP_CATEGORIES, TONES, buildStamp, stampPalette, stampSvg, drawStamp, stampDrawingData,
     isProceduralStamp, isStamp, stampById, parseColor, makeRng
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, polygonShape, distanceToPolyline, insidePolygon, drawingHit, keptGroup } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, polygonShape, distanceToPolyline, insidePolygon, drawingHit, keptGroup, WALL_KINDS, wallKindById, wallKindData, wallKindSvg, isDoorKind } from '../scripts/utils-drawing.js';
 import { TERRAINS, terrainById, terrainPalette, smoothPath, buildTerrain, terrainSvg, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
 let failures = 0;

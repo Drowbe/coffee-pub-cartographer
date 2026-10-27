@@ -184,19 +184,36 @@ class AutoWallManager {
         try {
             session.image = session.background = await this._readImage();
         } catch (error) {
-            console.error(`${MODULE.NAME}: could not read the scene image`, error);
-            if (this.session === session) {
-                ui.notifications.warn(this._localize('noImage'));
-                this.cancel();
-            }
-            return;
+            if (this.session !== session) return;
+            if (!this._withoutBackground(session, error)) return;
         }
         if (this.session !== session) return;
         this._listen();
         this._syncCursor();
         this._drawThumb(session);
         this._showSource(session);
-        this._setStatus(this._localize(HINTS[session.mode]));
+        this._setStatus(this._localize(session.background ? HINTS[session.mode] : 'noBackground'), session.background ? undefined : 'note');
+    }
+
+    /**
+     * The background could not be read. A scene with no still background -- one built from tiles, or
+     * with nothing but what was drawn on it -- can still be mapped from its tiles, so the run goes on
+     * without a background, and a click where no tile is says so. A scene with nothing to read ends
+     * the run, and says why.
+     * @returns {boolean} Whether the run goes on.
+     */
+    _withoutBackground(session, error) {
+        const readable = (canvas.tiles?.placeables ?? []).some(tile => tile.mesh && !tile.mesh.destroyed
+            && tile.document?.texture?.src && !/\.(webm|mp4|m4v)$/i.test(tile.document.texture.src));
+        if (error?.message !== 'no still image') console.error(`${MODULE.NAME}: could not read the scene image`, error);
+        else console.info(`${MODULE.NAME}: the scene has no still background image${readable ? '; tiles can still be read' : ''}`);
+        if (readable) {
+            session.image = session.background = null;
+            return true;
+        }
+        ui.notifications.warn(this._localize('noImage'));
+        this.cancel();
+        return false;
     }
 
     cancel() {
@@ -352,6 +369,11 @@ class AutoWallManager {
 
     /** Start from a click: on a different picture, nothing found on the last one carries over. */
     _useImage(session, image, point) {
+        // A click where no tile is, on a scene with no background: there is no picture to read.
+        if (!image) {
+            this._setStatus(this._localize('nothingHere'), 'warn');
+            return;
+        }
         if (session.image?.key !== image.key) {
             session.image = image;
             session.result = null;

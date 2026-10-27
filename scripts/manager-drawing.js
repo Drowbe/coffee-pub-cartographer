@@ -6,7 +6,7 @@ import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
 import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor } from './utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup } from './utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData } from './utils-drawing.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
 
 // ================================================================== 
@@ -18,6 +18,9 @@ import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } fr
  * Handles temporary player drawings on the canvas for planning purposes
  * This is the first tool in the Cartographer multi-tool module
  */
+/** The dark line a wall's line is laid over, so it shows on any map. */
+const WALL_CASING = '#1c1c1c';
+
 /** The most stamps one drag puts down, so a long stroke cannot bury the scene. */
 const MAX_SCATTER = 400;
 
@@ -60,6 +63,8 @@ class DrawingTool {
             },
             wallShape: 'line', // wall mode: 'line' (one straight wall) or 'sketch' (freehand, simplified to walls)
             wallSnap: true, // wall mode: put wall ends on Foundry's wall snap points
+            wallKind: 'wall', // wall mode: what is drawn: 'wall', 'invisible', 'terrain', 'ethereal', 'door', 'secret', 'window'
+            wallDoor: 'closed', // wall mode: the state a door is drawn in: 'closed', 'open', 'locked'
             symbolSize: 'medium', // 'small', 'medium', 'large' - controls square bounding box size
             lineStyle: 'solid', // 'solid', 'dotted', 'dashed'
             brushSettings: {
@@ -151,6 +156,8 @@ class DrawingTool {
         const savedWallOptions = game.settings.get(MODULE.ID, 'toolbar.wallOptions');
         if (['line', 'sketch'].includes(savedWallOptions?.shape)) this.state.wallShape = savedWallOptions.shape;
         if (typeof savedWallOptions?.snap === 'boolean') this.state.wallSnap = savedWallOptions.snap;
+        if (wallKindById(savedWallOptions?.kind)) this.state.wallKind = savedWallOptions.kind;
+        if (['closed', 'open', 'locked'].includes(savedWallOptions?.door)) this.state.wallDoor = savedWallOptions.door;
         if (['small', 'medium', 'large'].includes(savedSymbolSize)) {
             this.state.symbolSize = savedSymbolSize;
         }
@@ -4510,8 +4517,18 @@ class DrawingTool {
         return [target.x, target.y];
     }
 
+    /** Choose a kind of wall from the window, and start drawing it. */
+    chooseWall(kind) {
+        if (!this.canMakeWalls() || !wallKindById(kind)) return;
+        this.setWallOption('kind', kind);
+        this.setDrawingMode('wall');
+        this.updateModeButtons();
+        this.startFromWindow();
+        this.notifyChange();
+    }
+
     /**
-     * A wall stroke, made: the walls it describes, and a line over them in the brush's colour so
+     * A wall stroke, made: the walls it describes, and a line over them in the colour of the kind so
      * the walls can be seen on the map. Both are written to the scene, and undo takes both back.
      * @param {number[][]} points  [[x, y], ...] in scene pixels, the stroke as drawn.
      */
@@ -4538,21 +4555,26 @@ class DrawingTool {
         if (!segments.length) return;
 
         const group = foundry.utils.randomID();
-        const flags = { [MODULE.ID]: { drawnWall: { id: group } } };
+        const kind = wallKindById(this.state.wallKind)?.id ?? 'wall';
+        const flags = { [MODULE.ID]: { drawnWall: { id: group, kind } } };
         const levels = scene.levels?.size > 1 && canvas.level?.id ? { levels: [canvas.level.id] } : {};
-        const wallData = segments.map(([a, b]) => ({ c: [a[0], a[1], b[0], b[1]], flags, ...levels }));
-        const channels = parseColor(this.state.brushSettings.color) ?? [0, 0, 0];
-        const color = `#${channels.map(c => c.toString(16).padStart(2, '0')).join('')}`;
-        const line = strokeDrawingData(segmentsPath(segments), {
-            color,
-            alpha: this.extractAlphaFromRgba(this.state.brushSettings.color),
-            width: this.state.brushSettings.size,
-            flags,
-            none: CONST.DRAWING_FILL_TYPES.NONE
-        });
+        // What each kind of wall is made of -- what it stops, what it lets through -- as Foundry's own tools make it.
+        const made = wallKindData(kind, {
+            sense: CONST.EDGE_SENSE_TYPES ?? CONST.WALL_SENSE_TYPES,
+            doorTypes: CONST.WALL_DOOR_TYPES,
+            doorStates: CONST.WALL_DOOR_STATES
+        }, { doorState: this.state.wallDoor, windowDistance: 2 * (Number(canvas.dimensions?.distance) || 5) });
+        const wallData = segments.map(([a, b]) => ({ c: [a[0], a[1], b[0], b[1]], ...made, flags, ...levels }));
+        // The line over them is the colour of the kind, so a kind can be told from another on the map,
+        // laid over a darker, wider line, so it shows on a pale map as well as a dark one.
+        const path = segmentsPath(segments);
+        const none = CONST.DRAWING_FILL_TYPES.NONE;
+        const weight = this.state.brushSettings.size;
+        const casing = strokeDrawingData(path, { color: WALL_CASING, alpha: 0.85, width: weight + 4, flags, none, sort: 0 });
+        const line = strokeDrawingData(path, { color: wallKindById(kind).color, alpha: 1, width: weight, flags, none, sort: 1 });
         try {
             const walls = await scene.createEmbeddedDocuments('Wall', wallData);
-            const lines = await scene.createEmbeddedDocuments('Drawing', [line]);
+            const lines = await scene.createEmbeddedDocuments('Drawing', [casing, line]);
             this._pushKept({
                 kind: 'wall',
                 wallIds: (walls ?? []).map(doc => doc.id),
@@ -4999,8 +5021,12 @@ class DrawingTool {
     setWallOption(name, value) {
         if (name === 'shape') this.state.wallShape = value === 'sketch' ? 'sketch' : 'line';
         else if (name === 'snap') this.state.wallSnap = !!value;
+        else if (name === 'kind' && wallKindById(value)) this.state.wallKind = value;
+        else if (name === 'door' && ['closed', 'open', 'locked'].includes(value)) this.state.wallDoor = value;
         else return;
-        game.settings.set(MODULE.ID, 'toolbar.wallOptions', { shape: this.state.wallShape, snap: this.state.wallSnap });
+        game.settings.set(MODULE.ID, 'toolbar.wallOptions', {
+            shape: this.state.wallShape, snap: this.state.wallSnap, kind: this.state.wallKind, door: this.state.wallDoor
+        });
         this.notifyChange();
     }
 

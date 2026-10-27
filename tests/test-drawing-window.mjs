@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import { STAMPS, STAMP_CATEGORIES, stampSvg, parseColor } from '../scripts/utils-stamps.js';
 import { TERRAINS, terrainSvg } from '../scripts/utils-terrain.js';
+import { WALL_KINDS, wallKindSvg, isDoorKind } from '../scripts/utils-drawing.js';
 
 const src = fs.readFileSync('scripts/window-drawing.js', 'utf8');
 const managerSrc = fs.readFileSync('scripts/manager-drawing.js', 'utf8');
@@ -50,7 +51,7 @@ const tool = (overrides = {}) => Object.assign(new FakeTool(), {
     state: {
         active: false, drawingMode: 'sketch', stampStyle: 'tree', symbolSize: 'medium', lineStyle: 'solid', timedEraseEnabled: false,
         brushSettings: { size: 6, color: 'rgba(186, 60, 49, 0.7)', type: 'pen' },
-        stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 }, wallShape: 'line', wallSnap: true
+        stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 }, wallShape: 'line', wallSnap: true, wallKind: 'wall', wallDoor: 'closed'
     },
     canMakeWalls: () => isGM, canKeepOnScene: () => isGM, canUndo: () => true,
     canSetScene: () => isGM, sceneState: () => ({ tokenVision: true, globalLight: false, darkness: 0.25 })
@@ -69,7 +70,7 @@ const count = (html, pattern) => (html.match(pattern) ?? []).length;
 console.log('every tab builds, for a GM and a player');
 for (const gm of [true, false]) {
     isGM = gm;
-    for (const tab of ['draw', 'stamps', 'terrain', 'utilities']) {
+    for (const tab of ['draw', 'stamps', 'terrain', 'walls', 'utilities']) {
         const w = build(tool(), tab);
         const body = w._buildBody();
         const all = body + w._buildFooterLeft() + w._buildFooterRight();
@@ -82,27 +83,16 @@ console.log('\nthe Drawing tab');
 isGM = true;
 {
     const body = build(tool(), 'draw')._buildBody();
-    check('every tool is offered to a GM, wall included', ['sketch', 'line', 'box', 'ellipse', 'wall'].every(id => has(body, `data-mode="${id}"`)));
     check('the current tool is the one checked', /value="sketch"[^>]*checked/.test(body) && count(body, /name="drawing-mode"[^>]*checked/g) === 1);
-    check('the wall options are not shown until wall is chosen', !has(body, 'name="wallSnap"') && !has(body, 'data-shape='));
     check('weight, style and colour are there', has(body, 'data-action="drawing-weight"') && has(body, 'data-action="drawing-style"') && has(body, 'data-action="drawing-color"'));
     check('the medium weight is checked', /value="6"[^>]*checked/.test(body));
     check('six swatches: the player and five colours', count(body, /cartographer-drawing-swatch[ "]/g) === 6);
     check('exactly one swatch is active', count(body, /cartographer-drawing-swatch is-active/g) === 1);
     check('the active swatch is the red one', /is-active" role="radio" aria-checked="true" data-action="drawing-color" data-color="rgba\(186, 60, 49, 0\.7\)"/.test(body));
-    const wall = build(tool({ state: { ...tool().state, drawingMode: 'wall' } }), 'draw')._buildBody();
-    check('with wall chosen the shape and snap appear', has(wall, 'data-shape="line"') && has(wall, 'data-shape="sketch"') && has(wall, 'name="wallSnap"'));
-    check('the snap is checked when on, and not when off', /name="wallSnap" checked|name="wallSnap"[^>]*checked/.test(wall)
-        && !/name="wallSnap"[^>]*checked/.test(build(tool({ state: { ...tool().state, drawingMode: 'wall', wallSnap: false } }), 'draw')._buildBody()));
-    const free = build(tool({ state: { ...tool().state, drawingMode: 'wall', wallShape: 'sketch' } }), 'draw')._buildBody();
-    check('the wall shape checked is the shape chosen', /value="sketch"[^>]*data-shape="sketch" checked|data-shape="sketch"[^>]*checked/.test(free));
 }
 {
     isGM = false;
     const body = build(tool(), 'draw')._buildBody();
-    check('a player is not offered wall', !has(body, 'data-mode="wall"') && has(body, 'data-mode="box"'));
-    const asked = build(tool({ state: { ...tool().state, drawingMode: 'wall' } }), 'draw')._buildBody();
-    check('a player whose saved tool is wall sees no wall options', !has(asked, 'name="wallSnap"'));
     isGM = true;
 }
 
@@ -131,6 +121,37 @@ console.log('\nthe Stamps tab');
     const off = build(tool({ state: { ...tool().state, stamp: { ...tool().state.stamp, natural: false } } }), 'stamps')._buildBody();
     check('with natural colours off a stamp is drawn in the brush colour', off !== body && has(off, '#ba3c31'));
     check('the markers are always in the brush colour', has(body, stampSvg('plus', { tint: 'rgba(186, 60, 49, 0.7)' })));
+}
+
+console.log('\nthe Drawing tab has no wall tool, the Walls tab has');
+{
+    const body = build(tool(), 'draw')._buildBody();
+    check('the Drawing tab offers sketch, line, box and ellipse, and not wall', ['sketch', 'line', 'box', 'ellipse'].every(id => has(body, `data-mode="${id}"`)) && !has(body, 'data-mode="wall"') && !has(body, 'name="wallSnap"'));
+}
+
+console.log('\nthe Walls tab');
+{
+    isGM = true;
+    const body = build(tool(), 'walls')._buildBody();
+    check('every kind of wall has a button with its picture and name', WALL_KINDS.every(k => has(body, `data-action="drawing-wall" data-kind="${k.id}"`) && has(body, wallKindSvg(k.id))));
+    check('at least a wall, a door, a window and an invisible wall are among them', ['wall', 'door', 'window', 'invisible', 'secret', 'terrain', 'ethereal'].every(id => WALL_KINDS.some(k => k.id === id)));
+    check('none is active until wall is the tool', count(body, /cartographer-stamp is-active/g) === 0);
+    const drawing = build(tool({ state: { ...tool().state, drawingMode: 'wall', wallKind: 'window' } }), 'walls')._buildBody();
+    check('when it is, the kind chosen is active', count(drawing, /cartographer-stamp is-active/g) === 1 && /is-active" data-action="drawing-wall" data-kind="window"/.test(drawing));
+    check('the shape, snap and weight are there', has(body, 'data-shape="line"') && has(body, 'data-shape="sketch"') && has(body, 'name="wallSnap"') && has(body, 'data-action="drawing-weight"'));
+    check('snap is checked when on, and not when off', /name="wallSnap"[^>]*checked/.test(body) && !/name="wallSnap"[^>]*checked/.test(build(tool({ state: { ...tool().state, wallSnap: false } }), 'walls')._buildBody()));
+    check('the shape checked is the shape chosen', /data-shape="sketch"[^>]*checked/.test(build(tool({ state: { ...tool().state, wallShape: 'sketch' } }), 'walls')._buildBody()));
+    check('a plain wall is offered no door state', !has(body, 'data-door='));
+    for (const kind of ['door', 'secret']) {
+        const doors = build(tool({ state: { ...tool().state, wallKind: kind, wallDoor: 'locked' } }), 'walls')._buildBody();
+        check(`${kind}: the door state is offered, with the one chosen checked`, ['closed', 'open', 'locked'].every(d => has(doors, `data-door="${d}"`)) && /value="locked"[^>]*checked/.test(doors));
+    }
+    isGM = false;
+    const player = build(tool(), 'walls');
+    check('a player has no Walls tab', !has(player._buildBody(), 'data-tab="walls"'));
+    check('and is shown the Drawing tab if they were on it', has(player._buildBody(), 'data-mode="sketch"'));
+    isGM = true;
+    check('a GM has the tab', has(build(tool(), 'draw')._buildBody(), 'data-tab="walls"'));
 }
 
 console.log('\nthe Utilities tab');
@@ -208,6 +229,7 @@ console.log('\nthe joins');
     for (const stamp of STAMPS) strings.add(stamp.labelKey);
     for (const category of STAMP_CATEGORIES) strings.add(category.labelKey);
     for (const terrain of TERRAINS) strings.add(terrain.labelKey);
+    for (const kind of WALL_KINDS) strings.add(kind.labelKey);
     const missing = [...strings].filter(key => !(`drawingTools.${key}` in lang));
     check('every string the window uses exists', missing.length === 0, missing.join(', '));
     const keys = Object.keys(lang).filter(key => key.startsWith('drawingTools.')).map(key => key.slice('drawingTools.'.length));

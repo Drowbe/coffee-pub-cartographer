@@ -78,10 +78,11 @@ export function segmentsPath(segments) {
  * @param {{ color: string, alpha?: number, width: number, flags?: object, none?: number }} style
  *   `none` is CONST.DRAWING_FILL_TYPES.NONE.
  */
-export function strokeDrawingData(path, { color, alpha = 1, width, flags = {}, none = 0 }) {
+export function strokeDrawingData(path, { color, alpha = 1, width, flags = {}, none = 0, sort = 0 }) {
     return {
         ...polygonShape(path),
         bezierFactor: 0,
+        sort,
         fillType: none, fillColor: color, fillAlpha: 0,
         strokeWidth: Math.max(1, Math.round(width)), strokeColor: color, strokeAlpha: alpha,
         flags
@@ -150,4 +151,90 @@ export function keptGroup(flags, moduleId) {
         if (own[type]?.id) return { type, id: own[type].id, key: `${type}:${own[type].id}` };
     }
     return null;
+}
+
+// ------------------------------------------------------------------
+// Kinds of wall
+// ------------------------------------------------------------------
+
+/**
+ * The kinds of wall that can be drawn. `color` is the line drawn over the walls, so that a kind can be
+ * told from another on the map; `look` is how the picture in the window draws it.
+ */
+export const WALL_KINDS = [
+    { id: 'wall', icon: 'fa-solid fa-border-none', labelKey: 'kindWall', color: '#d8cfa8', look: 'solid' },
+    { id: 'invisible', icon: 'fa-regular fa-eye-slash', labelKey: 'kindInvisible', color: '#a394dc', look: 'dotted' },
+    { id: 'terrain', icon: 'fa-solid fa-mountain', labelKey: 'kindTerrain', color: '#e0a64a', look: 'zigzag' },
+    { id: 'ethereal', icon: 'fa-solid fa-ghost', labelKey: 'kindEthereal', color: '#7fc4e0', look: 'dashed' },
+    { id: 'door', icon: 'fa-solid fa-door-closed', labelKey: 'kindDoor', color: '#4fae5a', look: 'door' },
+    { id: 'secret', icon: 'fa-solid fa-door-closed', labelKey: 'kindSecret', color: '#c25a86', look: 'secret' },
+    { id: 'window', icon: 'fa-solid fa-window-maximize', labelKey: 'kindWindow', color: '#6fb4e8', look: 'window' }
+];
+const KIND_BY_ID = new Map(WALL_KINDS.map(kind => [kind.id, kind]));
+export const wallKindById = id => KIND_BY_ID.get(id) ?? null;
+
+/** The kinds that are doors, and take a state. */
+export const isDoorKind = id => id === 'door' || id === 'secret';
+
+/**
+ * The fields a wall of a kind is written with, over Foundry's defaults, which are a plain wall. These
+ * are the settings Foundry's own wall tools give each kind.
+ *
+ * @param {string} kind
+ * @param {object} constants  What Foundry calls its numbers:
+ *   sense { NONE, LIMITED, NORMAL, PROXIMITY }, doorTypes { DOOR, SECRET }, doorStates { CLOSED, OPEN, LOCKED }.
+ * @param {{ doorState?: string, windowDistance?: number }} [options]  windowDistance is in scene units.
+ */
+export function wallKindData(kind, constants, { doorState = 'closed', windowDistance = 10 } = {}) {
+    const { sense, doorTypes, doorStates } = constants;
+    switch (kind) {
+        case 'invisible':
+            // Stops movement, and nothing else.
+            return { light: sense.NONE, sight: sense.NONE, sound: sense.NONE, move: sense.NORMAL };
+        case 'terrain':
+            // Sight, light and sound are cut short, not stopped; movement is stopped.
+            return { light: sense.LIMITED, sight: sense.LIMITED, sound: sense.LIMITED, move: sense.NORMAL };
+        case 'ethereal':
+            // Stops sight, light and sound, and not movement.
+            return { light: sense.NORMAL, sight: sense.NORMAL, sound: sense.NORMAL, move: sense.NONE };
+        case 'door':
+        case 'secret':
+            return {
+                light: sense.NORMAL, sight: sense.NORMAL, sound: sense.NORMAL, move: sense.NORMAL,
+                door: kind === 'secret' ? doorTypes.SECRET : doorTypes.DOOR,
+                ds: { closed: doorStates.CLOSED, open: doorStates.OPEN, locked: doorStates.LOCKED }[doorState] ?? doorStates.CLOSED
+            };
+        case 'window':
+            // As the window tool does: light and sight pass at close range, fading with distance.
+            return {
+                light: sense.PROXIMITY, sight: sense.PROXIMITY, sound: sense.NORMAL, move: sense.NORMAL,
+                threshold: { light: windowDistance, sight: windowDistance, attenuation: true }
+            };
+        default:
+            return {};
+    }
+}
+
+/** A kind of wall as a small SVG for the window: a length of it, drawn as it is on the map. */
+export function wallKindSvg(kind) {
+    const info = KIND_BY_ID.get(kind) ?? KIND_BY_ID.get('wall');
+    const color = info.color;
+    const line = (d, extra = '') => `<path d="${d}" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"${extra}/>`;
+    let body;
+    switch (info.look) {
+        case 'dotted': body = line('M10 20H90', ' stroke-dasharray="0.1 11"'); break;
+        case 'dashed': body = line('M10 20H90', ' stroke-dasharray="13 9"'); break;
+        case 'zigzag': body = line('M10 24L24 14L38 26L52 14L66 26L80 14L90 22'); break;
+        case 'door':
+        case 'secret': {
+            const leaf = `<rect x="34" y="12" width="32" height="16" rx="2" fill="none" stroke="${color}" stroke-width="4"/>`;
+            body = line('M10 20H30') + line('M70 20H90') + leaf + (info.look === 'secret' ? `<circle cx="50" cy="20" r="3" fill="${color}"/>` : '');
+            break;
+        }
+        case 'window':
+            body = line('M10 20H90') + `<path d="M10 20H90" fill="none" stroke="#fff" stroke-opacity="0.75" stroke-width="2.5" stroke-linecap="round"/>`;
+            break;
+        default: body = line('M10 20H90');
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40" aria-hidden="true">${body}</svg>`;
 }

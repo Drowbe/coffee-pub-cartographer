@@ -600,5 +600,42 @@ console.log('\nthings that go wrong');
     check('cancel ends the run', manager.session === null && manager.window === null);
 }
 
+// ---------------------------------------------------------------- a scene with no background
+console.log('a scene with no still background image');
+{
+    const tile = (src = 'tile.png') => ({ id: 't1', mesh: { destroyed: false }, document: { texture: { src } } });
+    // With a tile to read, the run goes on without a background.
+    canvas = makeCanvas(makeScene(), [tile()]);
+    let manager = build();
+    let session = startSession(manager);
+    session.image = session.background = null;
+    notices.length = 0;
+    check('with a tile to read, the run goes on without a background', manager._withoutBackground(session, new Error('no still image')) === true && session.background === null && manager.session === session);
+    check('and no warning is raised', notices.length === 0);
+    manager._useImage(session, null, [100, 100]);
+    check('a click where there is no tile says there is no picture there, and does not throw', manager._status?.tone === 'warn' && /nothingHere/.test(manager._status.text) && session.seeds.length === 0);
+    // A video tile cannot be read, so it does not count.
+    canvas = makeCanvas(makeScene(), [tile('tile.webm')]);
+    manager = build();
+    session = startSession(manager);
+    notices.length = 0;
+    check('a scene with only a video tile cannot be read, and ends the run with the reason', manager._withoutBackground(session, new Error('no still image')) === false && notices.some(n => n[0] === 'warn' && /noImage/.test(n[1])) && manager.session === null);
+    // Nothing at all.
+    canvas = makeCanvas(makeScene(), []);
+    manager = build();
+    session = startSession(manager);
+    notices.length = 0;
+    check('a scene with nothing to read ends the run with the reason', manager._withoutBackground(session, new Error('no still image')) === false && notices.some(n => /noImage/.test(n[1])) && manager.session === null);
+    // A background that exists but failed to read is logged as a fault; only no still image is a plain fact.
+    const logged = [];
+    const keep = console.error;
+    console.error = (...args) => logged.push(args);
+    canvas = makeCanvas(makeScene(), []);
+    manager = build();
+    manager._withoutBackground(startSession(manager), new Error('empty image'));
+    console.error = keep;
+    check('an image that would not read is logged as a fault', logged.length === 1);
+}
+
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall checks passed');
 process.exit(failures ? 1 : 0);
