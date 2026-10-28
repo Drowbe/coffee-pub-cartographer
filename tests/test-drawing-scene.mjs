@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import {
     stampSquares, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor,
-    isScatterStamp, isScaledStamp, stampTurn, stampLayer, stampFootprint, stampBlocks
+    isScatterStamp, isScaledStamp, stampTurn, stampLayer, stampFootprint, stampBlocks, stampUnder
 } from '../scripts/utils-stamps.js';
 import { layerDocs, layerById, drawingLayer, LAYERS } from '../scripts/utils-layers.js';
 import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, wallLayer, ringWalls, OPENING_LIFT, DOOR_LEAF, WINDOW_GLASS } from '../scripts/utils-drawing.js';
@@ -1431,6 +1431,10 @@ console.log('\nlayers: terrain is under stamps, and a painted pond is one pond')
     const ids = [...new Set(painted.map(d => d.flags[MODULE.ID].stamp.id))];
     const [a, b] = ids.map(lowest);
     check('every shore of the stroke is under every water of it, so the ponds run into one', a[0].sort < b[1].sort && b[0].sort < a[1].sort);
+    // Ponds clicked one at a time are separate writes, and still run into one.
+    const clicked = await keepAll([t => t._placeStamp('pond', 300, 300), t => t._placeStamp('pond', 400, 300)]);
+    const [first, second] = clicked;
+    check('a pond clicked over a pond has its shore under the first water, and the ponds run into one', second[0].sort < first[1].sort && first[0].sort < second[1].sort);
 }
 
 console.log('\nlayers: what is temporary is drawn in the same order');

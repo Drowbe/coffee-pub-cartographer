@@ -5,7 +5,7 @@
 import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
-import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor, stampSquares, isScatterStamp, isScaledStamp, stampTurn, stampLayer, stampFootprint, stampBlocks } from './utils-stamps.js';
+import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor, stampSquares, isScatterStamp, isScaledStamp, stampTurn, stampLayer, stampFootprint, stampBlocks, stampUnder } from './utils-stamps.js';
 import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, wallLayer, OPENING_LIFT, ringWalls } from './utils-drawing.js';
 import { layerDocs, layerById, drawingLayer } from './utils-layers.js';
 import { SKIP_JOIN } from './utils-autowall.js';
@@ -4291,7 +4291,7 @@ class DrawingTool {
         };
         // The whole stroke is put on its layer as one: the first piece of every stamp in it (a pond's shore) is under the
         // second of every stamp (its water), so ponds painted into one run into one pond, as the ground patches do.
-        if (stroke.docs.length) void this._keepDrawings(this._layered(stroke.docs, stampLayer(stroke.kind)), 'stamp', stroke.walls).finally(clear);
+        if (stroke.docs.length) void this._keepDrawings(this._layeredStamp(stroke.docs, stroke.kind), 'stamp', stroke.walls).finally(clear);
         else clear();
     }
 
@@ -4451,7 +4451,7 @@ class DrawingTool {
             solid: CONST.DRAWING_FILL_TYPES.SOLID,
             none: CONST.DRAWING_FILL_TYPES.NONE
         });
-        const docs = stroke ? raw : this._layered(raw, stampLayer(kind));
+        const docs = stroke ? raw : this._layeredStamp(raw, kind);
         const walls = this._blockers(kind, x, y, size, { [MODULE.ID]: { stamp: { id: group, kind } } });
         // In a stroke, they wait for its end and are written together.
         if (stroke) {
@@ -4487,6 +4487,20 @@ class DrawingTool {
         let raised = false;
         try { raised = !!game.settings.get(MODULE.ID, 'drawing.aboveTokens'); } catch { /* not registered: under the tokens */ }
         return layerDocs(docs, layer, { moduleId: MODULE.ID, top, raised });
+    }
+
+    /**
+     * A stamp's Drawings on its layer. A stamp with pieces that go under (a pond's shore) has them put in the
+     * lower half of the layer and the rest in the upper half, so every shore on the layer is under every
+     * water, and ponds put down over ponds, in one stroke or in many, run into one.
+     */
+    _layeredStamp(docs, kind) {
+        const layer = stampLayer(kind);
+        const under = stampUnder(kind);
+        if (!under) return this._layered(docs, layer);
+        const below = docs.filter(doc => (doc.sort ?? 0) < under);
+        const above = docs.filter(doc => (doc.sort ?? 0) >= under);
+        return [...this._layered(below, layer), ...this._layered(above, layer, { top: true })];
     }
 
     /**

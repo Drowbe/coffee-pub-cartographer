@@ -746,7 +746,7 @@ const EXCEPTIONS = {
     shrub: { layer: 'waist', blocks: 0.3 },
     boulders: { paint: 'single', layer: 'waist', blocks: 0.3 },
     // Water is a thing on the ground, so it is over every patch and path, which are terrain.
-    pond: { paint: 'scatter', size: 'scale', layer: 'ankle' },
+    pond: { paint: 'scatter', size: 'scale', layer: 'ankle', under: 1 },
     stump: { layer: 'waist', blocks: 0.3 },
     log: { layer: 'waist' },
     cabinet: { layer: 'eye' },
@@ -765,6 +765,11 @@ export const isScaledStamp = id => BY_ID.get(id)?.size === 'scale';
 export const stampTurn = id => BY_ID.get(id)?.turn ?? 'none';
 /** How far round this stamp the terrain walls go, as a part of its size, or 0 for a thing that is not in the way. */
 export const stampBlocks = id => BY_ID.get(id)?.blocks ?? 0;
+/**
+ * How many of a stamp's first pieces are drawn under the rest of every stamp of its kind on the layer: a
+ * pond's shore, so ponds put down one by one run into one pond. 0 for a stamp that does not run together.
+ */
+export const stampUnder = id => BY_ID.get(id)?.under ?? 0;
 /** The layer this stamp is drawn on. */
 export const stampLayer = id => BY_ID.get(id)?.layer ?? 'waist';
 
