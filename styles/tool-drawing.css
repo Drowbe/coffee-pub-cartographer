@@ -88,6 +88,15 @@
     gap: 6px;
 }
 
+.cartographer-drawing-window .cartographer-drawing-layers .blacksmith-tool-segmented {
+    flex-wrap: wrap;
+}
+
+/* Seven layers in a row have room for their names, not their pictures as well. */
+.cartographer-drawing-window .cartographer-drawing-layers .blacksmith-tool-segment i {
+    display: none;
+}
+
 .cartographer-drawing-window .cartographer-drawing-swatches {
     display: flex;
     flex-wrap: wrap;

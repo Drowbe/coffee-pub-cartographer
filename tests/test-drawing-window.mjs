@@ -8,6 +8,7 @@
 // It does not show how the window looks or that Blacksmith draws it.
 import fs from 'node:fs';
 import { STAMPS, STAMP_CATEGORIES, stampSvg, parseColor } from '../scripts/utils-stamps.js';
+import { LAYERS } from '../scripts/utils-layers.js';
 import { TERRAINS, terrainSvg } from '../scripts/utils-terrain.js';
 import { WALL_KINDS, wallKindSvg, isDoorKind, isOpeningKind, WALL_MATERIALS, wallMaterialSvg } from '../scripts/utils-drawing.js';
 
@@ -141,7 +142,7 @@ console.log('\nthe tabs stay put, and the controls come first');
     const body = w._buildBody();
     const at = text => body.indexOf(text);
     check('on the Stamps tab the options are first, above every stamp', at('name="drawing-size"') > 0 && at('name="drawing-size"') < at('data-action="drawing-stamp"') && at('name="keep"') < at('data-action="drawing-stamp"') && at('name="spacing"') < at('data-action="drawing-stamp"'));
-    check('the switches are in a grid, all four together', /cartographer-drawing-toggles">(?:(?!<\/div>)[\s\S])*name="natural"(?:(?!<\/div>\s*<label class="cartographer-drawing-row")[\s\S])*name="keep"/.test(body) && count(body, /cartographer-drawing-toggles/g) === 1 && count(body, /blacksmith-toggle-row/g) === 4);
+    check('the switches are in a grid, all five together', /cartographer-drawing-toggles">(?:(?!<\/div>)[\s\S])*name="natural"(?:(?!<\/div>\s*<label class="cartographer-drawing-row")[\s\S])*name="keep"/.test(body) && count(body, /cartographer-drawing-toggles/g) === 1 && count(body, /blacksmith-toggle-row/g) === 5);
     const walls = build(tool(), 'walls')._buildBody();
     const wat = text => walls.indexOf(text);
     check('on the Walls tab how they are drawn is first, above the kinds and the materials', wat('data-shape="sketch"') > 0 && wat('data-shape="sketch"') < wat('data-action="drawing-wall"') && wat('name="wallSnap"') < wat('data-action="drawing-wall"') && wat('name="drawing-wall-thickness"') < wat('data-action="drawing-wall"') && wat('data-action="drawing-wall"') < wat('data-action="drawing-wall-material"'));
@@ -267,6 +268,7 @@ console.log('\nthe joins');
     }
     for (const m of src.matchAll(/labelKey: '(\w+)'/g)) strings.add(m[1]);
     for (const stamp of STAMPS) strings.add(stamp.labelKey);
+    for (const layer of LAYERS) strings.add(layer.labelKey);
     for (const category of STAMP_CATEGORIES) strings.add(category.labelKey);
     for (const terrain of TERRAINS) strings.add(terrain.labelKey);
     for (const kind of WALL_KINDS) strings.add(kind.labelKey);

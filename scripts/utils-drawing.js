@@ -419,8 +419,12 @@ export const WALL_MATERIALS = [
     { id: 'iron', icon: 'fa-solid fa-bars', labelKey: 'materialIron', color: '#59606a', edge: '#1b1d20', suggests: 'invisible' },
     { id: 'hedge', icon: 'fa-solid fa-tree', labelKey: 'materialHedge', color: '#3f7d36', edge: '#24461f', suggests: 'terrain' }
 ];
+// A wall stands at eye level, over the furniture along it; a fence is only waist high.
+for (const material of WALL_MATERIALS) material.layer = material.id === 'fence' ? 'waist' : 'eye';
 const MATERIAL_BY_ID = new Map(WALL_MATERIALS.map(material => [material.id, material]));
 export const wallMaterialById = id => MATERIAL_BY_ID.get(id) ?? null;
+/** The layer a wall of a material is drawn on. A door or a window is on the wall layer, over its walls. */
+export const wallLayer = id => MATERIAL_BY_ID.get(id)?.layer ?? 'eye';
 
 /** The most pieces of decoration one wall stroke may have: a long stroke spaces them out instead. */
 export const MAX_WALL_DECOR = 240;

@@ -17,6 +17,7 @@ import { STAMPS, STAMP_CATEGORIES, stampSvg, parseColor } from './utils-stamps.j
 import { TERRAINS, terrainSvg } from './utils-terrain.js';
 import { WALL_KINDS, wallKindSvg, isDoorKind, isOpeningKind, WALL_MATERIALS, wallMaterialSvg } from './utils-drawing.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
+import { LAYERS } from './utils-layers.js';
 import { BlacksmithToolWindowBaseV2 } from '/modules/coffee-pub-blacksmith/api/blacksmith-api.js';
 
 const APP_ID = `${MODULE.ID}-drawing-tools`;
@@ -71,6 +72,15 @@ const SIZES = [
     { id: 'medium', icon: 'fa-solid fa-circle-m', labelKey: 'sizeMedium' },
     { id: 'large', icon: 'fa-solid fa-circle-l', labelKey: 'sizeLarge' }
 ];
+/** How far a stamp that is turned a quarter at a time is turned. */
+const TURNS = [
+    { id: '0', icon: 'fa-solid fa-arrow-up', labelKey: 'turn0' },
+    { id: '1', icon: 'fa-solid fa-arrow-right', labelKey: 'turn1' },
+    { id: '2', icon: 'fa-solid fa-arrow-down', labelKey: 'turn2' },
+    { id: '3', icon: 'fa-solid fa-arrow-left', labelKey: 'turn3' }
+];
+/** What the eraser takes from: every layer, or the one. The top layer first, as they are in the world. */
+const ERASE_LAYERS = [{ id: 'all', icon: 'fa-solid fa-layer-group', labelKey: 'layerAll' }, ...[...LAYERS].reverse()];
 /** The brush colours, by the drawing tool's own palette constants. */
 const COLORS = [
     { id: 'black', source: 'strColor1', labelKey: 'colorBlack' },
@@ -112,6 +122,8 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         'drawing-terrain': (_event, target, app) => app.manager.chooseTerrain(target.dataset.kind),
         'drawing-path-width': (_event, target, app) => app.manager.setStampOption('pathWidth', Number(target.dataset.width)),
         'drawing-size': (_event, target, app) => app.manager.setSymbolSize(target.dataset.size),
+        'drawing-turn': (_event, target, app) => app.manager.setStampOption('turn', Number(target.dataset.turn)),
+        'drawing-erase-layer': (_event, target, app) => app.manager.setEraseLayer(target.dataset.layer),
         'drawing-erase': (_event, _target, app) => app.manager.chooseErase(),
         'drawing-erase-all': (_event, _target, app) => void app.manager.eraseAllKept(),
         'drawing-undo': (_event, _target, app) => app.manager.undoLastDrawing(),
@@ -346,8 +358,11 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         const gm = !!game.user?.isGM;
         const erase = [this._button({ action: 'drawing-erase', icon: 'fa-solid fa-eraser', label: localize('eraserHint'), text: localize('eraser'), active: state.drawingMode === 'erase' })];
         if (gm) erase.push(this._button({ action: 'drawing-erase-all', icon: 'fa-solid fa-trash-can', label: localize('eraseAllHint'), text: localize('eraseAll') }));
+        // Which layer it takes from is above the eraser it controls.
         let sections = this._section('fa-solid fa-eraser', localize('erase'),
-            `<div class="cartographer-drawing-buttons">${erase.join('')}</div>` + this._hint(localize('eraseHint')));
+            `<div class="cartographer-drawing-layers">${this._segmented('drawing-erase-layer', localize('eraseLayer'), ERASE_LAYERS, state.eraseLayer, 'layer')}</div>`
+            + this._hint(localize('eraseLayerHint'))
+            + `<div class="cartographer-drawing-buttons">${erase.join('')}</div>` + this._hint(localize('eraseHint')));
         const clear = [this._button({ action: 'drawing-clear', icon: 'fa-solid fa-eraser', label: localize('clearOwnHint'), text: localize('clearOwn') })];
         if (gm) clear.push(this._button({ action: 'drawing-clear-all', icon: 'fa-solid fa-trash-can', label: localize('clearAllHint'), text: localize('clearAll') }));
         sections += this._section('fa-solid fa-broom', localize('tidy'),
@@ -371,7 +386,11 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         const active = state.drawingMode === 'stamp' && state.stampStyle === stamp.id;
         const label = this._escape(this._localize(stamp.labelKey));
         const art = stampSvg(stamp.id, { tint: stamp.legacy || !state.stamp.natural ? tint : null });
-        return `<button type="button" class="cartographer-stamp${active ? ' is-active' : ''}" data-action="drawing-stamp" data-kind="${stamp.id}" data-tooltip="${label}" aria-label="${label}" aria-pressed="${active}">
+        // The tooltip says where it goes: on which layer, and whether it is one or many, fixed or scaled.
+        const many = stamp.paint === 'scatter';
+        const scales = stamp.size === 'scale';
+        const how = this._escape([this._localize(`layer${stamp.layer[0].toUpperCase()}${stamp.layer.slice(1)}`), this._localize(many ? 'paintMany' : 'paintOne'), this._localize(scales ? 'sizeScales' : 'sizeFixed')].join(' · '));
+        return `<button type="button" class="cartographer-stamp${active ? ' is-active' : ''}" data-action="drawing-stamp" data-kind="${stamp.id}" data-tooltip="${label} — ${how}" aria-label="${label}" aria-pressed="${active}">
                 <span class="cartographer-stamp-art">${art}</span><span class="cartographer-stamp-name">${label}</span></button>`;
     }
 
@@ -383,10 +402,14 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         const canKeep = this.manager.canKeepOnScene();
         // The options come first: they apply to every stamp below them.
         const options = this._segmented('drawing-size', localize('size'), SIZES, state.symbolSize, 'size')
+            + this._hint(localize('sizeHint'))
+            + this._segmented('drawing-turn', localize('turn'), TURNS, String(state.stamp.turn), 'turn')
+            + this._hint(localize('turnHint'))
             + this._toggles(
                 this._toggle('natural', localize('natural'), state.stamp.natural, { hint: localize('naturalHint') }),
                 this._toggle('rotate', localize('rotate'), state.stamp.rotate, { hint: localize('rotateHint') }),
                 this._toggle('jitter', localize('jitter'), state.stamp.jitter, { hint: localize('jitterHint') }),
+                this._toggle('snap', localize('snap'), state.stamp.snap, { hint: localize('snapHint') }),
                 this._toggle('keep', localize('keep'), state.stamp.keep && canKeep, { hint: localize(canKeep ? 'keepHint' : 'keepDenied'), disabled: !canKeep }))
             + this._slider('spacing', localize('spacing'), localize('spacingHint'), { min: 0.5, max: 3, step: 0.25, value: state.stamp.spacing })
             + this._hint(localize('stampHint'));
@@ -444,7 +467,7 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         const name = target?.name;
         if (!name || target.dataset?.action) return;
         const manager = this.manager;
-        if (['natural', 'rotate', 'jitter', 'keep'].includes(name)) manager.setStampOption(name, target.checked);
+        if (['natural', 'rotate', 'jitter', 'snap', 'keep'].includes(name)) manager.setStampOption(name, target.checked);
         else if (name === 'spacing') manager.setStampOption('spacing', target.value);
         else if (name === 'wallSnap') manager.setWallOption('snap', target.checked);
         else if (name === 'timedErase') manager.setTimedErase(target.checked);

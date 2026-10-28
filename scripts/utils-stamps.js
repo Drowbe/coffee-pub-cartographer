@@ -605,11 +605,14 @@ const markerSquare = () => [poly(place([-0.32, -0.32, 0.32, -0.32, 0.32, 0.32, -
 /** How big Small and Large are against Medium: a tree is 1, 3 and 6 squares across. */
 export const SIZE_FACTORS = { small: 1 / 3, medium: 1, large: 2 };
 
-/** How many grid squares across a stamp is at a size, or null for a marker, which is sized in pixels. */
+/**
+ * How many grid squares across a stamp is at a size, or null for a marker, which is sized in pixels.
+ * A stamp of a fixed size is the same at every size: a crate is a crate.
+ */
 export function stampSquares(kind, size = 'medium') {
     const stamp = BY_ID.get(kind);
     if (!stamp || stamp.legacy) return null;
-    return stamp.squares * (SIZE_FACTORS[size] ?? 1);
+    return stamp.squares * (stamp.size === 'fixed' ? 1 : (SIZE_FACTORS[size] ?? 1));
 }
 
 /** The groups the Stamps tab shows, in order. */
@@ -711,7 +714,71 @@ export const STAMPS = [
     { id: 'square', category: 'markers', icon: 'fa-solid fa-square', labelKey: 'stampSquare', scale: 1, legacy: true, build: markerSquare }
 ];
 
+/**
+ * How each kind of stamp behaves, by what it is. A stamp is one of three things, and says so in `paint`,
+ * `size`, `turn` and `layer`:
+ *   - `paint`: 'scatter' -- dragging puts many down, as grass, trees, a pond -- or 'single': one to a click,
+ *     as a crate or a bed, which must never run together.
+ *   - `size`: 'scale' -- small, medium or large by the Size control, and a little different each time --
+ *     or 'fixed': the size of the thing itself, which the Size control does not change.
+ *   - `turn`: 'free' -- any way round, and flipped, if the option is on -- 'steps' -- stands as it was
+ *     put, turned a quarter at a time by the Turn control -- or 'none'.
+ *   - `layer`: where it is drawn (utils-layers.js).
+ */
+const RULES = {
+    trees: { paint: 'scatter', size: 'scale', turn: 'free', layer: 'above' },
+    plants: { paint: 'scatter', size: 'scale', turn: 'free', layer: 'ankle' },
+    ground: { paint: 'scatter', size: 'scale', turn: 'free', layer: 'ground' },
+    fields: { paint: 'scatter', size: 'fixed', turn: 'none', layer: 'ankle' },
+    rocks: { paint: 'scatter', size: 'scale', turn: 'free', layer: 'ankle' },
+    features: { paint: 'single', size: 'fixed', turn: 'free', layer: 'ankle' },
+    furniture: { paint: 'single', size: 'fixed', turn: 'steps', layer: 'waist' },
+    storage: { paint: 'single', size: 'fixed', turn: 'steps', layer: 'waist' },
+    kitchen: { paint: 'single', size: 'fixed', turn: 'steps', layer: 'waist' },
+    markers: { paint: 'single', size: 'scale', turn: 'none', layer: 'above' }
+};
+// What differs from the rest of its kind.
+const EXCEPTIONS = {
+    shrub: { layer: 'waist' },
+    boulders: { paint: 'single', layer: 'waist' },
+    pond: { paint: 'scatter', size: 'scale', layer: 'ground' },
+    stump: { layer: 'waist' },
+    log: { layer: 'waist' },
+    cabinet: { layer: 'eye' },
+    pumpkins: { turn: 'free', layer: 'ankle' },
+    melons: { turn: 'free', layer: 'ankle' }
+};
+for (const stamp of STAMPS) Object.assign(stamp, { ...RULES[stamp.category], ...EXCEPTIONS[stamp.id] });
+
 const BY_ID = new Map(STAMPS.map(stamp => [stamp.id, stamp]));
+
+/** Whether dragging puts down more of this stamp, or a click puts down one. A field is laid on a lattice, so it is dragged. */
+export const isScatterStamp = id => BY_ID.get(id)?.paint === 'scatter';
+/** Whether the Size control changes this stamp: a tree grows, a crate is a crate. */
+export const isScaledStamp = id => BY_ID.get(id)?.size === 'scale';
+/** How this stamp is turned: 'free', 'steps' or 'none'. */
+export const stampTurn = id => BY_ID.get(id)?.turn ?? 'none';
+/** The layer this stamp is drawn on. */
+export const stampLayer = id => BY_ID.get(id)?.layer ?? 'waist';
+
+/**
+ * How many whole grid squares across and down a stamp is, turned `turns` quarters, so a thing that
+ * stands on the grid can be put with its edges on the lines: a bed 1 by 2, a crate 1 by 1.
+ */
+export function stampFootprint(kind, turns = 0) {
+    const stamp = BY_ID.get(kind);
+    if (!stamp || stamp.legacy) return { w: 1, h: 1 };
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const prim of stamp.build(makeRng(1))) {
+        for (let i = 0; i < prim.pts.length; i += 2) {
+            minX = Math.min(minX, prim.pts[i]); maxX = Math.max(maxX, prim.pts[i]);
+            minY = Math.min(minY, prim.pts[i + 1]); maxY = Math.max(maxY, prim.pts[i + 1]);
+        }
+    }
+    const w = Math.max(1, Math.round((maxX - minX) * stamp.squares));
+    const h = Math.max(1, Math.round((maxY - minY) * stamp.squares));
+    return Math.abs(turns) % 2 === 1 ? { w: h, h: w } : { w, h };
+}
 
 export const stampById = id => BY_ID.get(id) ?? null;
 export const isStamp = id => BY_ID.has(id);

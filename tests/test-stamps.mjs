@@ -185,7 +185,8 @@ console.log('\nclutter and crops');
 console.log('\nstamp sizes, in grid squares');
 {
     check('a tree is 1, 3 and 6 squares across', stampSquares('tree', 'small') === 1 && stampSquares('tree', 'medium') === 3 && stampSquares('tree', 'large') === 6);
-    check('small is a third and large double of medium, for every stamp', STAMPS.filter(s => !s.legacy).every(s => Math.abs(stampSquares(s.id, 'small') * 3 - s.squares) < 1e-9 && stampSquares(s.id, 'large') === s.squares * 2));
+    check('small is a third and large double of medium, for every stamp that scales', STAMPS.filter(s => !s.legacy && s.size === 'scale').every(s => Math.abs(stampSquares(s.id, 'small') * 3 - s.squares) < 1e-9 && stampSquares(s.id, 'large') === s.squares * 2));
+    check('and a stamp of a fixed size is the same at every size', STAMPS.filter(s => !s.legacy && s.size === 'fixed').every(s => stampSquares(s.id, 'small') === s.squares && stampSquares(s.id, 'large') === s.squares));
     check('medium is the default, and an unknown size is medium', stampSquares('tree') === 3 && stampSquares('tree', 'huge') === 3);
     check('every stamp but the markers has a size in squares', STAMPS.filter(s => !s.legacy).every(s => s.squares > 0) && STAMPS.filter(s => s.legacy).every(s => stampSquares(s.id) === null && s.scale === 1));
     check('a tree is bigger than a shrub, a shrub than a tuft of grass, and a pond bigger than a tree', stampById('tree').squares > stampById('shrub').squares && stampById('shrub').squares > stampById('grass').squares && stampById('pond').squares > stampById('tree').squares);

@@ -102,6 +102,17 @@ export const registerSettings = () => {
 		group: WORKFLOW_GROUPS.CONFIGURATION
 	});
 
+    // -- Layers over the tokens --
+    game.settings.register(MODULE.ID, 'drawing.aboveTokens', {
+        name: MODULE.ID + '.drawing.aboveTokens-Label',
+        hint: MODULE.ID + '.drawing.aboveTokens-Hint',
+        scope: 'world',
+        config: true,
+        default: false,
+        type: Boolean,
+		group: WORKFLOW_GROUPS.CONFIGURATION
+	});
+
     // -- Timed Erase Timeout --
     game.settings.register(MODULE.ID, 'drawing.timedEraseTimeout', {
         name: MODULE.ID + '.drawing.timedEraseTimeout-Label',

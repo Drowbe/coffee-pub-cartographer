@@ -91,21 +91,54 @@ the colour you choose and are never the same twice:
 - **Kitchen and produce** -- a stove, a cauldron, pumpkins and melons.
 - **Markers** -- the plus, X, dot, arrows and square the tool has always had.
 
-Click a stamp, then click the map to put one down, or **drag to scatter** several along the stroke.
-**Scatter spacing** sets how far apart they fall.
+Click a stamp, then click the map to put one down. What happens when you drag, how big it is and
+whether it turns depend on what the stamp is -- a crate is not a tree:
+
+- **Painted or one at a time.** Trees, plants, rocks, ponds and ground are **painted**: drag and they
+  scatter along the stroke, so grass runs together into a meadow. Furniture, crates, barrels,
+  chests, stoves, a stump or a log, and boulders go down **one to a click**, however far you drag, so
+  they never run into one another. **Scatter spacing** sets how far apart the painted ones fall.
+- **Scaled or their own size.** Trees, plants, rocks and ponds **scale** with Size, and vary a little
+  each time. Furniture, crates and the like are **a fixed size** -- a crate is a crate, a bed is one
+  square by two -- and Size does not change them.
+- **Turned any way, by quarters, or not at all.** Trees, plants and rocks can be turned and flipped
+  at random. Furniture and crates **stay as you put them** and are only turned with **Turn**.
+  Crops are never turned.
+
+Hover a stamp to see which it is, and the layer it goes on.
+
+### Layers
+
+What you draw is put on a **layer** by what it is, not by when you drew it, so the dirt is always
+under the cabbage that grows in it, whichever you drew first. From the bottom: **Ground** (dirt, paths,
+ponds, patches), **Ankle** (crops, grass, flowers, rocks, a campfire, pumpkins, a boardwalk), **Waist**
+(furniture, crates, shrubs, a fence, boulders), **Eye** (walls, doors, windows, a cabinet), **Above**
+(trees) and **Sky**. On one layer, what you put down later is on top. A door or a window is over every
+wall.
+
+The layers keep their order for what you **keep on the scene**: it is written as Drawings with
+the layer in each one's flags, and a sort that puts it in its layer. Temporary stamps and paths are
+drawn in the same order, under what you draw by hand. By default every layer is under the tokens. The
+setting **Draw Above and Sky layers over tokens** raises those two, so a tree's canopy is drawn over a
+token under it; it applies to what you draw from then on.
 
 The options under the stamps:
 
 - **Size** -- small, medium or large, **measured in grid squares**, so a stamp is the same size on any
-  map. A tree is 1 square across at small, 3 at medium and 6 at large; a shrub is half that, a pond a
+  map. It changes what scales (trees, plants, rocks, ponds), not furniture, crates or crops. A tree is 1 square across at small, 3 at medium and 6 at large; a shrub is half that, a pond a
   little more, a tuft of grass or a rock a third of it at small and 2 squares at large. The
   markers (plus, X, dot, arrows, square) are the exception: they keep a size of their own in pixels, near a
   square at medium.
 - **Natural colors** -- draws each stamp in its own colours. Off tints it with your brush colour
   from the Drawing tab. Markers are always your brush colour.
-- **Turn and flip** and **Vary the size** -- give each stamp a random turn, flip and size so a
-  row of trees does not look stamped. The faint preview that follows the pointer shows the stamp
-  exactly as it will land.
+- **Turn** -- which way furniture, crates and the like face: 0, 90, 180 or 270 degrees. They stay as
+  placed and turn only here. It sits above the stamps it turns.
+- **Random turn** and **Vary the size** -- give each tree, plant and rock a random turn, flip and
+  size so a row of trees does not look stamped. They do not touch furniture or crates. The faint
+  preview that follows the pointer shows the stamp exactly as it will land.
+- **Snap to grid** -- puts furniture, crates and the like with their edges on the grid lines: a
+  bed that is one square by two covers exactly one by two squares, and turned a quarter it covers two
+  by one. Trees and other scaled stamps are not snapped. It does nothing on a gridless or hex scene.
 - **Keep on the scene** -- off, a stamp is temporary like a sketch. On, it is written to the scene as
   Foundry Drawings, so it is still there after a reload or a change of scene, and the GM can move
   or delete it with Foundry's own Drawing tools. It needs permission to create Drawings, which the GM
@@ -141,7 +174,9 @@ The **Utilities** tab holds the things that are not drawing.
 
 - **Eraser** -- press and drag over what you drew to take it away. It removes sketches, lines,
   boxes, ellipses, stamps, paths and wall strokes, a whole one at a time, and the walls of a wall
-  stroke with it. It leaves anything it did not draw alone. A circle shows how far it reaches. You erase
+  stroke with it. It leaves anything it did not draw alone. A circle shows how far it reaches. **Erase from**,
+  above it, takes from every layer or only the one you pick -- the dirt under a field, the crates on a
+  floor -- and it leaves drawings from before there were layers alone while one is picked. You erase
   your own; the GM erases anyone's. What it takes off the scene comes back with **Undo**; a
   temporary drawing does not.
 - **Erase all** (GM) -- after asking, removes every stamp, path and wall stroke on the scene.
@@ -156,8 +191,8 @@ The **Utilities** tab holds the things that are not drawing.
 Also on the Terrain tab: **corn**, **wheat**, **cabbage**, a **pumpkin patch** and **carrots**. A crop is one plant on its
 own bed of soil, and it **goes on a lattice** as wide as itself, one plant to a point, so when you hold the
 button and drag, the plants fall into **rows** and fill the field you sweep over, none doubled and none
-missing. A crop is never turned or sized at random, so the rows stay straight. **Size** sets how far
-apart the plants are (three quarters of a square at Medium). A kept field is a plant's worth of Drawings for
+missing. A crop is never turned or sized, so the rows stay straight: the plants are always three
+quarters of a square apart, at any Size. A kept field is a plant's worth of Drawings for
 every plant, so a big field is a lot of them; Undo takes the whole stroke back.
 
 ## Draw walls

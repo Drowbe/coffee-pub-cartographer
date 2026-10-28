@@ -5,8 +5,9 @@
 import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
-import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor, stampSquares } from './utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, OPENING_LIFT } from './utils-drawing.js';
+import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor, stampSquares, isScatterStamp, isScaledStamp, stampTurn, stampLayer, stampFootprint } from './utils-stamps.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, wallLayer, OPENING_LIFT } from './utils-drawing.js';
+import { layerDocs, layerById, drawingLayer } from './utils-layers.js';
 import { SKIP_JOIN } from './utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
 
@@ -56,12 +57,15 @@ class DrawingTool {
             stamp: {
                 natural: true, // draw a stamp in its own colours; off tints it with the brush colour
                 keep: false, // write the stamp to the scene as Drawings, not a temporary drawing
-                rotate: true, // turn and flip each stamp as it is put down
-                jitter: true, // vary each stamp's size a little
+                rotate: true, // turn and flip each stamp that may be turned any way as it is put down
+                jitter: true, // vary the size of each stamp that scales a little
+                turn: 0, // a stamp that is turned a quarter at a time (furniture, crates): how many quarters it is turned
+                snap: true, // a stamp of a fixed size is put on the grid, edges on the lines
                 spacing: 1, // how far apart dragging scatters stamps, as a multiple of a stamp's size
                 terrain: 'dirt', // terrain mode: the kind of path laid (utils-terrain.js)
                 pathWidth: 1 // terrain mode: how wide a path is, in grid squares
             },
+            eraseLayer: 'all', // the eraser: 'all', or the one layer it takes from (utils-layers.js)
             wallShape: 'line', // wall mode, as for drawing: 'sketch' (freehand, simplified to walls), 'line' (one straight wall), 'box' (a room), 'ellipse'
             wallSnap: true, // wall mode: put wall ends on Foundry's wall snap points
             wallKind: 'wall', // wall mode: what is drawn: 'wall', 'invisible', 'terrain', 'ethereal', 'door', 'secret', 'window'
@@ -4203,6 +4207,24 @@ class DrawingTool {
         return grid * (stampSquares(kind, this.state.symbolSize) ?? 1);
     }
 
+    /**
+     * A stamp of a fixed size, put on the grid with its edges on the lines: a bed two squares long covers two
+     * squares, a crate one. Where its width is a whole number of squares the middle is on a square's middle if
+     * that is odd and on a corner if it is even, and the same down. Anything that scales, a crop on its
+     * lattice, and a scene with no square grid, is left where it is put.
+     */
+    _snapStamp(kind, x, y, roll) {
+        const stamp = stampById(kind);
+        if (!this.state.stamp.snap || !stamp || stamp.legacy || stamp.size !== 'fixed' || stamp.lattice) return { x, y };
+        const grid = canvas.grid;
+        if (!grid?.getSnappedPoint || !grid.isSquare) return { x, y };
+        const turns = Math.round(roll.rotation / (Math.PI / 2));
+        const { w, h } = stampFootprint(kind, turns);
+        const centre = grid.getSnappedPoint({ x, y }, { mode: CONST.GRID_SNAPPING_MODES.CENTER });
+        const corner = grid.getSnappedPoint({ x, y }, { mode: CONST.GRID_SNAPPING_MODES.VERTEX });
+        return { x: w % 2 ? centre.x : corner.x, y: h % 2 ? centre.y : corner.y };
+    }
+
     /** What the next stamp will look like -- its seed, turn, flip and size -- rolled ahead so the preview is what is placed. */
     _peekRoll() {
         if (!this._roll) {
@@ -4210,10 +4232,12 @@ class DrawingTool {
             const options = this.state.stamp;
             this._roll = {
                 seed: 1 + Math.floor(Math.random() * 2147483646),
-                // A crop stands as it is, and as big as the others: a field is a lattice, and a turn or a size would spoil it.
-                rotation: options.rotate && stamp && !stamp.legacy && !stamp.lattice ? Math.random() * Math.PI * 2 : 0,
-                mirror: options.rotate && !stamp?.lattice && Math.random() < 0.5,
-                jitter: options.jitter && !stamp?.lattice ? 0.85 + Math.random() * 0.3 : 1
+                // Each stamp turns as it says: any way, a quarter at a time as the Turn control says, or not at all
+                // (a crop stands as it is: a field is a lattice, and a turn would spoil it).
+                rotation: !stamp || stamp.legacy ? 0 : stamp.turn === 'free' ? (options.rotate ? Math.random() * Math.PI * 2 : 0) : stamp.turn === 'steps' ? (options.turn % 4) * (Math.PI / 2) : 0,
+                mirror: stamp?.turn === 'free' && options.rotate && Math.random() < 0.5,
+                // Only what scales is a little different in size each time: a crate is a crate.
+                jitter: options.jitter && stamp?.size === 'scale' && !stamp.legacy ? 0.85 + Math.random() * 0.3 : 1
             };
         }
         return this._roll;
@@ -4247,7 +4271,8 @@ class DrawingTool {
      */
     _beginScatter(event) {
         this._endScatter();
-        if (!isProceduralStamp(this.state.stampStyle)) return;
+        // A crate, a bed, a stove: one to a click. Only what is painted -- grass, trees, a pond -- runs on while dragging.
+        if (!isProceduralStamp(this.state.stampStyle) || !isScatterStamp(this.state.stampStyle)) return;
         const point = this.getWorldCoordinates(event);
         if (point) this._scatter = { x: point.x, y: point.y, group: foundry.utils.randomID(), count: 0, docs: [], live: [] };
     }
@@ -4299,6 +4324,7 @@ class DrawingTool {
         const kind = this.state.stampStyle;
         const stamp = stampById(kind);
         const roll = this._peekRoll();
+        ({ x, y } = this._snapStamp(kind, x, y, roll));
         const graphics = new PIXI.Graphics();
         drawStamp(graphics, buildStamp(kind, roll), stampPalette(kind, this._stampTint(kind)), {
             x, y, size: this._stampPixels(kind) * roll.jitter, alpha: 0.55
@@ -4327,6 +4353,7 @@ class DrawingTool {
             }
         }
         const roll = this._takeRoll();
+        ({ x, y } = this._snapStamp(kind, x, y, roll));
         const size = this._stampPixels(kind) * roll.jitter;
         const tint = this._stampTint(kind);
         const prims = buildStamp(kind, roll);
@@ -4342,7 +4369,7 @@ class DrawingTool {
             if (stroke) {
                 const live = new PIXI.Graphics();
                 drawStamp(live, kept, palette, { x, y, size });
-                this.services.canvasLayer.addChild(live);
+                this._addTemporary(live, stampLayer(kind));
                 stroke.live.push(live);
             }
             void this._keepStamp(kind, kept, palette, { x, y, size }, stroke);
@@ -4351,7 +4378,7 @@ class DrawingTool {
 
         const graphics = new PIXI.Graphics();
         drawStamp(graphics, prims, palette, { x, y, size });
-        this.services.canvasLayer.addChild(graphics);
+        this._addTemporary(graphics, stampLayer(kind));
         const drawingId = `stamp-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
         const record = {
             id: drawingId,
@@ -4393,7 +4420,7 @@ class DrawingTool {
         drawStamp(graphics, buildStamp(data.stampKind, data), stampPalette(data.stampKind, data.tint), {
             x: data.x, y: data.y, size: data.size
         });
-        this.services.canvasLayer.addChild(graphics);
+        this._addTemporary(graphics, stampLayer(data.stampKind));
         if (!this._pixiDrawings) this._pixiDrawings = [];
         this._pixiDrawings.push({
             id: data.drawingId,
@@ -4414,18 +4441,40 @@ class DrawingTool {
         const scene = canvas.scene;
         if (!scene) return;
         const group = foundry.utils.randomID();
-        const docs = stampDrawingData(prims, palette, {
+        // On the layer its kind is on, so a cabbage is over the dirt and under the tree.
+        const docs = this._layered(stampDrawingData(prims, palette, {
             x, y, size,
             flags: { [MODULE.ID]: { stamp: { id: group, kind } } },
             solid: CONST.DRAWING_FILL_TYPES.SOLID,
             none: CONST.DRAWING_FILL_TYPES.NONE
-        });
+        }), stampLayer(kind));
         // In a stroke, they wait for its end and are written together.
         if (stroke) {
             stroke.docs.push(...docs);
             return;
         }
         await this._keepDrawings(docs, 'stamp');
+    }
+
+    /**
+     * Drawings as data, put on a layer (utils-layers.js). With the setting on, the layers Above and Sky are
+     * also raised, to be drawn over the tokens.
+     */
+    _layered(docs, layer, { top = false } = {}) {
+        let raised = false;
+        try { raised = !!game.settings.get(MODULE.ID, 'drawing.aboveTokens'); } catch { /* not registered: under the tokens */ }
+        return layerDocs(docs, layer, { moduleId: MODULE.ID, top, raised });
+    }
+
+    /**
+     * A temporary stamp or path, on the canvas layer, drawn in the order of its layer: under what other
+     * temporary marks are drawn (lines, boxes), over each other as the layers are over each other.
+     */
+    _addTemporary(graphics, layerId) {
+        const layer = this.services.canvasLayer;
+        layer.sortableChildren = true;
+        graphics.zIndex = (layerById(layerId)?.band ?? 2) - 10;
+        layer.addChild(graphics);
     }
 
     /** Write Drawings to the scene, as one thing to take back. `what` is 'stamp' or 'path'. */
@@ -4489,19 +4538,19 @@ class DrawingTool {
         const prims = buildTerrain(kind, path, { width, seed, maxTexture: keep ? MAX_TEXTURE.scene : MAX_TEXTURE.canvas });
 
         if (keep) {
-            const docs = stampDrawingData(prims, palette, {
+            const docs = this._layered(stampDrawingData(prims, palette, {
                 x: 0, y: 0, size: 1,
                 flags: { [MODULE.ID]: { terrain: { id: foundry.utils.randomID(), kind } } },
                 solid: CONST.DRAWING_FILL_TYPES.SOLID,
                 none: CONST.DRAWING_FILL_TYPES.NONE
-            });
+            }), terrainById(kind).layer);
             void this._keepDrawings(docs, 'path');
             return;
         }
 
         const graphics = new PIXI.Graphics();
         drawStamp(graphics, prims, palette, { x: 0, y: 0, size: 1, shadow: false });
-        this.services.canvasLayer.addChild(graphics);
+        this._addTemporary(graphics, terrainById(kind).layer);
         const drawingId = `terrain-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
         const record = {
             id: drawingId, graphics, createdAt: Date.now(), expiresAt: this.getExpirationTime(),
@@ -4524,7 +4573,7 @@ class DrawingTool {
         const graphics = new PIXI.Graphics();
         const prims = buildTerrain(data.terrainKind, data.path, { width: data.width, seed: data.seed, maxTexture: MAX_TEXTURE.canvas });
         drawStamp(graphics, prims, terrainPalette(data.terrainKind), { x: 0, y: 0, size: 1, shadow: false });
-        this.services.canvasLayer.addChild(graphics);
+        this._addTemporary(graphics, terrainById(data.terrainKind).layer);
         if (!this._pixiDrawings) this._pixiDrawings = [];
         this._pixiDrawings.push({
             id: data.drawingId, graphics,
@@ -4656,11 +4705,11 @@ class DrawingTool {
         const color = wallKindById(kind).color;
         // The line over the walls: dark under and coloured over, with round ends and corners, and what a material
         // adds. A door has its leaf, a secret door its dot, a window its pane: what the button shows.
-        const drawn = [
+        // On the wall layer, over the furniture along it; a door or a window is over every wall, so no wall's pattern runs over it.
+        const drawn = this._layered([
             ...wallLineDrawings({ path, material, color, casing: WALL_CASING, weight, grid, seed: Math.floor(Math.random() * 2147483646) + 1, flags, solid, none, lift: opening ? OPENING_LIFT : 0 }),
-            // A door or a window is drawn above every wall, so no wall's pattern runs over it.
             ...(opening ? openingMarks(kind, segments[0], { weight, color, casing: WALL_CASING, flags, solid, none, sort: OPENING_LIFT + 2 }) : [])
-        ];
+        ], wallLayer(material), { top: opening });
         const options = cut ? { [SKIP_JOIN]: true } : {};
         // The wall as it was, taken before anything is written: cutting it changes it.
         const original = cut ? { id: cut.wall.id, c: [...cut.wall.c], data: cut.wall.toObject() } : null;
@@ -4817,6 +4866,8 @@ class DrawingTool {
             if (!game.user.isGM && !doc.isOwner) continue;
             const group = keptGroup(doc.flags, MODULE.ID);
             if (!group || this._erased.has(group.key) || hit.has(group.key)) continue;
+            // With a layer chosen, only what is on it; a drawing from before there were layers is on none of them.
+            if (this.state.eraseLayer !== 'all' && drawingLayer(doc.flags, MODULE.ID) !== this.state.eraseLayer) continue;
             if (drawingHit(doc, x, y, reach, CONST.DRAWING_FILL_TYPES.NONE)) hit.set(group.key, group);
         }
         if (!hit.size) return;
@@ -5137,6 +5188,13 @@ class DrawingTool {
         this.state.stamp[name] = typeof current === 'number' ? Number(value) : typeof current === 'string' ? String(value) : !!value;
         this._roll = null;
         game.settings.set(MODULE.ID, 'toolbar.stampOptions', { ...this.state.stamp });
+        this.notifyChange();
+    }
+
+    /** The eraser takes from every layer, or from the one. */
+    setEraseLayer(layer) {
+        if (layer !== 'all' && !layerById(layer)) return;
+        this.state.eraseLayer = layer;
         this.notifyChange();
     }
 

@@ -7,9 +7,11 @@
 // It does not run Foundry: that Foundry accepts the data is for the map to show.
 import fs from 'node:fs';
 import {
-    stampSquares, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor
+    stampSquares, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor,
+    isScatterStamp, isScaledStamp, stampTurn, stampLayer, stampFootprint
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, OPENING_LIFT, DOOR_LEAF, WINDOW_GLASS } from '../scripts/utils-drawing.js';
+import { layerDocs, layerById, drawingLayer, LAYERS } from '../scripts/utils-layers.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, wallLayer, OPENING_LIFT, DOOR_LEAF, WINDOW_GLASS } from '../scripts/utils-drawing.js';
 import { SKIP_JOIN } from '../scripts/utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
@@ -27,7 +29,7 @@ const MAX_SCATTER = Number(src.match(/const MAX_SCATTER = (\d+)/)[1]);
 const KEPT_SPECKS = Number(src.match(/const KEPT_SPECKS = (\d+)/)[1]);
 const WALL_CASING = src.match(/const WALL_CASING = '([^']+)'/)[1];
 const pointer = slice('    /** The button went down on the map', '    /** Stop drawing from the window. */');
-const wallOptions = slice('    setWallOption(name, value) {', '    setLineStyle(style) {');
+const wallOptions = slice('    setEraseLayer(layer) {', '    setLineStyle(style) {');
 const strokeMode = slice('    _strokeMode() {', '    /**\n     * Set the stamp style');
 
 const MODULE = { ID: 'coffee-pub-cartographer', NAME: 'Cartographer' };
@@ -35,7 +37,7 @@ const notices = [];
 const notify = (title, options) => notices.push({ title, ...options });
 const CONST = {
     DRAWING_FILL_TYPES: { NONE: 0, SOLID: 1 },
-    GRID_SNAPPING_MODES: { VERTEX: 1 },
+    GRID_SNAPPING_MODES: { VERTEX: 1, CENTER: 2 },
     EDGE_SENSE_TYPES: { NONE: 0, LIMITED: 10, NORMAL: 20, PROXIMITY: 30, DISTANCE: 40 },
     WALL_DOOR_TYPES: { NONE: 0, DOOR: 1, SECRET: 2 },
     WALL_DOOR_STATES: { CLOSED: 0, OPEN: 1, LOCKED: 2 }
@@ -44,10 +46,11 @@ const foundry = { utils: { randomID: (() => { let n = 0; return () => `id${++n}`
 let isGM = true;
 let canCreate = true;
 let savedMode = 'box';
+let aboveTokens = false;
 let confirmAnswer = true;
 const game = {
     get user() { return { id: 'u1', name: 'Una', isGM, can: () => canCreate }; },
-    settings: { get: () => savedMode, set() {} }
+    settings: { get: (_module, key) => (key === 'drawing.aboveTokens' ? aboveTokens : savedMode), set() {} }
 };
 const foundryApplications = { api: { DialogV2: { confirm: async () => confirmAnswer } } };
 
@@ -98,7 +101,15 @@ const makeScene = () => {
 let scene = makeScene();
 const canvas = {
     get scene() { return scene; },
-    grid: { size: 100, getSnappedPoint: ({ x, y }) => ({ x: Math.round(x / 50) * 50, y: Math.round(y / 50) * 50 }) },
+    grid: {
+        size: 100, isSquare: true,
+        // The middle of the square, or the nearest corner.
+        getSnappedPoint: ({ x, y }, { mode } = {}) => mode === CONST.GRID_SNAPPING_MODES.CENTER
+            ? { x: Math.floor(x / 100) * 100 + 50, y: Math.floor(y / 100) * 100 + 50 }
+            : mode === CONST.GRID_SNAPPING_MODES.VERTEX
+                ? { x: Math.round(x / 100) * 100, y: Math.round(y / 100) * 100 }
+                : { x: Math.round(x / 50) * 50, y: Math.round(y / 50) * 50 }
+    },
     walls: null,
     level: null,
     dimensions: { distance: 5 }
@@ -128,7 +139,8 @@ const make = () => {
         state: {
             drawingMode: 'wall', stampStyle: 'tree', symbolSize: 'medium', timedEraseEnabled: false,
             brushSettings: { size: 6, color: 'rgba(186, 60, 49, 0.7)', type: 'pen' },
-            stamp: { natural: true, keep: false, rotate: true, jitter: true, spacing: 1, terrain: 'dirt', pathWidth: 1 },
+            stamp: { natural: true, keep: false, rotate: true, jitter: true, turn: 0, snap: true, spacing: 1, terrain: 'dirt', pathWidth: 1 },
+            eraseLayer: 'all',
             wallShape: 'line', wallSnap: true, wallKind: 'wall', wallDoor: 'closed', wallMaterial: 'plain'
         },
         services: { canvasLayer: { added: [], addChild(g) { this.added.push(g); } } },
@@ -184,7 +196,8 @@ console.log('\na wall stroke');
     check('the ends are round: a dark disc and a coloured one at each end', discs.length === 4 && discs.filter(d => d.fillColor === WALL_CASING).length === 2 && discs.filter(d => d.fillColor === wallKindById('wall').color).length === 2);
     check('the discs are as wide as the lines they cap', discs.filter(d => d.fillColor === WALL_CASING).every(d => d.shape.width >= 24 && d.shape.width <= 25) && discs.filter(d => d.fillColor !== WALL_CASING).every(d => d.shape.width >= 20 && d.shape.width <= 21));
     check('the discs sit on the ends of the wall', [0, 400].every(x => discs.some(d => Math.abs(d.x + d.shape.width / 2 - x) <= 1)));
-    check('dark below, colour above: every dark thing sorts under every coloured one', Math.max(...lines[0][1].filter(d => d.sort === 0).map(d => d.sort)) < Math.min(...lines[0][1].filter(d => d.sort === 1).map(d => d.sort)) && lines[0][1].filter(d => d.sort === 0).length === 3);
+    const first = Math.min(...lines[0][1].map(d => d.sort));
+    check('dark below, colour above: every dark thing sorts under every coloured one', Math.max(...lines[0][1].filter(d => d.sort === first).map(d => d.sort)) < Math.min(...lines[0][1].filter(d => d.sort === first + 1).map(d => d.sort)) && lines[0][1].filter(d => d.sort === first).length === 3);
     check('both carry the same group flag, so the eraser takes both', lines[0][1].every(d => d.flags[MODULE.ID].drawnWall.id === lines[0][1][0].flags[MODULE.ID].drawnWall.id));
     check('it is one thing to take back, with both kinds in it', tool._kept.length === 1 && tool._kept[0].wallIds.length === 1 && tool._kept[0].drawingIds.length === 6);
     check('the window is told', tool.changes >= 1);
@@ -433,8 +446,8 @@ console.log('\nthe marks on a door and a window');
     check('it is not a black block: the only big filled shape is the pale leaf', door.filter(d => d.fillType === 1 && d.shape.width > 30).every(d => d.fillColor === DOOR_LEAF));
     check('a secret door has the leaf, a handle and a dot in its own colour', secret.length === 9 && secret.at(-3).fillColor === DOOR_LEAF && secret.at(-1).fillColor === wallKindById('secret').color && secret.at(-1).shape.width < 20);
     check('a window has a pane of glass, as thick as the wall, with a bright line down it', window_.length === 8 && window_.at(-2).fillColor === WINDOW_GLASS && window_.at(-2).shape.height < thick && window_.at(-1).strokeColor === '#ffffff' && window_.at(-1).fillType === 0);
-    check('a door and a window are drawn above every wall: nothing of theirs sorts under a wall\'s own drawings', [door, secret, window_].every(list => Math.min(...list.map(d => d.sort)) >= OPENING_LIFT) && Math.max(...plain.map(d => d.sort)) < OPENING_LIFT);
-    check('even a wall of a patterned material, whose pieces sort higher', Math.max(...wallLineDrawings({ path: [0, 0, 500, 0], material: 'stone', color: '#fff', casing: '#000', weight: 33, grid: 100 }).map(d => d.sort)) < OPENING_LIFT);
+    const later = await draw('wall');
+    check('a door and a window are drawn above every wall, also a wall drawn after them', [door, secret, window_].every(list => Math.min(...list.map(d => d.sort)) > Math.max(...plain.map(d => d.sort)) && Math.min(...list.map(d => d.sort)) > Math.max(...later.map(d => d.sort))));
     check('and their marks above their own lines', Math.min(...door.slice(6).map(d => d.sort)) > Math.max(...door.slice(0, 6).map(d => d.sort)));
     check('the marks carry the group flag, so the eraser takes them too', [door, secret, window_].every(list => list.every(d => d.flags[MODULE.ID].drawnWall.id === list[0].flags[MODULE.ID].drawnWall.id)));
     check('an opening too short to hold a mark has none', openingMarks('door', [[0, 0], [10, 0]], { weight: 6, color: '#0f0', casing: '#000' }).length === 0);
@@ -1225,7 +1238,7 @@ console.log('\nlaying a field: crops on a lattice');
     check('a drag down a column lays a column', tool._pixiDrawings.length === 7 && tool._pixiDrawings.every(d => d.x % cell === 0 && d.y % cell === 0));
     tool._endScatter();
     check('a new stroke may put a plant on a point an earlier one used', (() => { tool._beginScatter({ x: 80, y: 74 }); tool._placeStamp('crop-corn', 80, 74); const n = tool._pixiDrawings.length; tool._endScatter(); return n === 8; })());
-    check('the size sets the lattice: a small plant is a third as far apart', (() => { const t = make(); t.state.symbolSize = 'small'; return t._stampPixels('crop-corn') === 25; })());
+    check('a crop is the same size at every size: the lattice does not move with the Size control', (() => { const t = make(); const sizes = ['small', 'medium', 'large'].map(size => { t.state.symbolSize = size; return t._stampPixels('crop-corn'); }); return sizes.every(px => px === 75); })());
     check('and spacing does not change it, so rows stay rows', (() => { const t = make(); t.state.stamp.spacing = 3; return t._scatterStep('crop-corn') === make()._scatterStep('crop-corn'); })());
     check('a drag samples more often than a cell, so no point is skipped on a diagonal', tool._scatterStep('crop-corn') === cell * 0.5);
 }
@@ -1242,6 +1255,139 @@ console.log('\nlaying a field: crops on a lattice');
     const written = scene.creates.filter(([type]) => type === 'Drawing');
     check('a kept field is written as one batch, a plant at each point', written.length === 1 && new Set(written[0][1].map(d => d.flags[MODULE.ID].stamp.id)).size === 4);
     check('and is one thing to undo', tool._kept.length === 1);
+}
+
+console.log('\nstamps follow their own rules');
+{
+    const drag = kind => { const t = make(); t.state.stampStyle = kind; t._beginScatter({ x: 0, y: 0 }); return t; };
+    check('a crate is one to a click: dragging does not start a scatter', drag('crate')._scatter === null);
+    check('nor a bed, a chest or a table', ['bed', 'chest', 'table', 'barrel', 'stove'].every(kind => drag(kind)._scatter === null));
+    check('a tree, shrub, grass and a pond are painted', ['tree', 'shrub', 'grass', 'pond', 'rock'].every(kind => drag(kind)._scatter !== null));
+    const crate = drag('crate');
+    crate._scatterTo({ x: 900, y: 0 });
+    check('and dragging a crate across the map puts down none', crate._pixiDrawings.length === 0);
+
+    const sizes = kind => ['small', 'medium', 'large'].map(size => { const t = make(); t.state.symbolSize = size; return t._stampPixels(kind); });
+    check('a tree scales with the size: 1, 3 and 6 squares', sizes('tree').join() === '100,300,600');
+    check('a crate is the same at every size', new Set(sizes('crate')).size === 1 && sizes('crate')[0] === 90);
+    check('furniture is the same at every size, a bed two squares', new Set(sizes('bed')).size === 1 && sizes('bed')[0] === 200);
+
+    const roll = (kind, options = {}, turn = 0) => { const t = make(); Object.assign(t.state.stamp, options, { turn }); t.state.stampStyle = kind; return t._peekRoll(); };
+    check('a bed is not turned or flipped unless asked, however many times it is placed', Array.from({ length: 30 }, () => roll('bed')).every(r => r.rotation === 0 && r.mirror === false));
+    check('the Turn control turns it a quarter at a time', [0, 1, 2, 3].map(turn => roll('bed', {}, turn).rotation).join() === [0, Math.PI / 2, Math.PI, Math.PI * 1.5].join());
+    check('and a crate and a chest likewise', roll('crate', {}, 1).rotation === Math.PI / 2 && roll('chest', {}, 3).rotation === Math.PI * 1.5);
+    check('the random turn leaves furniture alone: it is for trees, plants and rocks', Array.from({ length: 30 }, () => roll('table', { rotate: true }, 2)).every(r => r.rotation === Math.PI && r.mirror === false));
+    check('a tree is turned any way when the option is on', Array.from({ length: 40 }, () => roll('tree', { rotate: true }).rotation).some(r => r > 0.1) && Array.from({ length: 40 }, () => roll('tree', { rotate: true }).mirror).some(Boolean));
+    check('and not at all when it is off, whatever Turn says', Array.from({ length: 20 }, () => roll('tree', { rotate: false }, 2)).every(r => r.rotation === 0 && r.mirror === false));
+    check('a crop is never turned', Array.from({ length: 20 }, () => roll('crop-corn', { rotate: true }, 1)).every(r => r.rotation === 0 && r.mirror === false));
+    check('a tree varies a little in size, a crate never does', Array.from({ length: 40 }, () => roll('tree', { jitter: true }).jitter).some(j => j !== 1) && Array.from({ length: 40 }, () => roll('crate', { jitter: true }).jitter).every(j => j === 1));
+
+    // Put on the grid.
+    const snapped = (kind, x, y, turn = 0) => { const t = make(); t.state.stamp.turn = turn; return t._snapStamp(kind, x, y, { rotation: turn * Math.PI / 2 }); };
+    check('a crate, one square, is in the middle of a square', JSON.stringify(snapped('crate', 123, 456)) === JSON.stringify({ x: 150, y: 450 }));
+    check('a bed, one by two, has its middle on a line down its length: the middle of a column, a corner across', JSON.stringify(snapped('bed', 123, 456)) === JSON.stringify({ x: 150, y: 500 }));
+    check('turned a quarter it is the other way round', JSON.stringify(snapped('bed', 123, 456, 1)) === JSON.stringify({ x: 100, y: 450 }));
+    check('a table, two by one, likewise', JSON.stringify(snapped('table', 123, 456)) === JSON.stringify({ x: 100, y: 450 }));
+    check('a tree is not snapped: it scales and is put where it is wanted', JSON.stringify(snapped('tree', 123, 456)) === JSON.stringify({ x: 123, y: 456 }));
+    check('nor a crop, which has its own lattice', JSON.stringify(snapped('crop-corn', 123, 456)) === JSON.stringify({ x: 123, y: 456 }));
+    check('with snapping off nothing is moved', (() => { const t = make(); t.state.stamp.snap = false; const at = t._snapStamp('crate', 123, 456, { rotation: 0 }); return at.x === 123 && at.y === 456; })());
+    check('on a grid that is not square, nothing is moved', (() => { const keep = canvas.grid.isSquare; canvas.grid.isSquare = false; const at = make()._snapStamp('crate', 123, 456, { rotation: 0 }); canvas.grid.isSquare = keep; return at.x === 123 && at.y === 456; })());
+    check('a placed crate is on the grid, and the preview is where it will be put', await (async () => {
+        const t = make(); added.length = 0; t._placeStamp('crate', 123, 456);
+        return added[0].x === 150 && added[0].y === 450;
+    })());
+}
+
+console.log('\nlayers: what is kept is put on its layer');
+{
+    const keepAll = async steps => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.stamp.keep = true;
+        for (const step of steps) step(tool);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        return scene.creates.filter(([type]) => type === 'Drawing').map(([, docs]) => docs);
+    };
+    const [crop, dirt, table, tree] = await (async () => {
+        // Drawn in the wrong order on purpose: the order they are drawn in is not what decides.
+        const batches = await keepAll([
+            t => t._placeStamp('crop-cabbage', 300, 300),
+            t => t._placeStamp('patch-dirt', 300, 300),
+            t => t._placeStamp('table', 300, 300),
+            t => t._placeStamp('tree', 300, 300)
+        ]);
+        return batches;
+    })();
+    check('each batch is told its layer in its flags', crop[0].flags[MODULE.ID].layer === 'ankle' && dirt[0].flags[MODULE.ID].layer === 'ground' && table[0].flags[MODULE.ID].layer === 'waist' && tree[0].flags[MODULE.ID].layer === 'above');
+    check('every piece of the dirt is under every piece of the cabbage, though the cabbage was put down first', Math.max(...dirt.map(d => d.sort)) < Math.min(...crop.map(d => d.sort)));
+    check('the cabbage is under the table, the table under the tree', Math.max(...crop.map(d => d.sort)) < Math.min(...table.map(d => d.sort)) && Math.max(...table.map(d => d.sort)) < Math.min(...tree.map(d => d.sort)));
+    check('under the tokens: no elevation is written when the setting is off', [crop, dirt, table, tree].every(docs => docs.every(d => !('elevation' in d))));
+    check('the pieces of one stamp keep their order', tree.every((d, i) => i === 0 || d.flags[MODULE.ID].stamp.id !== tree[i - 1].flags[MODULE.ID].stamp.id || d.sort > tree[i - 1].sort));
+
+    aboveTokens = true;
+    const [raisedTree, raisedTable] = await keepAll([t => t._placeStamp('tree', 300, 300), t => t._placeStamp('table', 300, 300)]);
+    aboveTokens = false;
+    check('with the setting on, the canopy is raised over the tokens and the table is not', raisedTree.every(d => d.elevation === layerById('above').elevation) && raisedTable.every(d => !('elevation' in d)));
+
+    const [two1, two2] = await keepAll([t => t._placeStamp('crate', 300, 300), t => t._placeStamp('crate', 400, 300)]);
+    check('a crate put down later is over the one before: no piece of it is under a piece of the first', Math.min(...two2.map(d => d.sort)) > Math.max(...two1.map(d => d.sort)));
+
+    scene = makeScene();
+    const walls = make();
+    walls.state.wallMaterial = 'stone';
+    await walls.createWallStroke([[0, 0], [400, 0]]);
+    const wallDocs = scene.creates.filter(([type]) => type === 'Drawing').at(-1)[1];
+    check('a wall is on the eye layer', wallDocs.every(d => d.flags[MODULE.ID].layer === 'eye'));
+    walls.state.wallMaterial = 'fence';
+    await walls.createWallStroke([[0, 200], [400, 200]]);
+    check('a fence on the waist layer', scene.creates.filter(([type]) => type === 'Drawing').at(-1)[1].every(d => d.flags[MODULE.ID].layer === 'waist'));
+
+    scene = makeScene();
+    const path = make();
+    path.state.stamp.keep = true;
+    path.createTerrainPath([[0, 0], [300, 0], [600, 40]]);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    check('a path is on the ground', scene.creates.filter(([type]) => type === 'Drawing').at(-1)[1].every(d => d.flags[MODULE.ID].layer === 'ground'));
+}
+
+console.log('\nlayers: what is temporary is drawn in the same order');
+{
+    const tool = make();
+    tool._placeStamp('tree', 100, 100);
+    tool._placeStamp('patch-dirt', 100, 100);
+    const [tree, dirt] = tool.services.canvasLayer.added;
+    check('the canvas layer is sorted, so layers are drawn in order', tool.services.canvasLayer.sortableChildren === true);
+    check('a canopy is drawn over dirt that was drawn after it', tree.zIndex > dirt.zIndex);
+    check('and both are under the marks drawn by hand, which are at zero', tree.zIndex < 0 && dirt.zIndex < 0);
+}
+
+console.log('\nlayers: the eraser can take from one');
+{
+    const setup = async () => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.stamp.keep = true;
+        tool._placeStamp('patch-dirt', 300, 300);
+        tool._placeStamp('crop-cabbage', 300, 300);
+        tool._placeStamp('crate', 300, 300);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        return tool;
+    };
+    const left = () => [...new Set(scene.drawings.contents.map(d => d.flags[MODULE.ID].layer))].sort().join();
+    let tool = await setup();
+    check('with all layers chosen the eraser takes everything under it', await (async () => { tool._eraseAt(320, 320); await tool._commitErase(); return scene.drawings.size === 0; })());
+    tool = await setup();
+    tool.setEraseLayer('ground');
+    tool._eraseAt(320, 320);
+    await tool._commitErase();
+    check('with the ground chosen it takes the dirt and leaves the cabbage and the crate', left() === 'ankle,waist');
+    tool.setEraseLayer('waist');
+    tool._eraseAt(320, 320);
+    await tool._commitErase();
+    check('and with waist it takes the crate', left() === 'ankle');
+    check('and an unknown layer is not a choice', (() => { tool.setEraseLayer('cellar'); return tool.state.eraseLayer === 'waist'; })());
+    tool.setEraseLayer('all');
+    check('all is a choice again', tool.state.eraseLayer === 'all');
 }
 
 console.log('\nwhat the user may do');
