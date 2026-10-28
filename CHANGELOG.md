@@ -6,11 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [14.2.1]
+
+### FIXED
+
+- **Terrain is under stamps, and a painted pond is one pond** (`scripts/utils-layers.js`, `scripts/utils-terrain.js`, `scripts/utils-stamps.js`, `scripts/manager-drawing.js`). Ground patches, paths and the pond were all on the one Ground layer, where what is drawn later is on top, so dirt drawn after a pond covered it, and a road and a patch fought over each other. There is a new **Path** layer between Ground and Ankle: ground patches are the very bottom, roads and streams are over them, and the pond is now on Ankle, over every patch and path. A boardwalk stays on Ankle. Ponds had also stopped running into one: giving every stamp a block of the order of its own put a later pond's shore over an earlier pond's water. A stroke is now put on its layer as one block, so the first piece of every stamp in it (the shore) is under the second of every one (the water), as ground patches painted into one are. A pond put down on its own, one click at a time, now runs into the others too: its shore is written in the lower half of the Ankle layer and its water in the upper half (`under` in the stamp rules, `stampUnder`), so every shore is under every water. **Verified** by new sections of `tests/test-layers.mjs` and `tests/test-drawing-scene.mjs`. **Not yet seen on the map**; temporary ponds are still separate drawings, and drawings kept before this change keep the layer they were written on.
+
 ## [14.2.0]
 
 ### ADDED
-
-- **Terrain is under stamps, and a painted pond is one pond** (`scripts/utils-layers.js`, `scripts/utils-terrain.js`, `scripts/utils-stamps.js`, `scripts/manager-drawing.js`). Ground patches, paths and the pond were all on the one Ground layer, where what is drawn later is on top, so dirt drawn after a pond covered it, and a road and a patch fought over each other. There is a new **Path** layer between Ground and Ankle: ground patches are the very bottom, roads and streams are over them, and the pond is now on Ankle, over every patch and path. A boardwalk stays on Ankle. Ponds had also stopped running into one: giving every stamp a block of the order of its own put a later pond's shore over an earlier pond's water. A stroke is now put on its layer as one block, so the first piece of every stamp in it (the shore) is under the second of every one (the water), as ground patches painted into one are. A pond put down on its own, one click at a time, now runs into the others too: its shore is written in the lower half of the Ankle layer and its water in the upper half (`under` in the stamp rules, `stampUnder`), so every shore is under every water. **Verified** by new sections of `tests/test-layers.mjs` and `tests/test-drawing-scene.mjs`. **Not yet seen on the map**; temporary ponds are still separate drawings, and drawings kept before this change keep the layer they were written on.
 
 - **A bushier hedge** (`scripts/utils-drawing.js`). A hedge was a smooth green band with a few leaf dabs on it, which read as a road. Its core is narrower and clumps of leaf now bulge from alternate sides, so the edge is scalloped, with lighter leaves on top and the odd berry; about the same number of pieces. **Verified** by `tests/test-stamps.mjs`; how it looks is not yet seen in a running world.
 
