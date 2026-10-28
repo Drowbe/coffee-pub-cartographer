@@ -668,13 +668,18 @@ function wallLineDrawingsAt({ path, material = 'plain', color, casing, weight, g
             break;
         }
         case 'hedge': {
-            // Wider than a wall, and soft: a dark mass, and clumps of leaves in three greens, with the odd berry.
+            // Wider than a wall, and soft: a dark core, and clumps of leaf that bulge from alternate sides so the edge is
+            // scalloped, not a smooth band, with lighter leaves on top and the odd berry.
             const hw = w * 1.5;
-            docs.push(line(path, hw + 4, edge, 1, 0), ...ends(hw / 2 + 2, edge, 0), line(path, hw, '#2f6a2a', 1, 1), ...ends(hw / 2, '#2f6a2a', 1));
-            spaced(Math.max(w * 0.55, 8), w * 0.2).forEach(p => {
-                const across = (rand() - 0.5) * hw * 0.55;
-                docs.push(disc(p.x + p.nx * across, p.y + p.ny * across, w * (0.4 + rand() * 0.3), pick(['#3f8a36', '#4f9a3c', '#5aa84a', '#357a2e']), 2, 0.95));
-                if (rand() < 0.12) docs.push(disc(p.x + p.nx * across * 1.2, p.y + p.ny * across * 1.2, Math.max(1.8, w * 0.1), '#c0392b', 3));
+            const core = hw * 0.8;
+            docs.push(line(path, core + 4, edge, 1, 0), ...ends(core / 2 + 2, edge, 0), line(path, core, '#2f6a2a', 1, 1), ...ends(core / 2, '#2f6a2a', 1));
+            spaced(Math.max(w * 0.5, 7), w * 0.2).forEach((p, i) => {
+                const side = i % 2 ? 1 : -1;
+                const across = side * hw * (0.3 + rand() * 0.1);
+                const radius = hw * (0.3 + rand() * 0.12);
+                docs.push(disc(p.x + p.nx * across, p.y + p.ny * across, radius, pick(['#2f6a2a', '#357a2e', '#3f8a36']), 2, 1));
+                if (rand() < 0.4) docs.push(disc(p.x + p.nx * across * 0.35, p.y + p.ny * across * 0.35, radius * 0.6, pick(['#5aa84a', '#4f9a3c']), 3, 0.9));
+                if (rand() < 0.1) docs.push(disc(p.x + p.nx * across * 0.8, p.y + p.ny * across * 0.8, Math.max(1.8, w * 0.1), '#c0392b', 4));
             });
             break;
         }
