@@ -131,6 +131,9 @@ const ngon = (cx, cy, radius, n, rng) => {
     return pts;
 };
 
+/** A round end: a polygon of points round a centre. */
+const circle = (cx, cy, radius, n = 20) => Array.from({ length: n * 2 }, (_, i) => (i % 2 ? cy + Math.sin(Math.floor(i / 2) / n * TAU) * radius : cx + Math.cos(Math.floor(i / 2) / n * TAU) * radius));
+
 /**
  * A path as primitives in scene pixels: the edge, the ground, a worn middle, and the ground's
  * texture over it. The same path, width and seed always give the same primitives.
@@ -144,11 +147,30 @@ export function buildTerrain(kind, path, { width, seed = 1, maxTexture = MAX_TEX
     if (!terrain || !Array.isArray(path) || path.length < 4 || !(width > 0)) return [];
     const rng = makeRng(seed);
     const edge = width * 0.08;
-    const prims = [
-        { k: 'line', pts: path, width: width + edge * 2, tone: 'dark' },
-        { k: 'line', pts: path, width, tone: 'base' },
-        { k: 'line', pts: path, width: width * 0.55, tone: 'light', alpha: 0.3 }
-    ];
+    // A line stops dead, so each end is closed: a rounded end for a track, a board across it for a boardwalk.
+    const ends = [{ x: path[0], y: path[1], from: [path[2], path[3]] }, { x: path[path.length - 2], y: path[path.length - 1], from: [path[path.length - 4], path[path.length - 3]] }];
+    const caps = (radius, tone, extra = {}) => ends.map(end => ({ k: 'poly', pts: circle(end.x, end.y, radius), tone, ...extra }));
+    const prims = kind === 'boardwalk'
+        ? [
+            { k: 'line', pts: path, width: width + edge * 2, tone: 'dark' },
+            { k: 'line', pts: path, width, tone: 'base' },
+            { k: 'line', pts: path, width: width * 0.55, tone: 'light', alpha: 0.3 },
+            ...ends.map(end => {
+                const length = Math.hypot(end.x - end.from[0], end.y - end.from[1]) || 1;
+                const nx = -(end.y - end.from[1]) / length;
+                const ny = (end.x - end.from[0]) / length;
+                const half = (width / 2) * 1.05;
+                return { k: 'line', width: width * 0.05, tone: 'dark', alpha: 0.8, pts: [end.x + nx * half, end.y + ny * half, end.x - nx * half, end.y - ny * half] };
+            })
+        ]
+        : [
+            { k: 'line', pts: path, width: width + edge * 2, tone: 'dark' },
+            ...caps(width / 2 + edge, 'dark'),
+            { k: 'line', pts: path, width, tone: 'base' },
+            ...caps(width / 2, 'base'),
+            { k: 'line', pts: path, width: width * 0.55, tone: 'light', alpha: 0.3 },
+            ...caps(width * 0.275, 'light', { alpha: 0.3 })
+        ];
     const { cumulative, total } = lengths(path);
     if (!(total > 0) || maxTexture <= 0) return prims;
 

@@ -207,19 +207,23 @@ console.log('\nterrain paths');
     for (const terrain of TERRAINS) {
         const prims = buildTerrain(terrain.id, path, { width: 80, seed: 3 });
         const palette = terrainPalette(terrain.id);
-        check(`${terrain.id}: an edge, the ground and a worn middle, then texture; every tone has a colour`, prims.length > 3 && prims.slice(0, 3).every(p => p.k === 'line') && prims.every(p => palette[p.tone] && p.pts.every(Number.isFinite)));
-        check(`${terrain.id}: the ribbon is the width asked for, with a wider edge beneath`, prims[1].width === 80 && prims[0].width > 80 && prims[0].width < 100);
+        // The ribbon is the three lines along the whole path; the ends are closed, and the texture is over it all.
+        const ribbon = prims.filter(p => p.pts === path);
+        const ends = terrain.id === 'boardwalk' ? 2 : 6;
+        check(`${terrain.id}: an edge, the ground and a worn middle, then texture; every tone has a colour`, ribbon.length === 3 && ribbon.every(p => p.k === 'line') && prims.length > 3 + ends && prims.every(p => palette[p.tone] && p.pts.every(Number.isFinite)));
+        check(`${terrain.id}: the ribbon is the width asked for, with a wider edge beneath`, ribbon[1].width === 80 && ribbon[0].width > 80 && ribbon[0].width < 100);
+        check(`${terrain.id}: both ends are closed, not left to stop dead`, terrain.id === 'boardwalk' ? prims.filter(p => p.k === 'line' && p.pts !== path && p.tone === 'dark' && p.width > 2 && p.width < 8 && Math.hypot(p.pts[0] - p.pts[2], p.pts[1] - p.pts[3]) > 80).length >= 2 : prims.filter(p => p.k === 'poly' && p.pts.length === 40).length === 6);
         check(`${terrain.id}: the same path and seed give the same texture`, JSON.stringify(prims) === JSON.stringify(buildTerrain(terrain.id, path, { width: 80, seed: 3 })));
-        check(`${terrain.id}: the texture stays on the path`, prims.slice(3).every(p => { const x = p.pts[0]; const y = p.pts[1]; return x > 100 - 60 && x < 520 + 60 && y > 170 - 70 && y < 230 + 70; }));
-        check(`${terrain.id}: the texture is held to the allowance`, buildTerrain(terrain.id, path, { width: 80, seed: 3, maxTexture: 10 }).length <= 3 + 10);
-        check(`${terrain.id}: no texture when none is allowed`, buildTerrain(terrain.id, path, { width: 80, maxTexture: 0 }).length === 3);
+        check(`${terrain.id}: the texture stays on the path`, prims.filter(p => p.pts !== path).every(p => { const x = p.pts[0]; const y = p.pts[1]; return x > 100 - 60 && x < 520 + 60 && y > 170 - 70 && y < 230 + 70; }));
+        check(`${terrain.id}: the texture is held to the allowance`, buildTerrain(terrain.id, path, { width: 80, seed: 3, maxTexture: 10 }).length <= 3 + ends + 10);
+        check(`${terrain.id}: no texture when none is allowed`, buildTerrain(terrain.id, path, { width: 80, maxTexture: 0 }).length === 3 + ends);
         const svg = terrainSvg(terrain.id);
         check(`${terrain.id}: its picture is an SVG with a ribbon, no undefined or NaN`, svg.startsWith('<svg') && svg.includes('<path') && !/undefined|NaN/.test(svg));
     }
     check('another seed gives another texture', JSON.stringify(buildTerrain('gravel', path, { width: 80, seed: 1 })) !== JSON.stringify(buildTerrain('gravel', path, { width: 80, seed: 2 })));
     check('an unknown kind, no path or no width builds nothing', buildTerrain('lava', path, { width: 80 }).length === 0 && buildTerrain('dirt', [], { width: 80 }).length === 0 && buildTerrain('dirt', path, { width: 0 }).length === 0);
     const docs = stampDrawingData(buildTerrain('cobble', path, { width: 80, seed: 3, maxTexture: MAX_TEXTURE.scene }), terrainPalette('cobble'), { x: 0, y: 0, size: 1, solid: 1, none: 0 });
-    check('written to the scene, a path is lines stroked at its width and the texture over them', docs.length > 3 && docs[1].fillType === 0 && docs[1].strokeWidth === 80 && docs[3].fillType === 1);
+    check('written to the scene, a path is lines stroked at its width and the texture over them', docs.length > 3 && docs.some(d => d.fillType === 0 && d.strokeWidth === 80) && docs.some(d => d.fillType === 1));
     check('and every Drawing has something to show and a whole-number size', docs.every(d => ((d.fillType !== 0 && d.fillAlpha > 0) || (d.strokeWidth > 0 && d.strokeAlpha > 0)) && Number.isInteger(d.shape.width) && Number.isInteger(d.shape.height)));
     check('the scene allowance is smaller than the canvas one', MAX_TEXTURE.scene < MAX_TEXTURE.canvas);
 }

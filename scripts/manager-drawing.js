@@ -4996,7 +4996,8 @@ class DrawingTool {
      * it again if it is open. Not offered to a player when the GM has turned player drawing off.
      */
     addDrawingTool(controls) {
-        const group = controls?.drawings ?? controls?.tokens;
+        // The drawing tools are among the ones the user has; a player without them is given the token tools.
+        const group = controls?.drawings?.visible === false ? controls?.tokens : (controls?.drawings ?? controls?.tokens);
         if (!group) return;
         const allowed = game.user.isGM || globalThis.BlacksmithUtils?.getSettingSafely?.(MODULE.ID, 'drawing.enablePlayerDrawing', true) !== false;
         if (!allowed) return;
@@ -5010,7 +5011,10 @@ class DrawingTool {
             onChange: () => {
                 const open = this.window;
                 if (open) void open.close();
-                else void this.openWindow();
+                else this.openWindow().catch(error => {
+                    console.error(`${MODULE.NAME}: could not open the drawing tools`, error);
+                    notify('Could not open the drawing tools', { subtitle: String(error?.message ?? error), type: 'warn', icon: 'fa-solid fa-pen-ruler', stackKey: `${MODULE.ID}-drawing-window` });
+                });
             }
         };
         if (Array.isArray(group.tools)) group.tools.push(tool);

@@ -142,8 +142,11 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
             await existing.render();
             return existing;
         }
-        // Beside the map, not over the middle of it: the user is about to draw there.
-        const left = Math.max(16, window.innerWidth - 400 - 24);
+        // Beside the map, not over the middle of it: the user is about to draw there. Left of the sidebar (the
+        // chat), not over it, when it is open.
+        const sidebar = document.getElementById('sidebar')?.getBoundingClientRect();
+        const edge = sidebar && sidebar.width > 0 && sidebar.left > 0 && sidebar.left < window.innerWidth ? sidebar.left : window.innerWidth;
+        const left = Math.max(16, edge - 400 - 24);
         const window_ = new DrawingToolsWindow(manager, { position: { left, top: 90 } });
         if (tab) window_.tab = tab;
         await window_.render({ force: true });
