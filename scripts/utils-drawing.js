@@ -427,7 +427,7 @@ export const wallMaterialById = id => MATERIAL_BY_ID.get(id) ?? null;
 export const wallLayer = id => MATERIAL_BY_ID.get(id)?.layer ?? 'eye';
 
 /** The most pieces of decoration one wall stroke may have: a long stroke spaces them out instead. */
-export const MAX_WALL_DECOR = 240;
+export const MAX_WALL_DECOR = 80;
 
 /** A seeded random number generator, for the little differences between one brick and the next. */
 function seeded(seed = 1) {
