@@ -745,7 +745,8 @@ const EXCEPTIONS = {
     pine: { blocks: 0.1 },
     shrub: { layer: 'waist', blocks: 0.3 },
     boulders: { paint: 'single', layer: 'waist', blocks: 0.3 },
-    pond: { paint: 'scatter', size: 'scale', layer: 'ground' },
+    // Water is a thing on the ground, so it is over every patch and path, which are terrain.
+    pond: { paint: 'scatter', size: 'scale', layer: 'ankle' },
     stump: { layer: 'waist', blocks: 0.3 },
     log: { layer: 'waist' },
     cabinet: { layer: 'eye' },

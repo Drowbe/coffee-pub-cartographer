@@ -37,8 +37,8 @@ export const TERRAINS = [
         palette: { dark: '#8a7a55', base: '#4a86c4', light: '#a6d4f2', accent: '#3a6ea8', accent2: '#cfe9fb' } }
 ];
 
-// A path is on the ground, under what grows and stands on it; a boardwalk lies over what it crosses, as a stream.
-for (const terrain of TERRAINS) terrain.layer = terrain.id === 'boardwalk' ? 'ankle' : 'ground';
+// A path is over the ground patches and under everything that grows or stands on it; a boardwalk lies over what it crosses, as a stream.
+for (const terrain of TERRAINS) terrain.layer = terrain.id === 'boardwalk' ? 'ankle' : 'path';
 
 const BY_ID = new Map(TERRAINS.map(terrain => [terrain.id, terrain]));
 export const terrainById = id => BY_ID.get(id) ?? null;

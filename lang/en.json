@@ -111,6 +111,7 @@
 	"drawingTools.layerWaist": "Waist",
 	"drawingTools.layerAnkle": "Ankle",
 	"drawingTools.layerGround": "Ground",
+	"drawingTools.layerPath": "Path",
 	"drawingTools.paintMany": "drag to scatter",
 	"drawingTools.paintOne": "one per click",
 	"drawingTools.sizeScales": "scales",

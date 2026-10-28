@@ -110,10 +110,11 @@ Hover a stamp to see which it is, and the layer it goes on.
 ### Layers
 
 What you draw is put on a **layer** by what it is, not by when you drew it, so the dirt is always
-under the cabbage that grows in it, whichever you drew first. From the bottom: **Ground** (dirt, paths,
-ponds, patches), **Ankle** (crops, grass, flowers, rocks, a campfire, pumpkins, a boardwalk), **Waist**
+under the cabbage that grows in it, whichever you drew first. Terrain is always under what stands on it.
+From the bottom: **Ground** (dirt, gravel, sand, mud and snow patches -- the very bottom), **Path** (roads,
+streams), **Ankle** (ponds, crops, grass, flowers, rocks, a campfire, pumpkins, a boardwalk), **Waist**
 (furniture, crates, shrubs, a fence, boulders), **Eye** (walls, doors, windows, a cabinet), **Above**
-(trees) and **Sky**. On one layer, what you put down later is on top. A door or a window is over every
+(trees) and **Sky**. Ponds you paint with one drag run into one pond. On one layer, what you put down later is on top. A door or a window is over every
 wall.
 
 The layers keep their order for what you **keep on the scene**: it is written as Drawings with

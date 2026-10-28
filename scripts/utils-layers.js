@@ -14,11 +14,12 @@
  */
 export const LAYERS = [
     { id: 'ground', band: 0, icon: 'fa-solid fa-layer-group', labelKey: 'layerGround', elevation: 0 },
-    { id: 'ankle', band: 1, icon: 'fa-solid fa-seedling', labelKey: 'layerAnkle', elevation: 0 },
-    { id: 'waist', band: 2, icon: 'fa-solid fa-chair', labelKey: 'layerWaist', elevation: 0 },
-    { id: 'eye', band: 3, icon: 'fa-solid fa-eye', labelKey: 'layerEye', elevation: 0 },
-    { id: 'above', band: 4, icon: 'fa-solid fa-tree', labelKey: 'layerAbove', elevation: 20 },
-    { id: 'sky', band: 5, icon: 'fa-solid fa-cloud', labelKey: 'layerSky', elevation: 200 }
+    { id: 'path', band: 1, icon: 'fa-solid fa-road', labelKey: 'layerPath', elevation: 0 },
+    { id: 'ankle', band: 2, icon: 'fa-solid fa-seedling', labelKey: 'layerAnkle', elevation: 0 },
+    { id: 'waist', band: 3, icon: 'fa-solid fa-chair', labelKey: 'layerWaist', elevation: 0 },
+    { id: 'eye', band: 4, icon: 'fa-solid fa-eye', labelKey: 'layerEye', elevation: 0 },
+    { id: 'above', band: 5, icon: 'fa-solid fa-tree', labelKey: 'layerAbove', elevation: 20 },
+    { id: 'sky', band: 6, icon: 'fa-solid fa-cloud', labelKey: 'layerSky', elevation: 200 }
 ];
 const BY_ID = new Map(LAYERS.map(layer => [layer.id, layer]));
 export const layerById = id => BY_ID.get(id) ?? null;

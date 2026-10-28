@@ -28,11 +28,11 @@ const lowest = docs => Math.min(...docs.map(d => d.sort));
 const highest = docs => Math.max(...docs.map(d => d.sort));
 
 console.log('the layers');
-check('there are six, from the ground up to the sky', LAYERS.map(l => l.id).join() === 'ground,ankle,waist,eye,above,sky');
+check('there are seven, from the ground up to the sky, the paths over the ground and under all that stands on them', LAYERS.map(l => l.id).join() === 'ground,path,ankle,waist,eye,above,sky');
 check('each is a band after the one before it', LAYERS.every((l, i) => l.band === i));
 check('each has an icon and a label to show', LAYERS.every(l => l.icon && l.labelKey));
 check('only Above and Sky are raised to be over the tokens, and Sky over Above', LAYERS.filter(l => l.elevation > 0).map(l => l.id).join() === 'above,sky' && layerById('sky').elevation > layerById('above').elevation);
-check('a layer is found by its id, and an unknown one is not', layerById('eye').band === 3 && layerById('nope') === null);
+check('a layer is found by its id, and an unknown one is not', layerById('eye').band === 4 && layerById('nope') === null);
 check('a thing with no layer is at waist height', DEFAULT_LAYER === 'waist' && layerSort('nope', 5) === layerSort('waist', 5));
 
 console.log('\nthe order');
@@ -89,12 +89,13 @@ check('the markers are one to a click and not turned', STAMPS.filter(s => s.lega
 check('an unknown stamp is none of these', !isScatterStamp('nope') && !isScaledStamp('nope') && stampTurn('nope') === 'none' && stampLayer('nope') === 'waist');
 
 console.log('\nthe layer of each stamp');
-check('ground patches and ponds are on the ground', real.filter(s => s.category === 'ground').every(s => stampLayer(s.id) === 'ground') && stampLayer('pond') === 'ground');
+check('ground patches are on the ground, the very bottom', real.filter(s => s.category === 'ground').every(s => stampLayer(s.id) === 'ground') && layerById('ground').band === 0);
+check('a pond is a thing on the ground, over every patch and path, so dirt never covers it', layerById(stampLayer('pond')).band > layerById('path').band && layerById(stampLayer('pond')).band > layerById(stampLayer('patch-dirt')).band);
 check('dirt is under what grows in it: crops and grass are over the ground', ['crop-corn', 'crop-cabbage', 'grass', 'flowers'].every(id => layerById(stampLayer(id)).band > layerById(stampLayer('patch-dirt')).band));
 check('furniture is over the crops, and the crops are under it', layerById(stampLayer('table')).band > layerById(stampLayer('crop-cabbage')).band);
 check('a tree is over the furniture under it', layerById(stampLayer('tree')).band > layerById(stampLayer('table')).band && layerById(stampLayer('pine')).band > layerById(stampLayer('bed')).band);
 check('a shrub is waist high, and a cabinet taller than a table', stampLayer('shrub') === 'waist' && layerById(stampLayer('cabinet')).band > layerById(stampLayer('table')).band);
-check('a path is on the ground, a boardwalk over what it crosses', TERRAINS.filter(t => t.id !== 'boardwalk').every(t => terrainById(t.id).layer === 'ground') && terrainById('boardwalk').layer === 'ankle' && layerById(terrainById('boardwalk').layer).band > layerById(terrainById('stream').layer).band);
+check('a road is over the ground and under what stands on it, a boardwalk over what it crosses', TERRAINS.filter(t => t.id !== 'boardwalk').every(t => terrainById(t.id).layer === 'path') && layerById('path').band > layerById(stampLayer('patch-dirt')).band && layerById('path').band < layerById(stampLayer('crop-corn')).band && terrainById('boardwalk').layer === 'ankle' && layerById(terrainById('boardwalk').layer).band > layerById(terrainById('stream').layer).band);
 check('a wall is at eye level, and a fence is waist high', WALL_MATERIALS.filter(m => m.id !== 'fence').every(m => wallLayer(m.id) === 'eye') && wallLayer('fence') === 'waist' && wallLayer('nope') === 'eye');
 check('a wall is over a table beside it', layerById(wallLayer('stone')).band > layerById(stampLayer('table')).band);
 

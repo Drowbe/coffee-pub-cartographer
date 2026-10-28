@@ -4275,7 +4275,7 @@ class DrawingTool {
         // A crate, a bed, a stove: one to a click. Only what is painted -- grass, trees, a pond -- runs on while dragging.
         if (!isProceduralStamp(this.state.stampStyle) || !isScatterStamp(this.state.stampStyle)) return;
         const point = this.getWorldCoordinates(event);
-        if (point) this._scatter = { x: point.x, y: point.y, group: foundry.utils.randomID(), count: 0, docs: [], walls: [], live: [] };
+        if (point) this._scatter = { x: point.x, y: point.y, kind: this.state.stampStyle, group: foundry.utils.randomID(), count: 0, docs: [], walls: [], live: [] };
     }
 
     /** The stroke is over: what is to be written to the scene is written, as one thing. */
@@ -4289,7 +4289,9 @@ class DrawingTool {
                 graphics.destroy?.();
             }
         };
-        if (stroke.docs.length) void this._keepDrawings(stroke.docs, 'stamp', stroke.walls).finally(clear);
+        // The whole stroke is put on its layer as one: the first piece of every stamp in it (a pond's shore) is under the
+        // second of every stamp (its water), so ponds painted into one run into one pond, as the ground patches do.
+        if (stroke.docs.length) void this._keepDrawings(this._layered(stroke.docs, stampLayer(stroke.kind)), 'stamp', stroke.walls).finally(clear);
         else clear();
     }
 
@@ -4443,12 +4445,13 @@ class DrawingTool {
         if (!scene) return;
         const group = foundry.utils.randomID();
         // On the layer its kind is on, so a cabbage is over the dirt and under the tree.
-        const docs = this._layered(stampDrawingData(prims, palette, {
+        const raw = stampDrawingData(prims, palette, {
             x, y, size,
             flags: { [MODULE.ID]: { stamp: { id: group, kind } } },
             solid: CONST.DRAWING_FILL_TYPES.SOLID,
             none: CONST.DRAWING_FILL_TYPES.NONE
-        }), stampLayer(kind));
+        });
+        const docs = stroke ? raw : this._layered(raw, stampLayer(kind));
         const walls = this._blockers(kind, x, y, size, { [MODULE.ID]: { stamp: { id: group, kind } } });
         // In a stroke, they wait for its end and are written together.
         if (stroke) {

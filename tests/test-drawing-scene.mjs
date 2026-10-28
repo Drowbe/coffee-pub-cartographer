@@ -1347,7 +1347,7 @@ console.log('\nlayers: what is kept is put on its layer');
     path.state.stamp.keep = true;
     path.createTerrainPath([[0, 0], [300, 0], [600, 40]]);
     await new Promise(resolve => setTimeout(resolve, 20));
-    check('a path is on the ground', scene.creates.filter(([type]) => type === 'Drawing').at(-1)[1].every(d => d.flags[MODULE.ID].layer === 'ground'));
+    check('a path is on the path layer, over the ground', scene.creates.filter(([type]) => type === 'Drawing').at(-1)[1].every(d => d.flags[MODULE.ID].layer === 'path'));
 }
 
 console.log('\nterrain walls round what is in the way');
@@ -1388,6 +1388,49 @@ console.log('\nterrain walls round what is in the way');
         return scene.creates.filter(([type]) => type === 'Wall').flatMap(([, w]) => w);
     })();
     check('a painted stroke of trees is walled together, a ring each', painted.length === 12 && new Set(painted.map(w => w.flags[MODULE.ID].stamp.id)).size === 2);
+}
+
+console.log('\nlayers: terrain is under stamps, and a painted pond is one pond');
+{
+    const keepAll = async steps => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.stamp.keep = true;
+        for (const step of steps) step(tool);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        return scene.creates.filter(([type]) => type === 'Drawing').map(([, docs]) => docs);
+    };
+    // The pond first, the dirt after: the dirt must still be under it.
+    const [pond, dirt] = await keepAll([t => t._placeStamp('pond', 300, 300), t => t._placeStamp('patch-dirt', 300, 300)]);
+    check('dirt drawn after a pond is still under it', Math.max(...dirt.map(d => d.sort)) < Math.min(...pond.map(d => d.sort)));
+    const [road, patch] = await (async () => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.stamp.keep = true;
+        tool._placeStamp('patch-dirt', 300, 300);
+        tool.createTerrainPath([[0, 0], [300, 0], [600, 40]]);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const batches = scene.creates.filter(([type]) => type === 'Drawing').map(([, docs]) => docs);
+        return [batches[1], batches[0]];
+    })();
+    check('a road is over the ground patch it crosses, drawn after it or before', Math.min(...road.map(d => d.sort)) > Math.max(...patch.map(d => d.sort)));
+    const painted = await (async () => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.stamp.keep = true;
+        tool.state.stampStyle = 'pond';
+        tool._beginScatter({ x: 0, y: 0 });
+        tool._placeStamp('pond', 300, 300);
+        tool._placeStamp('pond', 400, 300);
+        tool._endScatter();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        return scene.creates.filter(([type]) => type === 'Drawing').flatMap(([, docs]) => docs);
+    })();
+    check('painted ponds are written as one block on one layer', new Set(painted.map(d => d.flags[MODULE.ID].layer)).size === 1 && new Set(painted.map(d => d.flags[MODULE.ID].stamp.id)).size === 2);
+    const lowest = id => painted.filter(d => d.flags[MODULE.ID].stamp.id === id);
+    const ids = [...new Set(painted.map(d => d.flags[MODULE.ID].stamp.id))];
+    const [a, b] = ids.map(lowest);
+    check('every shore of the stroke is under every water of it, so the ponds run into one', a[0].sort < b[1].sort && b[0].sort < a[1].sort);
 }
 
 console.log('\nlayers: what is temporary is drawn in the same order');
