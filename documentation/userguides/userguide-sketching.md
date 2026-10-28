@@ -136,6 +136,10 @@ The options under the stamps:
 - **Random turn** and **Vary the size** -- give each tree, plant and rock a random turn, flip and
   size so a row of trees does not look stamped. They do not touch furniture or crates. The faint
   preview that follows the pointer shows the stamp exactly as it will land.
+- **Terrain walls** (the GM's) -- rings a **kept** tree, pine, shrub, boulder or stump with six terrain walls round it, so
+  it stops tokens and cuts short what is seen through it, as Foundry's own terrain wall does. They are put down, undone and
+  erased with the stamp. Nothing else is walled; for a fence or a hedge, draw it on the **Walls** tab, where a fence is
+  already a wall that stops movement and a hedge a terrain wall.
 - **Snap to grid** -- puts furniture, crates and the like with their edges on the grid lines: a
   bed that is one square by two covers exactly one by two squares, and turned a quarter it covers two
   by one. Trees and other scaled stamps are not snapped. It does nothing on a gridless or hex scene.

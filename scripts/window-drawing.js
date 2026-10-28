@@ -413,7 +413,8 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
                 this._toggle('rotate', localize('rotate'), state.stamp.rotate, { hint: localize('rotateHint') }),
                 this._toggle('jitter', localize('jitter'), state.stamp.jitter, { hint: localize('jitterHint') }),
                 this._toggle('snap', localize('snap'), state.stamp.snap, { hint: localize('snapHint') }),
-                this._toggle('keep', localize('keep'), state.stamp.keep && canKeep, { hint: localize(canKeep ? 'keepHint' : 'keepDenied'), disabled: !canKeep }))
+                this._toggle('keep', localize('keep'), state.stamp.keep && canKeep, { hint: localize(canKeep ? 'keepHint' : 'keepDenied'), disabled: !canKeep }),
+                ...(this.manager.canMakeWalls() ? [this._toggle('walls', localize('stampWalls'), state.stamp.walls, { hint: localize('stampWallsHint') })] : []))
             + this._slider('spacing', localize('spacing'), localize('spacingHint'), { min: 0.5, max: 3, step: 0.25, value: state.stamp.spacing })
             + this._hint(localize('stampHint'));
         let sections = this._section('fa-solid fa-sliders', localize('options'), options);
@@ -470,7 +471,7 @@ export class DrawingToolsWindow extends BlacksmithToolWindowBaseV2 {
         const name = target?.name;
         if (!name || target.dataset?.action) return;
         const manager = this.manager;
-        if (['natural', 'rotate', 'jitter', 'snap', 'keep'].includes(name)) manager.setStampOption(name, target.checked);
+        if (['natural', 'rotate', 'jitter', 'snap', 'walls', 'keep'].includes(name)) manager.setStampOption(name, target.checked);
         else if (name === 'spacing') manager.setStampOption('spacing', target.value);
         else if (name === 'wallSnap') manager.setWallOption('snap', target.checked);
         else if (name === 'timedErase') manager.setTimedErase(target.checked);

@@ -231,6 +231,16 @@ export const WALL_KINDS = [
 const KIND_BY_ID = new Map(WALL_KINDS.map(kind => [kind.id, kind]));
 export const wallKindById = id => KIND_BY_ID.get(id) ?? null;
 
+/**
+ * The walls of a ring round a point, for a thing that stands in the way -- a tree's trunk, a boulder. Each is
+ * [x1, y1, x2, y2], whole numbers, going round.
+ */
+export function ringWalls(x, y, radius, sides = 6) {
+    if (!(radius > 0) || sides < 3) return [];
+    const at = i => [Math.round(x + Math.cos(-Math.PI / 2 + (i / sides) * Math.PI * 2) * radius), Math.round(y + Math.sin(-Math.PI / 2 + (i / sides) * Math.PI * 2) * radius)];
+    return Array.from({ length: sides }, (_, i) => [...at(i), ...at((i + 1) % sides)]);
+}
+
 /** The kinds that are doors, and take a state. */
 export const isDoorKind = id => id === 'door' || id === 'secret';
 

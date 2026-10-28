@@ -724,6 +724,8 @@ export const STAMPS = [
  *   - `turn`: 'free' -- any way round, and flipped, if the option is on -- 'steps' -- stands as it was
  *     put, turned a quarter at a time by the Turn control -- or 'none'.
  *   - `layer`: where it is drawn (utils-layers.js).
+ *   - `blocks`: a thing that gets in the way -- a tree's trunk, a shrub, a boulder -- is the radius of the ring of
+ *     terrain walls that can be put round it, as a part of the stamp's size. Most things have none.
  */
 const RULES = {
     trees: { paint: 'scatter', size: 'scale', turn: 'free', layer: 'above' },
@@ -739,10 +741,12 @@ const RULES = {
 };
 // What differs from the rest of its kind.
 const EXCEPTIONS = {
-    shrub: { layer: 'waist' },
-    boulders: { paint: 'single', layer: 'waist' },
+    tree: { blocks: 0.12 },
+    pine: { blocks: 0.1 },
+    shrub: { layer: 'waist', blocks: 0.3 },
+    boulders: { paint: 'single', layer: 'waist', blocks: 0.3 },
     pond: { paint: 'scatter', size: 'scale', layer: 'ground' },
-    stump: { layer: 'waist' },
+    stump: { layer: 'waist', blocks: 0.3 },
     log: { layer: 'waist' },
     cabinet: { layer: 'eye' },
     pumpkins: { turn: 'free', layer: 'ankle' },
@@ -758,6 +762,8 @@ export const isScatterStamp = id => BY_ID.get(id)?.paint === 'scatter';
 export const isScaledStamp = id => BY_ID.get(id)?.size === 'scale';
 /** How this stamp is turned: 'free', 'steps' or 'none'. */
 export const stampTurn = id => BY_ID.get(id)?.turn ?? 'none';
+/** How far round this stamp the terrain walls go, as a part of its size, or 0 for a thing that is not in the way. */
+export const stampBlocks = id => BY_ID.get(id)?.blocks ?? 0;
 /** The layer this stamp is drawn on. */
 export const stampLayer = id => BY_ID.get(id)?.layer ?? 'waist';
 

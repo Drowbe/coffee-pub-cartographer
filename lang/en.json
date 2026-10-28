@@ -95,6 +95,8 @@
 	"drawingTools.jitterHint": "Make each tree, plant and rock a little bigger or smaller. Furniture and crates stay their own size.",
 	"drawingTools.snap": "Snap to grid",
 	"drawingTools.snapHint": "Put furniture, crates and the like with their edges on the grid lines.",
+	"drawingTools.stampWalls": "Terrain walls",
+	"drawingTools.stampWallsHint": "Ring trees, shrubs, boulders and stumps you keep on the scene with terrain walls: they stop movement and cut short what is seen through them. GM only. Walls for a fence or a hedge are on the Walls tab.",
 	"drawingTools.sizeHint": "Size changes trees, plants, rocks and ponds. Furniture, crates and the like are always their own size.",
 	"drawingTools.turn": "Turn",
 	"drawingTools.turnHint": "Which way furniture, crates and the like face: they stay as placed and are only turned here.",

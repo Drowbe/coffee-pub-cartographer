@@ -8,10 +8,10 @@
 import fs from 'node:fs';
 import {
     stampSquares, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor,
-    isScatterStamp, isScaledStamp, stampTurn, stampLayer, stampFootprint
+    isScatterStamp, isScaledStamp, stampTurn, stampLayer, stampFootprint, stampBlocks
 } from '../scripts/utils-stamps.js';
 import { layerDocs, layerById, drawingLayer, LAYERS } from '../scripts/utils-layers.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, wallLayer, OPENING_LIFT, DOOR_LEAF, WINDOW_GLASS } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, wallLayer, ringWalls, OPENING_LIFT, DOOR_LEAF, WINDOW_GLASS } from '../scripts/utils-drawing.js';
 import { SKIP_JOIN } from '../scripts/utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
@@ -1348,6 +1348,46 @@ console.log('\nlayers: what is kept is put on its layer');
     path.createTerrainPath([[0, 0], [300, 0], [600, 40]]);
     await new Promise(resolve => setTimeout(resolve, 20));
     check('a path is on the ground', scene.creates.filter(([type]) => type === 'Drawing').at(-1)[1].every(d => d.flags[MODULE.ID].layer === 'ground'));
+}
+
+console.log('\nterrain walls round what is in the way');
+{
+    const placed = async (kind, { walls = true, gm = true, keep = true } = {}) => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.stamp.keep = keep;
+        tool.state.stamp.walls = walls;
+        isGM = gm;
+        tool._placeStamp(kind, 500, 500);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        isGM = true;
+        return { drawn: scene.creates.filter(([type]) => type === 'Drawing'), walled: scene.creates.filter(([type]) => type === 'Wall'), tool };
+    };
+    check('a tree, a boulder and a stump are in the way, a crate is not', ['tree', 'pine', 'shrub', 'boulders', 'stump'].every(k => stampBlocks(k) > 0) && ['crate', 'bed', 'grass', 'rock', 'campfire'].every(k => stampBlocks(k) === 0));
+    const ring = ringWalls(500, 500, 40);
+    check('a ring is six walls going round, each ending where the next begins', ring.length === 6 && ring.every((w, i) => w[2] === ring[(i + 1) % 6][0] && w[3] === ring[(i + 1) % 6][1]) && ring.flat().every(Number.isInteger));
+    check('and it is nothing for no radius', ringWalls(0, 0, 0).length === 0);
+    const tree = await placed('tree');
+    const walls = tree.walled[0]?.[1] ?? [];
+    check('with the switch on, a kept tree gets a ring of terrain walls', walls.length === 6);
+    check('they are terrain walls: movement stopped, sight, light and sound cut short', walls.every(w => w.move === CONST.EDGE_SENSE_TYPES.NORMAL && [w.sight, w.light, w.sound].every(v => v === CONST.EDGE_SENSE_TYPES.LIMITED)));
+    check('they are round the tree, in its group, so erasing it erases them', walls.every(w => Math.hypot(w.c[0] - 500, w.c[1] - 500) < 60) && walls[0].flags[MODULE.ID].stamp.id === tree.drawn[0][1][0].flags[MODULE.ID].stamp.id);
+    check('undo takes the walls back with the tree', await (async () => { await tree.tool._undoKept(); return scene.walls.size === 0 && scene.drawings.size === 0; })());
+    check('with the switch off, there are none', (await placed('tree', { walls: false })).walled.length === 0);
+    check('a player does not get them: walls are the GM\'s', (await placed('tree', { gm: false })).walled.length === 0);
+    check('a tree that is not kept is only a drawing, with no walls', (await placed('tree', { keep: false })).walled.length === 0);
+    check('a crate gets none, whatever is switched on', (await placed('crate')).walled.length === 0);
+    const painted = await (async () => {
+        scene = makeScene();
+        const tool = make();
+        tool.state.stamp.keep = true; tool.state.stamp.walls = true; tool.state.stampStyle = 'tree';
+        tool._beginScatter({ x: 0, y: 0 });
+        tool._placeStamp('tree', 100, 100); tool._placeStamp('tree', 400, 100);
+        tool._endScatter();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        return scene.creates.filter(([type]) => type === 'Wall').flatMap(([, w]) => w);
+    })();
+    check('a painted stroke of trees is walled together, a ring each', painted.length === 12 && new Set(painted.map(w => w.flags[MODULE.ID].stamp.id)).size === 2);
 }
 
 console.log('\nlayers: what is temporary is drawn in the same order');

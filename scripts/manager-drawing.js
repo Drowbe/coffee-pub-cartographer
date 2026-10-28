@@ -5,8 +5,8 @@
 import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
-import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor, stampSquares, isScatterStamp, isScaledStamp, stampTurn, stampLayer, stampFootprint } from './utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, wallLayer, OPENING_LIFT } from './utils-drawing.js';
+import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor, stampSquares, isScatterStamp, isScaledStamp, stampTurn, stampLayer, stampFootprint, stampBlocks } from './utils-stamps.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, wallLayer, OPENING_LIFT, ringWalls } from './utils-drawing.js';
 import { layerDocs, layerById, drawingLayer } from './utils-layers.js';
 import { SKIP_JOIN } from './utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
@@ -61,6 +61,7 @@ class DrawingTool {
                 jitter: true, // vary the size of each stamp that scales a little
                 turn: 0, // a stamp that is turned a quarter at a time (furniture, crates): how many quarters it is turned
                 snap: true, // a stamp of a fixed size is put on the grid, edges on the lines
+                walls: false, // a kept stamp that is in the way (a tree, a boulder) is ringed with terrain walls (the GM's)
                 spacing: 1, // how far apart dragging scatters stamps, as a multiple of a stamp's size
                 terrain: 'dirt', // terrain mode: the kind of path laid (utils-terrain.js)
                 pathWidth: 1 // terrain mode: how wide a path is, in grid squares
@@ -4274,7 +4275,7 @@ class DrawingTool {
         // A crate, a bed, a stove: one to a click. Only what is painted -- grass, trees, a pond -- runs on while dragging.
         if (!isProceduralStamp(this.state.stampStyle) || !isScatterStamp(this.state.stampStyle)) return;
         const point = this.getWorldCoordinates(event);
-        if (point) this._scatter = { x: point.x, y: point.y, group: foundry.utils.randomID(), count: 0, docs: [], live: [] };
+        if (point) this._scatter = { x: point.x, y: point.y, group: foundry.utils.randomID(), count: 0, docs: [], walls: [], live: [] };
     }
 
     /** The stroke is over: what is to be written to the scene is written, as one thing. */
@@ -4288,7 +4289,7 @@ class DrawingTool {
                 graphics.destroy?.();
             }
         };
-        if (stroke.docs.length) void this._keepDrawings(stroke.docs, 'stamp').finally(clear);
+        if (stroke.docs.length) void this._keepDrawings(stroke.docs, 'stamp', stroke.walls).finally(clear);
         else clear();
     }
 
@@ -4448,12 +4449,31 @@ class DrawingTool {
             solid: CONST.DRAWING_FILL_TYPES.SOLID,
             none: CONST.DRAWING_FILL_TYPES.NONE
         }), stampLayer(kind));
+        const walls = this._blockers(kind, x, y, size, { [MODULE.ID]: { stamp: { id: group, kind } } });
         // In a stroke, they wait for its end and are written together.
         if (stroke) {
             stroke.docs.push(...docs);
+            stroke.walls.push(...walls);
             return;
         }
-        await this._keepDrawings(docs, 'stamp');
+        await this._keepDrawings(docs, 'stamp', walls);
+    }
+
+    /**
+     * The terrain walls round a thing that is in the way, when asked for: movement stopped, sight and light
+     * cut short, as Foundry's own terrain wall. Walls are the GM's, as with the walls tab.
+     */
+    _blockers(kind, x, y, size, flags) {
+        const reach = stampBlocks(kind) * size;
+        if (!this.state.stamp.walls || !this.canMakeWalls() || !(reach > 0)) return [];
+        const scene = canvas.scene;
+        const levels = scene?.levels?.size > 1 && canvas.level?.id ? { levels: [canvas.level.id] } : {};
+        const made = wallKindData('terrain', {
+            sense: CONST.EDGE_SENSE_TYPES ?? CONST.WALL_SENSE_TYPES,
+            doorTypes: CONST.WALL_DOOR_TYPES,
+            doorStates: CONST.WALL_DOOR_STATES
+        });
+        return ringWalls(x, y, reach).map(c => ({ c, ...made, flags, ...levels }));
     }
 
     /**
@@ -4478,12 +4498,13 @@ class DrawingTool {
     }
 
     /** Write Drawings to the scene, as one thing to take back. `what` is 'stamp' or 'path'. */
-    async _keepDrawings(docs, what) {
+    async _keepDrawings(docs, what, walls = []) {
         const scene = canvas.scene;
         if (!scene) return;
         try {
             const made = await scene.createEmbeddedDocuments('Drawing', docs);
-            this._pushKept({ kind: what, drawingIds: (made ?? []).map(doc => doc.id) });
+            const ringed = walls.length ? await scene.createEmbeddedDocuments('Wall', walls) : [];
+            this._pushKept({ kind: what, drawingIds: (made ?? []).map(doc => doc.id), wallIds: (ringed ?? []).map(doc => doc.id) });
         } catch (error) {
             console.error(`${MODULE.NAME}: could not keep the ${what} on the scene`, error);
             notify(`Could not keep the ${what}`, {
@@ -5182,7 +5203,7 @@ class DrawingTool {
     }
 
     /**
-     * Change one of the stamp options: natural, keep, rotate, jitter, spacing.
+     * Change one of the stamp options: natural, keep, rotate, jitter, snap, walls, spacing.
      * @param {string} name
      * @param {boolean|number} value
      */
