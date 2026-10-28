@@ -6,7 +6,7 @@ import { MODULE } from './const.js';
 import { socketManager } from './manager-sockets.js';
 import { notify } from './utils-toast.js';
 import { STAMPS, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor, stampSquares } from './utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness } from './utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, OPENING_LIFT } from './utils-drawing.js';
 import { SKIP_JOIN } from './utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
 
@@ -4657,8 +4657,9 @@ class DrawingTool {
         // The line over the walls: dark under and coloured over, with round ends and corners, and what a material
         // adds. A door has its leaf, a secret door its dot, a window its pane: what the button shows.
         const drawn = [
-            ...wallLineDrawings({ path, material, color, casing: WALL_CASING, weight, grid, seed: Math.floor(Math.random() * 2147483646) + 1, flags, solid, none }),
-            ...(opening ? openingMarks(kind, segments[0], { weight, color, casing: WALL_CASING, flags, solid, none, sort: 2 }) : [])
+            ...wallLineDrawings({ path, material, color, casing: WALL_CASING, weight, grid, seed: Math.floor(Math.random() * 2147483646) + 1, flags, solid, none, lift: opening ? OPENING_LIFT : 0 }),
+            // A door or a window is drawn above every wall, so no wall's pattern runs over it.
+            ...(opening ? openingMarks(kind, segments[0], { weight, color, casing: WALL_CASING, flags, solid, none, sort: OPENING_LIFT + 2 }) : [])
         ];
         const options = cut ? { [SKIP_JOIN]: true } : {};
         // The wall as it was, taken before anything is written: cutting it changes it.

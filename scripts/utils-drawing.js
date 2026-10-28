@@ -349,10 +349,17 @@ export function fitOpeningToWall(walls, segment, { grid, reach = 0.5, minSquares
     return { wall: best.index, segment: [point(lo), point(hi)], pieces };
 }
 
+/** How far above every wall's own drawings an opening is drawn, so a door or a window is never under a wall's pattern. */
+export const OPENING_LIFT = 10;
+
+/** The colour of a door's leaf, and of the glass in a window. */
+export const DOOR_LEAF = '#efe6c8';
+export const WINDOW_GLASS = '#cfe8fb';
+
 /**
- * The marks that say what an opening is, drawn over its line, as the picture on its button does: a door
- * leaf across a door, with a dot on a secret one, and a pane down the middle of a window. Nothing for
- * an opening too short to hold them, or a kind that has none.
+ * The marks that say what an opening is, drawn over its line as the picture on its button does, as thick as
+ * the wall: a pale leaf across a door with a handle on it, and a dot on a secret one; a pane of glass in a
+ * window with a shine down it. Nothing for an opening too short to hold them, or a kind that has none.
  *
  * @param {string} kind
  * @param {number[][]} segment  [[x, y], [x, y]].
@@ -366,24 +373,31 @@ export function openingMarks(kind, segment, { weight, color, casing, flags = {},
     const uy = (by - ay) / length;
     const cx = (ax + bx) / 2;
     const cy = (ay + by) / 2;
-    if (kind === 'window') {
-        const pane = strokeDrawingData([ax, ay, bx, by], { color: '#ffffff', alpha: 0.85, width: Math.max(2, weight * 0.35), flags, none, sort });
-        return [pane];
-    }
-    // The leaf of a door: a panel across the middle, wider than the wall, in the door's colour.
-    const half = length * 0.3;
-    const thick = Math.max(weight * 0.9, 6);
     const corner = (along, across) => [cx + ux * along - uy * across, cy + uy * along + ux * across];
-    const ring = [...corner(-half, -thick), ...corner(half, -thick), ...corner(half, thick), ...corner(-half, thick)];
-    const leaf = {
-        ...polygonShape(ring),
-        bezierFactor: 0, sort,
-        fillType: solid, fillColor: casing, fillAlpha: 1,
-        strokeWidth: 3, strokeColor: color, strokeAlpha: 1,
+    const panel = (half, thick, fill, edge, edgeWidth, order) => ({
+        ...polygonShape([...corner(-half, -thick), ...corner(half, -thick), ...corner(half, thick), ...corner(-half, thick)]),
+        bezierFactor: 0, sort: order,
+        fillType: solid, fillColor: fill, fillAlpha: 1,
+        strokeWidth: edgeWidth, strokeColor: edge, strokeAlpha: 1,
         flags
-    };
-    const marks = [leaf];
-    if (kind === 'secret') marks.push(discDrawingData(cx, cy, Math.max(3, weight * 0.4), { color, alpha: 1, flags, solid, sort }));
+    });
+    if (kind === 'window') {
+        // A pane of glass the length of the opening, edged dark, with a bright line down it.
+        const half = length * 0.43;
+        const thick = Math.max(weight * 0.36, 3);
+        const [x1, y1] = corner(-half * 0.92, 0);
+        const [x2, y2] = corner(half * 0.92, 0);
+        return [
+            panel(half, thick, WINDOW_GLASS, casing, 2, sort),
+            strokeDrawingData([x1, y1, x2, y2], { color: '#ffffff', alpha: 0.95, width: Math.max(1.5, weight * 0.1), flags, none, sort: sort + 1 })
+        ];
+    }
+    // The leaf of a door: a pale panel across the middle, a little wider than the wall, edged dark, with its handle.
+    const half = length * 0.3;
+    const thick = Math.max(weight * 0.78, 6);
+    const [hx, hy] = corner(half * 0.62, 0);
+    const marks = [panel(half, thick, DOOR_LEAF, casing, 3, sort), discDrawingData(hx, hy, Math.max(2.5, weight * 0.14), { color: casing, alpha: 1, flags, solid, sort: sort + 1 })];
+    if (kind === 'secret') marks.push(discDrawingData(cx, cy, Math.max(3, weight * 0.28), { color, alpha: 1, flags, solid, sort: sort + 1 }));
     return marks;
 }
 
@@ -524,8 +538,14 @@ function onLeg(leg, a, b, lo, hi) {
  * @param {object} what.flags
  * @param {number} [what.solid]  CONST.DRAWING_FILL_TYPES.SOLID.
  * @param {number} [what.none]  CONST.DRAWING_FILL_TYPES.NONE.
+ * @param {number} [what.lift]  Added to every sort, to put the whole stroke above others: see OPENING_LIFT.
  */
-export function wallLineDrawings({ path, material = 'plain', color, casing, weight, grid = 100, seed = 1, flags = {}, solid = 1, none = 0 }) {
+export function wallLineDrawings({ path, material = 'plain', color, casing, weight, grid = 100, seed = 1, flags = {}, solid = 1, none = 0, lift = 0 }) {
+    const docs = wallLineDrawingsAt({ path, material, color, casing, weight, grid, seed, flags, solid, none });
+    return lift ? docs.map(doc => ({ ...doc, sort: doc.sort + lift })) : docs;
+}
+
+function wallLineDrawingsAt({ path, material = 'plain', color, casing, weight, grid = 100, seed = 1, flags = {}, solid = 1, none = 0 }) {
     const info = MATERIAL_BY_ID.get(material) ?? MATERIAL_BY_ID.get('plain');
     const rand = seeded(seed);
     const pick = list => list[Math.floor(rand() * list.length)];

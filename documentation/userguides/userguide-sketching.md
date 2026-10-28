@@ -198,8 +198,9 @@ A **door**, **secret door** or **window** is always two points -- press where it
 it ends -- so there is no shape to choose for them, and a box or ellipse of them is not drawn. Draw one **along a wall** and it is fitted onto the wall,
 and the wall is cut around it, so what is before it and what is after it stay walls. A door that covers a whole
 wall replaces it. **Undo** makes the wall whole again. (Erasing a door leaves the gap; Undo is how to put the
-wall back.) A door has its leaf drawn across it, a secret door a dot as well, and a window a pane, as on the
-buttons.
+wall back.) A door has a pale leaf drawn across it with its handle, a secret door a dot as well, and a window a pane of
+glass, as on the buttons. They are as thick as the wall, and drawn **above** every wall, so no wall's pattern runs
+over them.
 
 **Snap to the grid** puts wall ends on the points Foundry's own wall tool snaps to; turn it off to
 place them exactly. Walls follow the same **Join Walls Where They Meet** setting as the walls

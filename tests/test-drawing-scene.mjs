@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import {
     stampSquares, stampById, isStamp, isProceduralStamp, buildStamp, stampPalette, drawStamp, stampDrawingData, parseColor
 } from '../scripts/utils-stamps.js';
-import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness } from '../scripts/utils-drawing.js';
+import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline, drawingHit, keptGroup, wallKindById, wallKindData, discDrawingData, isOpeningKind, fitOpeningToWall, openingMarks, wallMaterialById, wallLineDrawings, wallThickness, OPENING_LIFT, DOOR_LEAF, WINDOW_GLASS } from '../scripts/utils-drawing.js';
 import { SKIP_JOIN } from '../scripts/utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from '../scripts/utils-terrain.js';
 
@@ -351,9 +351,9 @@ console.log('\nmaterials');
     }
     {
         const { drawn, wall } = await strokeWith('brick', 'door');
-        check('a door is drawn as a door, whatever the material', drawn.length === 7 && wall.flags[MODULE.ID].drawnWall.material === 'plain' && drawn.every(d => d.strokeColor !== wallMaterialById('brick').color));
+        check('a door is drawn as a door, whatever the material', drawn.length === 8 && wall.flags[MODULE.ID].drawnWall.material === 'plain' && drawn.every(d => d.strokeColor !== wallMaterialById('brick').color));
         const window_ = await strokeWith('stone', 'window');
-        check('and a window', window_.drawn.length === 7);
+        check('and a window', window_.drawn.length === 8);
     }
     {
         const { drawn, wall } = await strokeWith('stone', 'invisible');
@@ -426,15 +426,20 @@ console.log('\nthe marks on a door and a window');
     const door = await draw('door');
     const secret = await draw('secret');
     const window_ = await draw('window');
+    const thick = wallThickness('medium', 100);
     check('a wall has no mark: just its lines and discs', plain.length === 6);
-    check('a door has a leaf over its line', door.length === 7 && door.at(-1).sort === 2 && door.at(-1).fillType === 1 && door.at(-1).strokeColor === wallKindById('door').color && door.at(-1).fillColor === WALL_CASING);
-    check('the leaf is across the middle, wider than the line, and not the whole door', (() => { const leaf = door.at(-1); return leaf.shape.width < 100 && leaf.shape.width > 40 && leaf.shape.height > 6 && Math.abs(leaf.x + leaf.shape.width / 2 - 50) < 2; })());
-    check('a secret door has the leaf and a dot', secret.length === 8 && secret.at(-2).fillType === 1 && secret.at(-1).fillColor === wallKindById('secret').color && secret.at(-1).shape.width < 20);
-    check('a window has a white pane down it', window_.length === 7 && window_.at(-1).strokeColor === '#ffffff' && window_.at(-1).fillType === 0 && window_.at(-1).sort === 2);
+    check('a door has a pale leaf and a handle over its line', door.length === 8 && door.at(-2).fillColor === DOOR_LEAF && door.at(-2).fillType === 1 && door.at(-2).strokeColor === WALL_CASING && door.at(-1).fillColor === WALL_CASING);
+    check('the leaf is across the middle, a little wider than the wall, and not the whole door', (() => { const leaf = door.at(-2); return leaf.shape.width < 100 && leaf.shape.width > 40 && leaf.shape.height > thick && leaf.shape.height < thick * 2.2 && Math.abs(leaf.x + leaf.shape.width / 2 - 50) < 2; })());
+    check('it is not a black block: the only big filled shape is the pale leaf', door.filter(d => d.fillType === 1 && d.shape.width > 30).every(d => d.fillColor === DOOR_LEAF));
+    check('a secret door has the leaf, a handle and a dot in its own colour', secret.length === 9 && secret.at(-3).fillColor === DOOR_LEAF && secret.at(-1).fillColor === wallKindById('secret').color && secret.at(-1).shape.width < 20);
+    check('a window has a pane of glass, as thick as the wall, with a bright line down it', window_.length === 8 && window_.at(-2).fillColor === WINDOW_GLASS && window_.at(-2).shape.height < thick && window_.at(-1).strokeColor === '#ffffff' && window_.at(-1).fillType === 0);
+    check('a door and a window are drawn above every wall: nothing of theirs sorts under a wall\'s own drawings', [door, secret, window_].every(list => Math.min(...list.map(d => d.sort)) >= OPENING_LIFT) && Math.max(...plain.map(d => d.sort)) < OPENING_LIFT);
+    check('even a wall of a patterned material, whose pieces sort higher', Math.max(...wallLineDrawings({ path: [0, 0, 500, 0], material: 'stone', color: '#fff', casing: '#000', weight: 33, grid: 100 }).map(d => d.sort)) < OPENING_LIFT);
+    check('and their marks above their own lines', Math.min(...door.slice(6).map(d => d.sort)) > Math.max(...door.slice(0, 6).map(d => d.sort)));
     check('the marks carry the group flag, so the eraser takes them too', [door, secret, window_].every(list => list.every(d => d.flags[MODULE.ID].drawnWall.id === list[0].flags[MODULE.ID].drawnWall.id)));
     check('an opening too short to hold a mark has none', openingMarks('door', [[0, 0], [10, 0]], { weight: 6, color: '#0f0', casing: '#000' }).length === 0);
     check('and a kind that has none, none', openingMarks('wall', [[0, 0], [100, 0]], { weight: 6, color: '#fff', casing: '#000' }).length === 0);
-    const turned = openingMarks('door', [[0, 0], [0, 100]], { weight: 6, color: '#0f0', casing: '#000' })[0];
+    const turned = openingMarks('door', [[0, 0], [0, 100]], { weight: 20, color: '#0f0', casing: '#000' })[0];
     check('on a door that runs down the map the leaf runs down it', turned.shape.height > turned.shape.width);
 }
 
