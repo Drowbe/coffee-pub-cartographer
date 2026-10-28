@@ -670,7 +670,7 @@ function wallLineDrawingsAt({ path, material = 'plain', color, casing, weight, g
         case 'hedge': {
             // Wider than a wall, and soft: a dark core, and clumps of leaf that bulge from alternate sides so the edge is
             // scalloped, not a smooth band, with lighter leaves on top and the odd berry.
-            const hw = w * 1.5;
+            const hw = w * 1.75;
             const core = hw * 0.8;
             docs.push(line(path, core + 4, edge, 1, 0), ...ends(core / 2 + 2, edge, 0), line(path, core, '#2f6a2a', 1, 1), ...ends(core / 2, '#2f6a2a', 1));
             spaced(Math.max(w * 0.5, 7), w * 0.2).forEach((p, i) => {
