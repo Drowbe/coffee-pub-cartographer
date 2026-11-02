@@ -5,9 +5,10 @@
 import { MODULE } from './const.js';
 import { travelPinsManager } from './manager-travelpins.js';
 import { journeysManager } from './manager-journeys.js';
-import { formatDistance, formatSpan, paceChoices, defaultPace, matchPace, paceIcon, PACE_GROUPS, gridStep } from './utils-travel.js';
+import { ROUTES_PREFS_KEY, readRoutesPrefs } from './manager-routes.js';
+import { formatDistance, paceChoices, defaultPace, matchPace, paceIcon, PACE_GROUPS, gridStep } from './utils-travel.js';
 import {
-    legTerrains, travelHours, terrainFactor, TERRAINS, travelPlan, MOUNT_HOURS_PER_DAY, FORCED_MARCH_HOURS,
+    legTerrains, travelHours, terrainFactor, TERRAINS, MOUNT_HOURS_PER_DAY, FORCED_MARCH_HOURS,
     TIME_RATES, timeRateIndex, routeTitle
 } from './utils-routes.js';
 // Imported from the bridge, not module.api: see the note in window-mapping.js.
@@ -28,8 +29,7 @@ function formatRate(value) {
     const per = abs < 3600 ? `${Math.round(abs / 60)} min/s` : `${Math.round((abs / 3600) * 10) / 10} h/s`;
     return `${sign}×${abs} (${per})`;
 }
-/** The window's choices, per browser: the tab, the pace times are shown at, and which routes show their legs. */
-const PREFS_KEY = `${MODULE.ID}.routes.windowPrefs`;
+const PREFS_KEY = ROUTES_PREFS_KEY;
 const TABS = [
     { id: 'routes', icon: 'fa-solid fa-route', labelKey: 'tabRoutes' },
     { id: 'journeys', icon: 'fa-solid fa-map-signs', labelKey: 'tabJourneys' },
@@ -37,13 +37,7 @@ const TABS = [
     { id: 'setup', icon: 'fa-solid fa-sliders', labelKey: 'tabSetup' }
 ];
 
-function readPrefs() {
-    try {
-        return JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') ?? {};
-    } catch {
-        return {};
-    }
-}
+const readPrefs = readRoutesPrefs;
 
 function writePrefs(prefs) {
     try {
@@ -288,13 +282,7 @@ export class RoutesWindow extends BlacksmithToolWindowBaseV2 {
      * "30 h of travel: 3 days of 8 h + 6 h". Nothing without a pace.
      */
     _timeText(hours, perDay) {
-        if (hours === null || hours === undefined) return '';
-        const format = (key, data) => game.i18n.format(`${MODULE.ID}.routes.${key}`, data);
-        const plan = travelPlan(hours, perDay);
-        const total = plan.hours < 1 ? formatSpan(plan.hours * 3600) : `${Math.round(plan.hours * 10) / 10} h`;
-        if (plan.hours <= plan.perDay) return format('time', { hours: total });
-        const days = format(plan.days === 1 ? 'oneDay' : 'days', { days: plan.days, perDay: plan.perDay });
-        return format(plan.rest ? 'timeDaysRest' : 'timeDays', { hours: total, days, rest: `${Math.round(plan.rest * 10) / 10} h` });
+        return this.manager.timeText(hours, perDay);
     }
 
     /**

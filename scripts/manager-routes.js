@@ -10,10 +10,21 @@ import {
     cleanPoints, legPixels, routePixels, gridDistance, distancePixels, pointAlong, convertDistance,
     nearestWaypoint, nearestOnRoute, legTerrains, terrainFactor, insertWaypoint, removeWaypoint,
     snapTo, chainRoutes, TERRAINS, pathLegs, totalEffort, distanceForEffort, legIndexAt, routeEnds, routeTitle, splitRouteName,
-    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate, effortForDistance
+    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate, effortForDistance, travelHours, travelPlan
 } from './utils-routes.js';
 import { motionSpeed } from './utils-motion.js';
-import { formatDistance, paceChoices, paceIcon, matchPace, defaultPace } from './utils-travel.js';
+import { formatDistance, formatSpan, paceChoices, paceIcon, matchPace, defaultPace } from './utils-travel.js';
+
+/** The Routes window's choices, per browser: the tab, the pace times are shown at, and which routes show their legs. */
+export const ROUTES_PREFS_KEY = `${MODULE.ID}.routes.windowPrefs`;
+
+export function readRoutesPrefs() {
+    try {
+        return JSON.parse(localStorage.getItem(ROUTES_PREFS_KEY) ?? '{}') ?? {};
+    } catch {
+        return {};
+    }
+}
 
 /** Scene flag holding `{ list, journeys }`. */
 const FLAG_KEY = 'routes';
@@ -791,6 +802,28 @@ class RoutesManager {
         return { icon: paceIcon(pace), label: pace?.label ?? `${formatDistance(perHour, units)}/h` };
     }
 
+    /**
+     * A trip's time: the hours of travel it takes, and -- when that is more
+     * than a travel day -- the days of the map's planned length it fills,
+     * "30 h of travel: 3 days of 8 h + 6 h". Nothing without a pace.
+     */
+    timeText(hours, perDay) {
+        if (hours === null || hours === undefined) return '';
+        const format = (key, data) => game.i18n.format(`${MODULE.ID}.routes.${key}`, data);
+        const plan = travelPlan(hours, perDay);
+        const total = plan.hours < 1 ? formatSpan(plan.hours * 3600) : `${Math.round(plan.hours * 10) / 10} h`;
+        if (plan.hours <= plan.perDay) return format('time', { hours: total });
+        const days = format(plan.days === 1 ? 'oneDay' : 'days', { days: plan.days, perDay: plan.perDay });
+        return format(plan.rest ? 'timeDaysRest' : 'timeDays', { hours: total, days, rest: `${Math.round(plan.rest * 10) / 10} h` });
+    }
+
+    /** The pace the Routes window shows times at: the one chosen there, or the normal pace. */
+    timesPace(scene = canvas.scene) {
+        const paces = paceChoices(game.system?.id, globalThis.CONFIG, scene?.grid?.units ?? '',
+            pace => game.i18n.localize(pace.label ?? `${MODULE.ID}.parallax.pace.${pace.id}`));
+        return paces.find(pace => pace.id === readRoutesPrefs().paceId) ?? defaultPace(paces);
+    }
+
     /** A trip's name as the odometer gives it: a route's, or a journey's with the route the party is on. */
     tripName(progress) {
         if (!progress) return '';
@@ -1394,12 +1427,18 @@ class RoutesManager {
             return;
         }
         this._hovered = hovered.id;
+        // Read at the pace the Routes window shows times at, so the two agree.
+        const scene = canvas.scene;
+        const time = this.timeText(travelHours(hovered.legs, hovered.terrain, this.timesPace(scene)?.perHour), this.settings(scene).hoursPerDay);
         callout?.show(CALLOUT_ID, {
             anchor: { x: at[0], y: at[1] },
             title: hovered.title,
             ...(hovered.subtitle ? { subtitle: hovered.subtitle } : {}),
             icon: 'fa-solid fa-route',
-            rows: [{ label: game.i18n.localize(`${MODULE.ID}.routes.calloutDistance`), value: hovered.distance }]
+            rows: [
+                { label: game.i18n.localize(`${MODULE.ID}.routes.calloutDistance`), value: hovered.distance },
+                ...(time ? [{ label: game.i18n.localize(`${MODULE.ID}.routes.calloutTime`), value: time }] : [])
+            ]
         });
     }
 
@@ -1647,7 +1686,9 @@ class RoutesManager {
                 points,
                 title: name || ends || routeTitle(route),
                 subtitle: name ? ends : '',
-                distance: formatDistance(distance, canvas.scene.grid.units)
+                distance: formatDistance(distance, canvas.scene.grid.units),
+                legs: legPixels(points).map(pixels => gridDistance(pixels, canvas.scene.grid)),
+                terrain
             });
         }
         // A route that is no longer drawn takes its callout with it.
