@@ -32,6 +32,8 @@ const IDS = {
 export const ROUTE_COLORS = ['#b03a2e', '#1f618d', '#1e8449', '#7d3c98', '#ca6f1e', '#212f3c'];
 /** How near, in screen pixels, a pointer must be to a waypoint or the line to take hold of it. */
 const HIT_PIXELS = 12;
+// The id of the Blacksmith callout a hovered route shows.
+const CALLOUT_ID = `${MODULE.ID}:route`;
 /** How near a route's end, in grid squares, a map note must be to name that end. */
 const NOTE_SQUARES = 1;
 /** How far, in screen pixels, the pointer may move in a click on a route before it is a drag. */
@@ -169,6 +171,7 @@ class RoutesManager {
             this.stopEditing();
             this._unlisten();
             this._container = null;
+            this._hovered = null;
         });
         on('updateScene', (scene, changes) => {
             if (!foundry.utils.hasProperty(changes, `flags.${MODULE.ID}.${FLAG_KEY}`)) return;
@@ -1365,12 +1368,13 @@ class RoutesManager {
     }
 
     /**
-     * A route's name and length show only while the pointer is over its line
-     * (or while it is edited), so the map stays clear. Showing and hiding the
-     * labels is all this does; nothing is redrawn.
+     * A route's name and length show in a Blacksmith callout only while the
+     * pointer is over its line, so the map stays clear. The callout follows the
+     * pointer along the line; nothing is redrawn.
      */
     _updateHover(point) {
         let hovered = null;
+        let at = null;
         if (point && this.show) {
             const radius = this._hitRadius();
             let best = Infinity;
@@ -1378,19 +1382,25 @@ class RoutesManager {
                 const hit = nearestOnRoute(route.points, point);
                 if (hit && hit.distance <= radius && hit.distance < best) {
                     best = hit.distance;
-                    hovered = route.id;
+                    hovered = route;
+                    at = hit.point;
                 }
             }
         }
-        if (hovered === this._hovered) return;
-        this._hovered = hovered;
-        this._showLabels();
-    }
-
-    _showLabels() {
-        for (const [id, label] of this._labels ?? []) {
-            if (!label.destroyed) label.visible = id === this._hovered || id === this.editing?.id;
+        const callout = game.modules.get('coffee-pub-blacksmith')?.api?.callout;
+        if (!hovered) {
+            if (this._hovered) callout?.hide(CALLOUT_ID, { grace: true });
+            this._hovered = null;
+            return;
         }
+        this._hovered = hovered.id;
+        callout?.show(CALLOUT_ID, {
+            anchor: { x: at[0], y: at[1] },
+            title: hovered.title,
+            ...(hovered.subtitle ? { subtitle: hovered.subtitle } : {}),
+            icon: 'fa-solid fa-route',
+            rows: [{ label: game.i18n.localize(`${MODULE.ID}.routes.calloutDistance`), value: hovered.distance }]
+        });
     }
 
     /** Right-clicking a waypoint removes it; that click is not Foundry's. */
@@ -1611,9 +1621,8 @@ class RoutesManager {
     draw() {
         if (!this._layer()) return;
         for (const child of this._routes.removeChildren()) child.destroy({ children: true });
-        // The routes drawn and their labels, for showing a label on hover.
+        // The routes drawn and what their hover callout says.
         this._drawnRoutes = [];
-        this._labels = new Map();
         // Turned off on this screen, routes are not drawn -- except one being edited.
         this._routes.visible = this.show || !!this.editing;
         const sizes = this._sizes();
@@ -1631,15 +1640,22 @@ class RoutesManager {
             const color = Number.parseInt(String(route.color ?? ROUTE_COLORS[0]).replace('#', ''), 16);
             this._routes.addChild(this._line(points, color, sizes, { alpha, terrain, editing, selected: editing ? this.editing.selected : null, ring: editing }));
             const distance = gridDistance(routePixels(points), canvas.scene.grid);
-            const middle = pointAlong(points, routePixels(points) / 2);
-            const label = this._label(`${routeTitle(route, { both: true })} · ${formatDistance(distance, canvas.scene.grid.units)}`, middle, sizes);
-            label.alpha = alpha;
-            this._routes.addChild(label);
-            this._drawnRoutes.push({ id: route.id, points });
-            this._labels.set(route.id, label);
+            const name = String(route.name ?? '').trim();
+            const ends = routeTitle({ from: route.from, to: route.to }, { both: true });
+            this._drawnRoutes.push({
+                id: route.id,
+                points,
+                title: name || ends || routeTitle(route),
+                subtitle: name ? ends : '',
+                distance: formatDistance(distance, canvas.scene.grid.units)
+            });
+        }
+        // A route that is no longer drawn takes its callout with it.
+        if (this._hovered && !this._drawnRoutes.some(route => route.id === this._hovered)) {
+            game.modules.get('coffee-pub-blacksmith')?.api?.callout?.hide(CALLOUT_ID);
+            this._hovered = null;
         }
         if (!this.editing && !this.draft) this._drawDirection(sizes);
-        this._showLabels();
         this._drawDraft();
     }
 

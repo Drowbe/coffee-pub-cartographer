@@ -570,6 +570,7 @@
 	"routes.progress": "{traveled} of {length} travelled, in {terrain}",
 	"routes.pinType": "Cartographer Journey",
 	"routes.partyMarker": "The party",
+	"routes.calloutDistance": "Distance",
 	"routes.play": "Play",
 	"routes.headingAsDrawn": "Heading for the end it was drawn to. Click to turn round; the party stays where it is.",
 	"routes.headingReversed": "Heading back to the start it was drawn from. Click to turn round; the party stays where it is.",
