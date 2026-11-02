@@ -10,6 +10,8 @@ import { wallStrokeSegments, segmentsPath, strokeDrawingData, distanceToPolyline
 import { layerDocs, layerById, drawingLayer } from './utils-layers.js';
 import { SKIP_JOIN } from './utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
+import { routePixels, gridDistance } from './utils-routes.js';
+import { formatDistance } from './utils-travel.js';
 
 // ================================================================== 
 // ===== DRAWING TOOL CLASS ========================================
@@ -22,6 +24,9 @@ import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } fr
  */
 /** The dark line a wall's line is laid over, so it shows on any map. */
 const WALL_CASING = '#1c1c1c';
+
+/** The Blacksmith callout a sketched route shows its distance in. */
+const SKETCH_CALLOUT_ID = `${MODULE.ID}:sketch`;
 
 /** The most stamps one drag puts down, so a long stroke cannot bury the scene. */
 const MAX_SCATTER = 400;
@@ -817,6 +822,60 @@ class DrawingTool {
     }
     
     /**
+     * Sketching a route: the tool as the draw hotkey makes it, but always freehand,
+     * in the player's colour, with the distance so far beside the pointer. It is a
+     * drawing like any other -- it undoes, erases on a timer and is seen by all.
+     * The hotkey that begins it is the hold key's, or the toggle's, by the setting.
+     */
+    onRouteSketchDown() {
+        if (this._keyDown || this.state.active) return; // another way of drawing has the tool
+        this._routeSketch = true;
+        this.onHoldKeyDown();
+        if (!this.state.active) {
+            this._routeSketch = false;
+            this._keyDown = false;
+        }
+    }
+
+    onRouteSketchUp() {
+        if (this._routeSketch) this.onHoldKeyUp();
+    }
+
+    toggleRouteSketch() {
+        if (this.state.active && !this._routeSketch) return;
+        if (!this.state.active) this._routeSketch = true;
+        this.toggleFromHotkey();
+        if (!this.state.active) {
+            this._routeSketch = false;
+            this._keyDown = false;
+        }
+    }
+
+    /** The colour a stroke is drawn in: the player's, sketching a route; else the brush's. */
+    _strokeColor() {
+        return this._routeSketch ? (game.user.color?.css ?? this.state.brushSettings.color) : this.state.brushSettings.color;
+    }
+
+    /** Shows how far the sketched route has gone, in the scene's units, at the pointer. */
+    _showSketchDistance(at) {
+        const grid = canvas.scene?.grid;
+        if (!grid) return;
+        const distance = gridDistance(routePixels(this.state.drawingPoints), grid);
+        game.modules.get('coffee-pub-blacksmith')?.api?.callout?.show(SKETCH_CALLOUT_ID, {
+            anchor: { x: at.x, y: at.y },
+            title: formatDistance(distance, grid.units),
+            icon: 'fa-solid fa-route'
+        });
+        this._sketchCalloutOpen = true;
+    }
+
+    _hideSketchDistance() {
+        if (!this._sketchCalloutOpen) return;
+        this._sketchCalloutOpen = false;
+        game.modules.get('coffee-pub-blacksmith')?.api?.callout?.hide(SKETCH_CALLOUT_ID);
+    }
+
+    /**
      * Handle toggle key press (called by Foundry keybinding system)
      * For "toggle" mode: toggles tool on/off with each key press
      */
@@ -1236,6 +1295,8 @@ class DrawingTool {
         
         this.state.active = false;
         this._fromWindow = false;
+        this._routeSketch = false;
+        this._hideSketchDistance();
         this._endScatter();
         this.notifyChange();
         this.detachCanvasHandlers();
@@ -1710,11 +1771,11 @@ class DrawingTool {
         // Use absolute coordinates for preview (matches what user sees)
         this._previewGraphics = new PIXI.Graphics();
         const previewAlpha = 1.0; // Always fully opaque (no transparency from color)
-        const previewColor = this.cssToPixiColor(this.state.brushSettings.color);
+        const previewColor = this.cssToPixiColor(this._strokeColor());
         const shadowOffset = 2; // Shadow offset in pixels
         const shadowAlpha = previewAlpha * 0.3; // Shadow opacity (30% of main alpha)
         const shadowColor = 0x000000; // Black shadow
-        
+
         // Draw shadow starting point
         this._previewGraphics.lineStyle(
             this.state.brushSettings.size,
@@ -1753,17 +1814,19 @@ class DrawingTool {
         const relativeY = worldCoords.y - this.state.drawingStartPoint.y;
         this.state.drawingPoints.push([relativeX, relativeY]);
 
+        if (this._routeSketch) this._showSketchDistance(worldCoords);
+
         // A path is previewed as the ribbon it will be, not as a thin line
-        if (this.state.drawingMode === 'terrain') {
+        if (this.state.drawingMode === 'terrain' && !this._routeSketch) {
             this._previewTerrain();
             return;
         }
-        
+
         // Clear and redraw preview graphics to avoid coordinate issues
         // This ensures clean drawing without weird lines
         this._previewGraphics.clear();
         const previewAlpha = 1.0; // Always fully opaque (no transparency from color)
-        const previewColor = this.cssToPixiColor(this.state.brushSettings.color);
+        const previewColor = this.cssToPixiColor(this._strokeColor());
         const shadowOffset = 2; // Shadow offset in pixels
         const shadowAlpha = previewAlpha * 0.3; // Shadow opacity (30% of main alpha)
         const shadowColor = 0x000000; // Black shadow
@@ -1825,7 +1888,7 @@ class DrawingTool {
             }
             
             // A path is laid down as terrain, not kept as a thin sketch
-            if (this.state.drawingMode === 'terrain') {
+            if (this.state.drawingMode === 'terrain' && !this._routeSketch) {
                 const start = this.state.drawingStartPoint;
                 const absolute = this.state.drawingPoints.map(([px, py]) => [start.x + px, start.y + py]);
                 if (this._previewGraphics && this._previewGraphics.parent) {
@@ -1842,7 +1905,7 @@ class DrawingTool {
             }
 
             // A wall stroke is written to the scene as walls and a line, not kept as a temporary drawing
-            if (this.state.drawingMode === 'wall') {
+            if (this.state.drawingMode === 'wall' && !this._routeSketch) {
                 const start = this.state.drawingStartPoint;
                 const absolute = this.state.drawingPoints.map(([px, py]) => [start.x + px, start.y + py]);
                 this.state.isDrawing = false;
@@ -1860,9 +1923,9 @@ class DrawingTool {
                 this.state.drawingStartPoint.y,
                 this.state.drawingPoints,
                 this.state.brushSettings.size,
-                this.state.brushSettings.color
+                this._strokeColor()
             );
-            
+
             // Reset drawing state
             this.state.isDrawing = false;
             this.state.drawingPoints = [];
@@ -3392,6 +3455,7 @@ class DrawingTool {
      * Cancel the current drawing
      */
     cancelDrawing() {
+        this._hideSketchDistance();
         // Remove preview graphics if exists
         if (this._previewGraphics && this._previewGraphics.parent && this.services?.canvasLayer) {
             this.services.canvasLayer.removeChild(this._previewGraphics);
@@ -3559,6 +3623,7 @@ class DrawingTool {
      * @returns {'sketch'|'line'|'box'|'ellipse'|'stamp'}
      */
     _strokeMode() {
+        if (this._routeSketch) return 'sketch';
         const mode = this.state.drawingMode;
         if (mode === 'terrain') return 'sketch';
         // A door or a window is two points, whatever shape is chosen for the walls.

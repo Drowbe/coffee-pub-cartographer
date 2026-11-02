@@ -44,6 +44,13 @@ Hooks.on('getSceneControlButtons', controls => autoWallManager.addWallTool(contr
 // The drawing tools window has one too, among the drawing tools or, failing those, the token tools.
 Hooks.on('getSceneControlButtons', controls => drawingTool.addDrawingTool(controls));
 
+/** Whether a drawing hotkey may act now: enabled, not typing into a field, on a ready canvas. */
+function drawHotkeyAllowed() {
+    if (!game.settings.get(MODULE.ID, 'drawing.hotkeyEnabled')) return false;
+    if (game.settings.get(MODULE.ID, 'drawing.blockWhenTyping') && game.keyboard.hasFocus) return false;
+    return !!canvas?.ready;
+}
+
 Hooks.once('init', () => {
     game.keybindings.register(MODULE.ID, 'drawHotkey', {
         name: 'Cartographer: Draw Hotkey',
@@ -52,14 +59,7 @@ Hooks.once('init', () => {
             { key: 'KeyL' } // default, user can change in Settings → Controls
         ],
         onDown: () => {
-            // Check if hotkey is enabled
-            if (!game.settings.get(MODULE.ID, 'drawing.hotkeyEnabled')) return false;
-            
-            // Check if we should block when typing
-            if (game.settings.get(MODULE.ID, 'drawing.blockWhenTyping') && game.keyboard.hasFocus) return false;
-            
-            // Canvas must exist
-            if (!canvas?.ready) return false;
+            if (!drawHotkeyAllowed()) return false;
 
             const mode = game.settings.get(MODULE.ID, 'drawing.hotkeyMode');
             if (mode === 'toggle') {
@@ -75,6 +75,33 @@ Hooks.once('init', () => {
             if (mode !== 'hold') return false;
 
             drawingTool.onHoldKeyUp();
+            return true;
+        }
+    });
+
+    // A quick sketch of a route: freehand in the player's colour, with its distance beside the pointer.
+    // It follows the draw hotkey's enabled, typing and hold/toggle settings.
+    game.keybindings.register(MODULE.ID, 'routeSketchHotkey', {
+        name: 'Cartographer: Sketch a Route',
+        hint: 'Sketches a temporary route in your colour, showing its distance. Configure key in Configure Controls.',
+        editable: [
+            { key: 'KeyP' }
+        ],
+        onDown: () => {
+            if (!drawHotkeyAllowed()) return false;
+
+            if (game.settings.get(MODULE.ID, 'drawing.hotkeyMode') === 'toggle') {
+                drawingTool.toggleRouteSketch();
+            } else {
+                drawingTool.onRouteSketchDown();
+            }
+
+            return true;
+        },
+        onUp: () => {
+            if (game.settings.get(MODULE.ID, 'drawing.hotkeyMode') !== 'hold') return false;
+
+            drawingTool.onRouteSketchUp();
             return true;
         }
     });
