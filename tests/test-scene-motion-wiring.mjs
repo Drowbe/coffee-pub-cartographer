@@ -120,6 +120,8 @@ console.log('\nthe routes window: actions, strings and styles');
     const dynamic = ['routes.terrain.', 'routes.names.'];
     const unusedRoutes = Object.keys(lang).filter(key => key.startsWith('routes.') && !used.has(key))
         .filter(key => !dynamic.some(prefix => key.startsWith(prefix)))
+        // A setting's name and hint are read by the settings dialog, from settings.js.
+        .filter(key => !/-(Label|Hint)$/.test(key))
         .filter(key => !(rjs + rman).includes(`'${key.slice('routes.'.length)}'`));
     if (unusedRoutes.length) fail(`unused routes strings: ${unusedRoutes.join(', ')}`);
     else ok('every routes string is referenced');

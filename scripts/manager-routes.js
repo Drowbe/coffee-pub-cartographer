@@ -1653,7 +1653,8 @@ class RoutesManager {
     /** Line, dot and text sizes from the grid, so routes read the same on any map. */
     _sizes() {
         const size = Number(canvas.scene?.grid?.size) || 100;
-        const line = Math.max(3, size * 0.05);
+        const share = Number(game.settings.get(MODULE.ID, 'routes.lineWidth')) || 3;
+        const line = Math.max(2, size * share / 100);
         return { line, dot: line * 1.1, font: Math.max(14, Math.round(size * 0.22)) };
     }
 
@@ -1755,7 +1756,7 @@ class RoutesManager {
         const graphics = new PIXI.Graphics();
         const dash = sizes.line * 2.5;
         // A dark edge under the colour, so the line reads on light and dark maps.
-        for (const [width, tint, a] of [[sizes.line + 3, 0x111111, 0.55 * alpha], [sizes.line, color, alpha]]) {
+        for (const [width, tint, a] of [[sizes.line + 2, 0x111111, 0.55 * alpha], [sizes.line, color, alpha]]) {
             graphics.lineStyle({ width, color: tint, alpha: a, cap: 'round', join: 'round' });
             for (let i = 1; i < points.length; i++) {
                 if (terrainFactor(terrain[i - 1]) < 1) this._dash(graphics, points[i - 1], points[i], dash);

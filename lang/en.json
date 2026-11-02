@@ -570,6 +570,8 @@
 	"routes.progress": "{traveled} of {length} travelled, in {terrain}",
 	"routes.pinType": "Cartographer Journey",
 	"routes.partyMarker": "The party",
+	"routes.lineWidth-Label": "Route Line Width",
+	"routes.lineWidth-Hint": "How thick routes are drawn on the map, as a percentage of a grid square (3 is about 3 px on a 100 px grid). Affects only your screen.",
 	"routes.calloutDistance": "Distance",
 	"routes.calloutTime": "Time",
 	"routes.play": "Play",

@@ -158,6 +158,26 @@ export const registerSettings = () => {
         group: WORKFLOW_GROUPS.CONFIGURATION
     });
 
+    // How thick a route's line is drawn, as a share of a grid square so it reads
+    // the same on any map; per viewer, as it is only how the map looks to them.
+    game.settings.register(MODULE.ID, 'routes.lineWidth', {
+        name: MODULE.ID + '.routes.lineWidth-Label',
+        hint: MODULE.ID + '.routes.lineWidth-Hint',
+        scope: 'user',
+        config: true,
+        default: 3,
+        type: Number,
+        range: {
+            min: 1,
+            max: 10,
+            step: 0.5
+        },
+        group: WORKFLOW_GROUPS.CONFIGURATION,
+        onChange: () => {
+            if (canvas?.ready) import('./manager-routes.js').then(({ routesManager }) => routesManager.draw());
+        }
+    });
+
     // Walls that meet are a joint, and a joint moves as one: see manager-walljoin.js.
     game.settings.register(MODULE.ID, 'walls.joinEnds', {
         name: MODULE.ID + '.walls.joinEnds-Label',
