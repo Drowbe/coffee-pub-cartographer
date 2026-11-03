@@ -10,7 +10,7 @@ import {
     cleanPoints, legPixels, routePixels, gridDistance, distancePixels, pointAlong, convertDistance,
     nearestWaypoint, nearestOnRoute, legTerrains, terrainFactor, insertWaypoint, removeWaypoint,
     snapTo, chainRoutes, TERRAINS, pathLegs, totalEffort, distanceForEffort, legIndexAt, routeEnds, routeTitle, splitRouteName,
-    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate, effortForDistance, travelHours, travelPlan
+    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate, effortForDistance, travelHours, travelPlan, roundCorners
 } from './utils-routes.js';
 import { motionSpeed } from './utils-motion.js';
 import { formatDistance, formatSpan, paceChoices, paceIcon, matchPace, defaultPace } from './utils-travel.js';
@@ -1422,23 +1422,28 @@ class RoutesManager {
         }
         const callout = game.modules.get('coffee-pub-blacksmith')?.api?.callout;
         if (!hovered) {
-            if (this._hovered) callout?.hide(CALLOUT_ID, { grace: true });
+            if (this._hovered) callout?.hide(CALLOUT_ID);
             this._hovered = null;
             return;
         }
+        const anchor = { x: at[0], y: at[1] };
+        // Along the same route the box is only moved; showing again would rebuild it on every move.
+        if (this._hovered === hovered.id && callout?.update(CALLOUT_ID, { anchor })) return;
         this._hovered = hovered.id;
         // Read at the pace the Routes window shows times at, so the two agree.
         const scene = canvas.scene;
         const time = this.timeText(travelHours(hovered.legs, hovered.terrain, this.timesPace(scene)?.perHour), this.settings(scene).hoursPerDay);
+        // Nothing in it to press, so it never takes the pointer from the map.
         callout?.show(CALLOUT_ID, {
-            anchor: { x: at[0], y: at[1] },
+            anchor,
             title: hovered.title,
             ...(hovered.subtitle ? { subtitle: hovered.subtitle } : {}),
             icon: 'fa-solid fa-route',
             rows: [
                 { label: game.i18n.localize(`${MODULE.ID}.routes.calloutDistance`), value: hovered.distance },
                 ...(time ? [{ label: game.i18n.localize(`${MODULE.ID}.routes.calloutTime`), value: time }] : [])
-            ]
+            ],
+            interactive: false
         });
     }
 
@@ -1655,7 +1660,9 @@ class RoutesManager {
         const size = Number(canvas.scene?.grid?.size) || 100;
         const share = Number(game.settings.get(MODULE.ID, 'routes.lineWidth')) || 3;
         const line = Math.max(2, size * share / 100);
-        return { line, dot: line * 1.1, font: Math.max(14, Math.round(size * 0.22)) };
+        // How far before a waypoint its corner starts to curve; none with rounding off.
+        const corner = game.settings.get(MODULE.ID, 'routes.curveCorners') ? size * 0.5 : 0;
+        return { line, dot: line * 1.1, font: Math.max(14, Math.round(size * 0.22)), corner };
     }
 
     draw() {
@@ -1735,15 +1742,28 @@ class RoutesManager {
     }
 
     /** A dashed segment, for a leg across difficult terrain. */
-    _dash(graphics, [ax, ay], [bx, by], length) {
-        const total = Math.hypot(bx - ax, by - ay);
-        if (!total) return;
-        const ux = (bx - ax) / total;
-        const uy = (by - ay) / total;
-        for (let at = 0; at < total; at += length * 2) {
-            const end = Math.min(total, at + length);
-            graphics.moveTo(ax + ux * at, ay + uy * at);
-            graphics.lineTo(ax + ux * end, ay + uy * end);
+    /** A run of points as dashes `length` long with gaps as long, the pattern carrying on round every bend. */
+    _dash(graphics, run, length) {
+        let travelled = 0;
+        for (let i = 1; i < run.length; i++) {
+            const [ax, ay] = run[i - 1];
+            const [bx, by] = run[i];
+            const total = Math.hypot(bx - ax, by - ay);
+            if (!total) continue;
+            const ux = (bx - ax) / total;
+            const uy = (by - ay) / total;
+            let at = 0;
+            while (at < total) {
+                const phase = (travelled + at) % (length * 2);
+                const drawn = phase < length;
+                const step = Math.min(total - at, (drawn ? length : length * 2) - phase);
+                if (drawn) {
+                    graphics.moveTo(ax + ux * at, ay + uy * at);
+                    graphics.lineTo(ax + ux * (at + step), ay + uy * (at + step));
+                }
+                at += step;
+            }
+            travelled += total;
         }
     }
 
@@ -1755,14 +1775,25 @@ class RoutesManager {
     _line(points, color, sizes, { alpha = 1, terrain = [], editing = false, selected = null, ring = false } = {}) {
         const graphics = new PIXI.Graphics();
         const dash = sizes.line * 2.5;
+        // The line as drawn: its corners rounded, or not, with the leg each stretch of it belongs to.
+        const { points: path, legs } = sizes.corner > 0
+            ? roundCorners(points, sizes.corner)
+            : { points, legs: points.map((_, i) => i) };
+        // Runs of it that are dashed or solid together, so a pattern is not broken at a bend.
+        const runs = [];
+        for (let i = 1; i < path.length; i++) {
+            const dashed = terrainFactor(terrain[legs[i - 1]]) < 1;
+            if (runs.at(-1)?.dashed === dashed) runs.at(-1).points.push(path[i]);
+            else runs.push({ dashed, points: [path[i - 1], path[i]] });
+        }
         // A dark edge under the colour, so the line reads on light and dark maps.
         for (const [width, tint, a] of [[sizes.line + 2, 0x111111, 0.55 * alpha], [sizes.line, color, alpha]]) {
             graphics.lineStyle({ width, color: tint, alpha: a, cap: 'round', join: 'round' });
-            for (let i = 1; i < points.length; i++) {
-                if (terrainFactor(terrain[i - 1]) < 1) this._dash(graphics, points[i - 1], points[i], dash);
+            for (const run of runs) {
+                if (run.dashed) this._dash(graphics, run.points, dash);
                 else {
-                    graphics.moveTo(points[i - 1][0], points[i - 1][1]);
-                    graphics.lineTo(points[i][0], points[i][1]);
+                    graphics.moveTo(run.points[0][0], run.points[0][1]);
+                    for (let i = 1; i < run.points.length; i++) graphics.lineTo(run.points[i][0], run.points[i][1]);
                 }
             }
         }

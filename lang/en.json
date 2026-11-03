@@ -4,11 +4,17 @@
 		"headingH1Introduction-Label": "Coffee Pub Cartographer",
 		"headingH1Introduction-Hint": "Give your party temporary canvas drawing tools and an old-school shared map for planning, marking locations, and coordinating during play.",
 
-		"headingH2Configuration-Label": "Configuration",
-		"headingH2Configuration-Hint": "",
-
 	"headingH2Drawing-Label": "Drawing",
 	"headingH2Drawing-Hint": "",
+
+	"headingH2Mapping-Label": "Mapping",
+	"headingH2Mapping-Hint": "",
+
+	"headingH2Walls-Label": "Walls",
+	"headingH2Walls-Hint": "",
+
+	"headingH2Routes-Label": "Routes",
+	"headingH2Routes-Hint": "",
 
 	"drawing.enablePlayerDrawing-Label": "Enable Player Drawing",
 	"drawing.enablePlayerDrawing-Hint": "Allow players to draw temporarily on the canvas for planning purposes.",
@@ -572,6 +578,8 @@
 	"routes.partyMarker": "The party",
 	"routes.lineWidth-Label": "Route Line Width",
 	"routes.lineWidth-Hint": "How thick routes are drawn on the map, as a percentage of a grid square (3 is about 3 px on a 100 px grid). Affects only your screen.",
+	"routes.curveCorners-Label": "Curve Route Corners",
+	"routes.curveCorners-Hint": "Round the corners where a route bends into curves instead of sharp points. Only how the line is drawn; its length and where you click to select it do not change. Affects only your screen.",
 	"routes.calloutDistance": "Distance",
 	"routes.calloutTime": "Time",
 	"routes.play": "Play",

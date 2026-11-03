@@ -28,6 +28,9 @@ const WALL_CASING = '#1c1c1c';
 /** The Blacksmith callout a sketched route shows its distance in. */
 const SKETCH_CALLOUT_ID = `${MODULE.ID}:sketch`;
 
+/** How much of the stroke, in scene pixels, says which way a sketched route is heading. */
+const SKETCH_HEADING_PIXELS = 40;
+
 /** The most stamps one drag puts down, so a long stroke cannot bury the scene. */
 const MAX_SCATTER = 400;
 
@@ -861,17 +864,46 @@ class DrawingTool {
         const grid = canvas.scene?.grid;
         if (!grid) return;
         const distance = gridDistance(routePixels(this.state.drawingPoints), grid);
-        game.modules.get('coffee-pub-blacksmith')?.api?.callout?.show(SKETCH_CALLOUT_ID, {
-            anchor: { x: at.x, y: at.y },
-            title: formatDistance(distance, grid.units),
-            icon: 'fa-solid fa-route'
-        });
+        const callout = game.modules.get('coffee-pub-blacksmith')?.api?.callout;
+        if (!callout) return;
+        const patch = { anchor: { x: at.x, y: at.y }, side: this._sketchCalloutSide(), title: formatDistance(distance, grid.units) };
+        // Opened once, then moved: showing again would rebuild the box on every move.
+        // It never takes the pointer, so a stroke is not stopped by running into it.
+        if (!callout.update(SKETCH_CALLOUT_ID, patch)) {
+            callout.show(SKETCH_CALLOUT_ID, { ...patch, icon: 'fa-solid fa-route', interactive: false, gap: 6 });
+        }
         this._sketchCalloutOpen = true;
+    }
+
+    /**
+     * The corner of the pointer the callout sits in: behind it, opposite the way the
+     * stroke is going, so the box is never ahead of the pointer. An axis changes only
+     * when the stroke has clearly moved along it, so the box does not jitter.
+     */
+    _sketchCalloutSide() {
+        const points = this.state.drawingPoints;
+        const [x, y] = points.at(-1);
+        // The way the pointer has gone over the last stretch of the stroke.
+        let from = points[0];
+        let walked = 0;
+        for (let i = points.length - 1; i > 0; i--) {
+            walked += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+            from = points[i - 1];
+            if (walked >= SKETCH_HEADING_PIXELS) break;
+        }
+        const dx = x - from[0];
+        const dy = y - from[1];
+        const clear = SKETCH_HEADING_PIXELS / 5;
+        if (Math.abs(dx) >= clear) this._sketchAcross = dx > 0 ? 'left' : 'right';
+        if (Math.abs(dy) >= clear) this._sketchDown = dy > 0 ? 'top' : 'bottom';
+        return `${this._sketchDown ?? 'bottom'}-${this._sketchAcross ?? 'right'}`;
     }
 
     _hideSketchDistance() {
         if (!this._sketchCalloutOpen) return;
         this._sketchCalloutOpen = false;
+        this._sketchDown = null;
+        this._sketchAcross = null;
         game.modules.get('coffee-pub-blacksmith')?.api?.callout?.hide(SKETCH_CALLOUT_ID);
     }
 

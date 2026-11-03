@@ -96,6 +96,53 @@ export function nearestOnRoute(points, [x, y]) {
 }
 
 /**
+ * A route's line with its corners rounded, for drawing: each waypoint between
+ * the ends becomes a curve that starts `radius` before it and ends `radius`
+ * after (less where a leg is short -- never past the middle of it, so two
+ * corners never meet). The ends stay where they are. Returns { points, legs },
+ * where legs[i] is the leg the segment starting at points[i] belongs to, so a
+ * leg's terrain can follow it round the bend.
+ */
+export function roundCorners(points, radius, steps = 8) {
+    const out = [];
+    const legs = [];
+    const push = (point, leg) => {
+        out.push(point);
+        legs.push(leg);
+    };
+    if (!(points?.length > 0)) return { points: out, legs: [] };
+    push([points[0][0], points[0][1]], 0);
+    for (let i = 1; i < points.length - 1; i++) {
+        const [ax, ay] = points[i - 1];
+        const [bx, by] = points[i];
+        const [cx, cy] = points[i + 1];
+        const before = Math.hypot(bx - ax, by - ay);
+        const after = Math.hypot(cx - bx, cy - by);
+        const reach = Math.min(radius, before / 2, after / 2);
+        // A straight run, or a doubling back, has no corner to round.
+        const cross = (bx - ax) * (cy - by) - (by - ay) * (cx - bx);
+        if (!(reach > 0) || Math.abs(cross) < 1e-9) {
+            push([bx, by], i);
+            continue;
+        }
+        const start = [bx + ((ax - bx) / before) * reach, by + ((ay - by) / before) * reach];
+        const end = [bx + ((cx - bx) / after) * reach, by + ((cy - by) / after) * reach];
+        // A quadratic curve from one to the other, pulled toward the waypoint.
+        for (let step = 0; step <= steps; step++) {
+            const t = step / steps;
+            const u = 1 - t;
+            push([
+                u * u * start[0] + 2 * u * t * bx + t * t * end[0],
+                u * u * start[1] + 2 * u * t * by + t * t * end[1]
+            ], t < 0.5 ? i - 1 : i);
+        }
+    }
+    const last = points[points.length - 1];
+    if (points.length > 1) push([last[0], last[1]], points.length - 2);
+    return { points: out, legs };
+}
+
+/**
  * The point a distance in pixels along the route reaches, with the heading
  * of the leg it is on (radians), clamped to the ends. Where the progress
  * marker will stand.

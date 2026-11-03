@@ -17,8 +17,10 @@ import { MODULE } from './const.js';
  */
 const WORKFLOW_GROUPS = {
     INTRODUCTION: 'introduction',
-    CONFIGURATION: 'configuration',
     DRAWING: 'drawing',
+    MAPPING: 'mapping',
+    WALLS: 'walls',
+    ROUTES: 'routes',
 };
 
 
@@ -87,9 +89,9 @@ export const registerSettings = () => {
 
 
 	// --------------------------------------
-	// -- H2: CONFIGURATION
+	// -- H2: DRAWING
 	// --------------------------------------
-	registerHeader('Configuration', 'headingH2Configuration-Label', 'headingH2Configuration-Hint', 'H2', WORKFLOW_GROUPS.CONFIGURATION);
+	registerHeader('Drawing', 'headingH2Drawing-Label', 'headingH2Drawing-Hint', 'H2', WORKFLOW_GROUPS.DRAWING, 'user');
 
     // -- Enable Player Drawing --
 	game.settings.register(MODULE.ID, 'drawing.enablePlayerDrawing', {
@@ -99,7 +101,7 @@ export const registerSettings = () => {
         config: true,
         default: true,
         type: Boolean,
-		group: WORKFLOW_GROUPS.CONFIGURATION
+		group: WORKFLOW_GROUPS.DRAWING
 	});
 
     // -- Layers over the tokens --
@@ -110,7 +112,7 @@ export const registerSettings = () => {
         config: true,
         default: false,
         type: Boolean,
-		group: WORKFLOW_GROUPS.CONFIGURATION
+		group: WORKFLOW_GROUPS.DRAWING
 	});
 
     // -- Timed Erase Timeout --
@@ -126,8 +128,47 @@ export const registerSettings = () => {
             max: 120,
             step: 5
         },
-		group: WORKFLOW_GROUPS.CONFIGURATION
+		group: WORKFLOW_GROUPS.DRAWING
 	});
+
+	game.settings.register(MODULE.ID, "drawing.hotkeyEnabled", {
+		name: MODULE.ID + ".drawing.hotkeyEnabled-Label",
+		hint: MODULE.ID + ".drawing.hotkeyEnabled-Hint",
+		scope: "user",
+		config: true,
+		type: Boolean,
+		default: true,
+		group: WORKFLOW_GROUPS.DRAWING
+	  });
+
+	  game.settings.register(MODULE.ID, "drawing.hotkeyMode", {
+		name: MODULE.ID + ".drawing.hotkeyMode-Label",
+		hint: MODULE.ID + ".drawing.hotkeyMode-Hint",
+		scope: "user",
+		config: true,
+		type: String,
+		choices: {
+		  hold: "Hold",
+		  toggle: "Toggle"
+		},
+		default: "hold",
+		group: WORKFLOW_GROUPS.DRAWING
+	  });
+
+	  game.settings.register(MODULE.ID, "drawing.blockWhenTyping", {
+		name: MODULE.ID + ".drawing.blockWhenTyping-Label",
+		hint: MODULE.ID + ".drawing.blockWhenTyping-Hint",
+		scope: "user",
+		config: true,
+		type: Boolean,
+		default: true,
+		group: WORKFLOW_GROUPS.DRAWING
+	  });
+
+	// --------------------------------------
+	// -- H2: MAPPING
+	// --------------------------------------
+	registerHeader('Mapping', 'headingH2Mapping-Label', 'headingH2Mapping-Hint', 'H2', WORKFLOW_GROUPS.MAPPING, 'user');
 
     game.settings.register(MODULE.ID, 'mapping.enabled', {
         name: MODULE.ID + '.mapping.enabled-Label',
@@ -136,7 +177,7 @@ export const registerSettings = () => {
         config: true,
         default: true,
         type: Boolean,
-        group: WORKFLOW_GROUPS.CONFIGURATION
+        group: WORKFLOW_GROUPS.MAPPING
     });
 
     // The width of the square detection window, in grid squares, so 11 means
@@ -155,8 +196,69 @@ export const registerSettings = () => {
             max: 15,
             step: 2
         },
-        group: WORKFLOW_GROUPS.CONFIGURATION
+        group: WORKFLOW_GROUPS.MAPPING
     });
+
+    game.settings.register(MODULE.ID, 'mapping.allowPlayers', {
+        name: MODULE.ID + '.mapping.allowPlayers-Label',
+        hint: MODULE.ID + '.mapping.allowPlayers-Hint',
+        scope: 'world',
+        config: true,
+        default: true,
+        type: Boolean,
+        group: WORKFLOW_GROUPS.MAPPING
+    });
+
+    // Client scope: it is this user's own menubar, and it decides whether
+    // closing the map window can leave recording running for them.
+    game.settings.register(MODULE.ID, 'mapping.menubarButton', {
+        name: MODULE.ID + '.mapping.menubarButton-Label',
+        hint: MODULE.ID + '.mapping.menubarButton-Hint',
+        scope: 'client',
+        config: true,
+        default: true,
+        type: Boolean,
+        group: WORKFLOW_GROUPS.MAPPING,
+        onChange: () => {
+            import('./manager-mapping.js').then(({ mappingManager }) => mappingManager.refreshMenubarTool());
+        }
+    });
+
+	// --------------------------------------
+	// -- H2: WALLS
+	// --------------------------------------
+	registerHeader('Walls', 'headingH2Walls-Label', 'headingH2Walls-Hint', 'H2', WORKFLOW_GROUPS.WALLS);
+
+    // Walls that meet are a joint, and a joint moves as one: see manager-walljoin.js.
+    game.settings.register(MODULE.ID, 'walls.joinEnds', {
+        name: MODULE.ID + '.walls.joinEnds-Label',
+        hint: MODULE.ID + '.walls.joinEnds-Hint',
+        scope: 'world',
+        config: true,
+        default: true,
+        type: Boolean,
+        group: WORKFLOW_GROUPS.WALLS
+    });
+
+    game.settings.register(MODULE.ID, 'walls.joinDistance', {
+        name: MODULE.ID + '.walls.joinDistance-Label',
+        hint: MODULE.ID + '.walls.joinDistance-Hint',
+        scope: 'world',
+        config: true,
+        default: 0.3,
+        type: Number,
+        range: {
+            min: 0.05,
+            max: 1,
+            step: 0.05
+        },
+        group: WORKFLOW_GROUPS.WALLS
+    });
+
+	// --------------------------------------
+	// -- H2: ROUTES
+	// --------------------------------------
+	registerHeader('Routes', 'headingH2Routes-Label', 'headingH2Routes-Hint', 'H2', WORKFLOW_GROUPS.ROUTES, 'user');
 
     // How thick a route's line is drawn, as a share of a grid square so it reads
     // the same on any map; per viewer, as it is only how the map looks to them.
@@ -172,105 +274,27 @@ export const registerSettings = () => {
             max: 10,
             step: 0.5
         },
-        group: WORKFLOW_GROUPS.CONFIGURATION,
+        group: WORKFLOW_GROUPS.ROUTES,
         onChange: () => {
             if (canvas?.ready) import('./manager-routes.js').then(({ routesManager }) => routesManager.draw());
         }
     });
 
-    // Walls that meet are a joint, and a joint moves as one: see manager-walljoin.js.
-    game.settings.register(MODULE.ID, 'walls.joinEnds', {
-        name: MODULE.ID + '.walls.joinEnds-Label',
-        hint: MODULE.ID + '.walls.joinEnds-Hint',
-        scope: 'world',
+    // Rounds the corners at a route's waypoints into curves. Drawing only: the route's
+    // points, its length and its hit area are the same either way.
+    game.settings.register(MODULE.ID, 'routes.curveCorners', {
+        name: MODULE.ID + '.routes.curveCorners-Label',
+        hint: MODULE.ID + '.routes.curveCorners-Hint',
+        scope: 'user',
         config: true,
         default: true,
         type: Boolean,
-        group: WORKFLOW_GROUPS.CONFIGURATION
-    });
-
-    game.settings.register(MODULE.ID, 'walls.joinDistance', {
-        name: MODULE.ID + '.walls.joinDistance-Label',
-        hint: MODULE.ID + '.walls.joinDistance-Hint',
-        scope: 'world',
-        config: true,
-        default: 0.3,
-        type: Number,
-        range: {
-            min: 0.05,
-            max: 1,
-            step: 0.05
-        },
-        group: WORKFLOW_GROUPS.CONFIGURATION
-    });
-
-    game.settings.register(MODULE.ID, 'mapping.allowPlayers', {
-        name: MODULE.ID + '.mapping.allowPlayers-Label',
-        hint: MODULE.ID + '.mapping.allowPlayers-Hint',
-        scope: 'world',
-        config: true,
-        default: true,
-        type: Boolean,
-        group: WORKFLOW_GROUPS.CONFIGURATION
-    });
-
-    // Client scope: it is this user's own menubar, and it decides whether
-    // closing the map window can leave recording running for them.
-    game.settings.register(MODULE.ID, 'mapping.menubarButton', {
-        name: MODULE.ID + '.mapping.menubarButton-Label',
-        hint: MODULE.ID + '.mapping.menubarButton-Hint',
-        scope: 'client',
-        config: true,
-        default: true,
-        type: Boolean,
-        group: WORKFLOW_GROUPS.CONFIGURATION,
+        group: WORKFLOW_GROUPS.ROUTES,
         onChange: () => {
-            import('./manager-mapping.js').then(({ mappingManager }) => mappingManager.refreshMenubarTool());
+            if (canvas?.ready) import('./manager-routes.js').then(({ routesManager }) => routesManager.draw());
         }
     });
 
-
-	// --------------------------------------
-	// -- H2: DRAWING
-	// --------------------------------------
-	registerHeader('Drawing', 'headingH2Drawing-Label', 'headingH2Drawing-Hint', 'H2', WORKFLOW_GROUPS.DRAWING, 'user');
-
-
-	// -- Draw Hotkey Settings --
-
-	game.settings.register(MODULE.ID, "drawing.hotkeyEnabled", {
-		name: MODULE.ID + ".drawing.hotkeyEnabled-Label",
-		hint: MODULE.ID + ".drawing.hotkeyEnabled-Hint",
-		scope: "user",
-		config: true,
-		type: Boolean,
-		default: true,
-		group: WORKFLOW_GROUPS.DRAWING
-	  });
-	
-	  game.settings.register(MODULE.ID, "drawing.hotkeyMode", {
-		name: MODULE.ID + ".drawing.hotkeyMode-Label",
-		hint: MODULE.ID + ".drawing.hotkeyMode-Hint",
-		scope: "user",
-		config: true,
-		type: String,
-		choices: {
-		  hold: "Hold",
-		  toggle: "Toggle"
-		},
-		default: "hold",
-		group: WORKFLOW_GROUPS.DRAWING
-	  });
-	
-	  game.settings.register(MODULE.ID, "drawing.blockWhenTyping", {
-		name: MODULE.ID + ".drawing.blockWhenTyping-Label",
-		hint: MODULE.ID + ".drawing.blockWhenTyping-Hint",
-		scope: "user",
-		config: true,
-		type: Boolean,
-		default: true,
-		group: WORKFLOW_GROUPS.DRAWING
-	  });
 
 	  // Toolbar height is no longer a setting. The secondary bar takes its size from a
 	  // Blacksmith preset (see manager-toolbar.js), which keeps it in step with the menubar.
