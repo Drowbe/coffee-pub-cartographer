@@ -1408,17 +1408,19 @@ class RoutesManager {
     _updateHover(point) {
         let hovered = null;
         let at = null;
-        if (point && this.show) {
+        if (point) {
             const radius = this._hitRadius();
             let best = Infinity;
-            for (const route of this._drawnRoutes ?? []) {
+            const consider = route => {
                 const hit = nearestOnRoute(route.points, point);
                 if (hit && hit.distance <= radius && hit.distance < best) {
                     best = hit.distance;
                     hovered = route;
                     at = hit.point;
                 }
-            }
+            };
+            if (this.show) this._drawnRoutes?.forEach(consider);
+            this._sketches().forEach(consider);
         }
         const callout = game.modules.get('coffee-pub-blacksmith')?.api?.callout;
         if (!hovered) {
@@ -1445,6 +1447,24 @@ class RoutesManager {
             ],
             interactive: false
         });
+    }
+
+    /**
+     * The routes people have sketched with the draw hotkey, in the shape the hover reads:
+     * what their callout says, and how long they take at the pace times are shown at.
+     */
+    _sketches() {
+        const grid = canvas.scene?.grid;
+        if (!grid || !this.sketchSource) return [];
+        return this.sketchSource().map(sketch => ({
+            id: sketch.id,
+            points: sketch.points,
+            title: game.i18n.localize(`${MODULE.ID}.routes.sketchTitle`),
+            subtitle: sketch.userName ?? '',
+            distance: formatDistance(gridDistance(routePixels(sketch.points), grid), grid.units),
+            legs: [gridDistance(routePixels(sketch.points), grid)],
+            terrain: []
+        }));
     }
 
     /** Right-clicking a waypoint removes it; that click is not Foundry's. */
@@ -1663,6 +1683,11 @@ class RoutesManager {
         // How far before a waypoint its corner starts to curve; none with rounding off.
         const corner = game.settings.get(MODULE.ID, 'routes.curveCorners') ? size * 0.5 : 0;
         return { line, dot: line * 1.1, font: Math.max(14, Math.round(size * 0.22)), corner };
+    }
+
+    /** How thick a route's line is on this map, in scene pixels, as the Route Line Width setting has it. */
+    lineWidth() {
+        return this._sizes().line;
     }
 
     draw() {

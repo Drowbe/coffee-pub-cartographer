@@ -580,6 +580,7 @@
 	"routes.lineWidth-Hint": "How thick routes are drawn on the map, as a percentage of a grid square (3 is about 3 px on a 100 px grid). Affects only your screen.",
 	"routes.curveCorners-Label": "Curve Route Corners",
 	"routes.curveCorners-Hint": "Round the corners where a route bends into curves instead of sharp points. Only how the line is drawn; its length and where you click to select it do not change. Affects only your screen.",
+	"routes.sketchTitle": "Sketched route",
 	"routes.calloutDistance": "Distance",
 	"routes.calloutTime": "Time",
 	"routes.play": "Play",

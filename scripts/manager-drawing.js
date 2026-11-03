@@ -12,6 +12,7 @@ import { SKIP_JOIN } from './utils-autowall.js';
 import { terrainById, terrainPalette, smoothPath, buildTerrain, MAX_TEXTURE } from './utils-terrain.js';
 import { routePixels, gridDistance } from './utils-routes.js';
 import { formatDistance } from './utils-travel.js';
+import { routesManager } from './manager-routes.js';
 
 // ================================================================== 
 // ===== DRAWING TOOL CLASS ========================================
@@ -246,7 +247,10 @@ class DrawingTool {
         if (this.state.timedEraseEnabled) {
             this.scheduleCleanup();
         }
-        
+
+        // Routes show their info when the pointer is over them; so do the routes sketched here
+        routesManager.sketchSource = () => this.routeSketches();
+
         console.log(`✅ ${MODULE.NAME}: ${this.displayName} initialized`);
     }
     
@@ -857,6 +861,50 @@ class DrawingTool {
     /** The colour a stroke is drawn in: the player's, sketching a route; else the brush's. */
     _strokeColor() {
         return this._routeSketch ? (game.user.color?.css ?? this.state.brushSettings.color) : this.state.brushSettings.color;
+    }
+
+    /** The routes sketched and still on the map, as { id, userName, points } in scene pixels. */
+    routeSketches() {
+        // None while one is being sketched: it has its own callout then.
+        if (this._routeSketch) return [];
+        return (this._pixiDrawings ?? [])
+            .filter(drawing => drawing.route && drawing.points?.length > 1)
+            .map(drawing => ({
+                id: drawing.id,
+                userName: drawing.userName,
+                points: drawing.points.map(([x, y]) => [drawing.startX + x, drawing.startY + y])
+            }));
+    }
+
+    /** The width a stroke is drawn at: a route's, as the routes setting has it, sketching a route; else the brush's. */
+    _strokeWidth() {
+        return this._routeSketch ? routesManager.lineWidth() : this.state.brushSettings.size;
+    }
+
+    /**
+     * The points a sketched route is drawn through: smoothed into curves when the
+     * routes setting asks for rounded corners, as it does for a route's own bends.
+     */
+    _routeSketchPoints(points) {
+        if (!game.settings.get(MODULE.ID, 'routes.curveCorners') || points.length < 3) return points;
+        const flat = smoothPath(points);
+        const out = [];
+        for (let i = 0; i + 1 < flat.length; i += 2) out.push([flat[i], flat[i + 1]]);
+        return out.length > 1 ? out : points;
+    }
+
+    /**
+     * A route's line, the way routes are drawn on the map: the colour over a dark edge,
+     * with round ends and joins. `points` are relative to the start, as a drawing's are.
+     */
+    _strokeRoute(graphics, points, startX, startY, width, color) {
+        if (!points?.length) return;
+        for (const [stroke, tint, alpha] of [[width + 2, 0x111111, 0.55], [width, color, 1]]) {
+            graphics.lineStyle({ width: stroke, color: tint, alpha, cap: 'round', join: 'round' });
+            graphics.moveTo(startX + points[0][0], startY + points[0][1]);
+            for (let i = 1; i < points.length; i++) graphics.lineTo(startX + points[i][0], startY + points[i][1]);
+        }
+        graphics.lineStyle(0);
     }
 
     /** Shows how far the sketched route has gone, in the scene's units, at the pointer. */
@@ -1854,6 +1902,14 @@ class DrawingTool {
             return;
         }
 
+        // A sketched route previews as a route is drawn
+        if (this._routeSketch) {
+            this._previewGraphics.clear();
+            this._strokeRoute(this._previewGraphics, this._routeSketchPoints(this.state.drawingPoints),
+                this.state.drawingStartPoint.x, this.state.drawingStartPoint.y, this._strokeWidth(), this.cssToPixiColor(this._strokeColor()));
+            return;
+        }
+
         // Clear and redraw preview graphics to avoid coordinate issues
         // This ensures clean drawing without weird lines
         this._previewGraphics.clear();
@@ -1953,8 +2009,8 @@ class DrawingTool {
             this.createPIXIDrawing(
                 this.state.drawingStartPoint.x,
                 this.state.drawingStartPoint.y,
-                this.state.drawingPoints,
-                this.state.brushSettings.size,
+                this._routeSketch ? this._routeSketchPoints(this.state.drawingPoints) : this.state.drawingPoints,
+                this._strokeWidth(),
                 this._strokeColor()
             );
 
@@ -2616,23 +2672,29 @@ class DrawingTool {
         const shadowAlpha = drawingAlpha * 0.3; // Shadow opacity (30% of main alpha)
         const shadowColor = 0x000000; // Black shadow
         
-        // Draw shadow first (offset version)
-        graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
-        
-        if (points.length > 0) {
-            const firstPoint = points[0];
-            graphics.moveTo(startX + firstPoint[0] + shadowOffset, startY + firstPoint[1] + shadowOffset);
-            
-            for (let i = 1; i < points.length; i++) {
-                const point = points[i];
-                graphics.lineTo(startX + point[0] + shadowOffset, startY + point[1] + shadowOffset);
+        const route = !!this._routeSketch;
+        if (route) {
+            // A sketched route is drawn as a route is
+            this._strokeRoute(graphics, points, startX, startY, strokeWidth, drawingColor);
+        } else {
+            // Draw shadow first (offset version)
+            graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+
+            if (points.length > 0) {
+                const firstPoint = points[0];
+                graphics.moveTo(startX + firstPoint[0] + shadowOffset, startY + firstPoint[1] + shadowOffset);
+
+                for (let i = 1; i < points.length; i++) {
+                    const point = points[i];
+                    graphics.lineTo(startX + point[0] + shadowOffset, startY + point[1] + shadowOffset);
+                }
             }
+
+            // Draw main line on top with line style
+            const lineStyle = this.state.lineStyle || 'solid';
+            this._drawLineWithStyle(graphics, points, startX, startY, strokeWidth, drawingColor, drawingAlpha, lineStyle);
         }
-        
-        // Draw main line on top with line style
-        const lineStyle = this.state.lineStyle || 'solid';
-        this._drawLineWithStyle(graphics, points, startX, startY, strokeWidth, drawingColor, drawingAlpha, lineStyle);
-        
+
         // Add to layer
         layer.addChild(graphics);
         
@@ -2653,15 +2715,17 @@ class DrawingTool {
             startY: startY,
             points: points,
             strokeWidth: strokeWidth,
-            strokeColor: strokeColor
+            strokeColor: strokeColor,
+            route
         };
         this._pixiDrawings.push(drawingData);
-        
+
         // Store as last drawing for undo
         this._lastDrawing = drawingData;
-        
+
         // Broadcast drawing creation to other clients
         this.broadcastDrawingCreation({
+            route,
             drawingId: drawingId,
             userId: game.user.id,
             userName: game.user.name,
@@ -2981,29 +3045,34 @@ class DrawingTool {
         const shadowAlpha = drawingAlpha * 0.3;
         const shadowColor = 0x000000;
         
-        // Draw shadow first
-        graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
-        if (data.points.length > 0) {
-            const firstPoint = data.points[0];
-            graphics.moveTo(data.startX + firstPoint[0] + shadowOffset, data.startY + firstPoint[1] + shadowOffset);
-            for (let i = 1; i < data.points.length; i++) {
-                const point = data.points[i];
-                graphics.lineTo(data.startX + point[0] + shadowOffset, data.startY + point[1] + shadowOffset);
+        if (data.route) {
+            // A sketched route, drawn as a route is
+            this._strokeRoute(graphics, data.points, data.startX, data.startY, strokeWidth, drawingColor);
+        } else {
+            // Draw shadow first
+            graphics.lineStyle(strokeWidth, shadowColor, shadowAlpha);
+            if (data.points.length > 0) {
+                const firstPoint = data.points[0];
+                graphics.moveTo(data.startX + firstPoint[0] + shadowOffset, data.startY + firstPoint[1] + shadowOffset);
+                for (let i = 1; i < data.points.length; i++) {
+                    const point = data.points[i];
+                    graphics.lineTo(data.startX + point[0] + shadowOffset, data.startY + point[1] + shadowOffset);
+                }
             }
+
+            // Draw main line with style
+            const lineStyle = data.lineStyle || 'solid';
+            this._drawLineWithStyle(
+                graphics,
+                data.points,
+                data.startX,
+                data.startY,
+                strokeWidth,
+                drawingColor,
+                drawingAlpha,
+                lineStyle
+            );
         }
-        
-        // Draw main line with style
-        const lineStyle = data.lineStyle || 'solid';
-        this._drawLineWithStyle(
-            graphics,
-            data.points,
-            data.startX,
-            data.startY,
-            strokeWidth,
-            drawingColor,
-            drawingAlpha,
-            lineStyle
-        );
         
         // Add to layer
         layer.addChild(graphics);
@@ -3024,13 +3093,14 @@ class DrawingTool {
             startY: data.startY,
             points: data.points,
             strokeWidth: strokeWidth,
-            strokeColor: data.strokeColor
+            strokeColor: data.strokeColor,
+            route: !!data.route
         });
-        
+
         // Schedule cleanup if needed
         this.scheduleCleanup();
     }
-    
+
     /**
      * Create a remote box drawing
      * NOTE: This method does NOT broadcast - it's only for rendering remote drawings
