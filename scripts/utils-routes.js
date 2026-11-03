@@ -96,49 +96,53 @@ export function nearestOnRoute(points, [x, y]) {
 }
 
 /**
- * A route's line with its corners rounded, for drawing: each waypoint between
- * the ends becomes a curve that starts `radius` before it and ends `radius`
- * after (less where a leg is short -- never past the middle of it, so two
- * corners never meet). The ends stay where they are. Returns { points, legs },
- * where legs[i] is the leg the segment starting at points[i] belongs to, so a
- * leg's terrain can follow it round the bend.
+ * A route's line as a smooth curve through every waypoint, for drawing: a
+ * centripetal Catmull-Rom spline, which passes exactly through each point, turns
+ * as tightly as the waypoints ask and does not loop or overshoot on a sharp bend.
+ * The curve is cut into short straight pieces, `spacing` pixels long or so.
+ * Returns { points, legs }, where legs[i] is the leg the piece starting at
+ * points[i] belongs to, so a leg's terrain can follow it round the bend.
  */
-export function roundCorners(points, radius, steps = 8) {
+export function curveThrough(points, spacing = 10) {
     const out = [];
     const legs = [];
-    const push = (point, leg) => {
-        out.push(point);
-        legs.push(leg);
-    };
-    if (!(points?.length > 0)) return { points: out, legs: [] };
-    push([points[0][0], points[0][1]], 0);
-    for (let i = 1; i < points.length - 1; i++) {
-        const [ax, ay] = points[i - 1];
-        const [bx, by] = points[i];
-        const [cx, cy] = points[i + 1];
-        const before = Math.hypot(bx - ax, by - ay);
-        const after = Math.hypot(cx - bx, cy - by);
-        const reach = Math.min(radius, before / 2, after / 2);
-        // A straight run, or a doubling back, has no corner to round.
-        const cross = (bx - ax) * (cy - by) - (by - ay) * (cx - bx);
-        if (!(reach > 0) || Math.abs(cross) < 1e-9) {
-            push([bx, by], i);
-            continue;
-        }
-        const start = [bx + ((ax - bx) / before) * reach, by + ((ay - by) / before) * reach];
-        const end = [bx + ((cx - bx) / after) * reach, by + ((cy - by) / after) * reach];
-        // A quadratic curve from one to the other, pulled toward the waypoint.
-        for (let step = 0; step <= steps; step++) {
-            const t = step / steps;
-            const u = 1 - t;
-            push([
-                u * u * start[0] + 2 * u * t * bx + t * t * end[0],
-                u * u * start[1] + 2 * u * t * by + t * t * end[1]
-            ], t < 0.5 ? i - 1 : i);
+    if (!(points?.length > 0)) return { points: out, legs };
+    out.push([points[0][0], points[0][1]]);
+    legs.push(0);
+    for (let i = 0; i < points.length - 1; i++) {
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        // The ends borrow a neighbour reflected across them, so the curve leaves them straight on.
+        const p0 = points[i - 1] ?? [2 * p1[0] - p2[0], 2 * p1[1] - p2[1]];
+        const p3 = points[i + 2] ?? [2 * p2[0] - p1[0], 2 * p2[1] - p1[1]];
+        const length = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+        const knot = (a, b) => Math.max(Math.sqrt(Math.hypot(b[0] - a[0], b[1] - a[1])), 1e-6);
+        const t0 = 0;
+        const t1 = t0 + knot(p0, p1);
+        const t2 = t1 + knot(p1, p2);
+        const t3 = t2 + knot(p2, p3);
+        const mix = (a, b, ta, tb, t) => [
+            ((tb - t) * a[0] + (t - ta) * b[0]) / (tb - ta),
+            ((tb - t) * a[1] + (t - ta) * b[1]) / (tb - ta)
+        ];
+        const steps = Math.max(2, Math.ceil(length / spacing));
+        for (let step = 1; step <= steps; step++) {
+            if (step === steps) {
+                out.push([p2[0], p2[1]]);
+            } else {
+                const t = t1 + ((t2 - t1) * step) / steps;
+                const a1 = mix(p0, p1, t0, t1, t);
+                const a2 = mix(p1, p2, t1, t2, t);
+                const a3 = mix(p2, p3, t2, t3, t);
+                const b1 = mix(a1, a2, t0, t2, t);
+                const b2 = mix(a2, a3, t1, t3, t);
+                out.push(mix(b1, b2, t1, t2, t));
+            }
+            // The piece that starts at this point: on the next leg once a waypoint is reached.
+            legs.push(step === steps ? i + 1 : i);
         }
     }
-    const last = points[points.length - 1];
-    if (points.length > 1) push([last[0], last[1]], points.length - 2);
+    // The last point starts no piece.
     return { points: out, legs };
 }
 

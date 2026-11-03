@@ -1,50 +1,64 @@
-// Rounding a route's corners for drawing: the ends stay put, a corner becomes a
-// curve that starts and ends inside its legs, a short leg is never overrun, and
-// each stretch of the curve knows which leg's terrain it takes.
-import { roundCorners } from '../scripts/utils-routes.js';
+// A route drawn as a curve: it goes through every waypoint (a road crosses its
+// points), keeps its ends, never strays far from the straight legs it joins, and
+// each stretch of it knows which leg's terrain it takes.
+import { curveThrough } from '../scripts/utils-routes.js';
 
 let failures = 0;
 const fail = message => { failures++; console.log(`  FAIL  ${message}`); };
 const ok = message => console.log(`  ok    ${message}`);
-const near = (a, b) => Math.abs(a - b) < 1e-6;
+const near = (a, b, tolerance = 1e-6) => Math.abs(a - b) < tolerance;
+const has = (points, [x, y]) => points.some(p => near(p[0], x) && near(p[1], y));
 
-// An L: 200 right, then 200 down.
-const bend = roundCorners([[0, 0], [200, 0], [200, 200]], 50);
-const first = bend.points[0];
-const last = bend.points.at(-1);
-if (first[0] === 0 && first[1] === 0 && last[0] === 200 && last[1] === 200) ok('both ends stay where they were');
+// A zigzag with a sharp turn, like a road down a valley and back up.
+const waypoints = [[0, 0], [200, 60], [260, 400], [300, 80], [520, 20]];
+const curve = curveThrough(waypoints);
+
+if (waypoints.every(point => has(curve.points, point))) ok('the line crosses every waypoint');
+else fail('the line misses a waypoint');
+
+const first = curve.points[0];
+const last = curve.points.at(-1);
+if (near(first[0], 0) && near(first[1], 0) && near(last[0], 520) && near(last[1], 20)) ok('both ends are where they were');
 else fail(`ends moved: ${JSON.stringify([first, last])}`);
 
-if (bend.points.every(([x, y]) => x <= 200 + 1e-6 && y >= -1e-6)) ok('the curve stays inside the corner');
-else fail('a point went outside the corner');
+// Distance from a point to the nearest straight leg: a spline wanders, but not far.
+const toLegs = ([x, y]) => Math.min(...waypoints.slice(1).map(([bx, by], i) => {
+    const [ax, ay] = waypoints[i];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
+}));
+const strayed = Math.max(...curve.points.map(toLegs));
+if (strayed < 80) ok(`it stays close to the legs (at most ${Math.round(strayed)} px away)`);
+else fail(`it strayed ${Math.round(strayed)} px from the legs`);
 
-const corner = bend.points.some(([x, y]) => near(x, 200) && near(y, 0));
-if (!corner) ok('the sharp point itself is gone');
-else fail('the waypoint is still a point on the line');
+if (curve.points.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y))) ok('every point is a number');
+else fail('a point is not finite');
 
-const start = bend.points.find(([x]) => near(x, 150));
-const end = bend.points.find(([x, y]) => near(x, 200) && near(y, 50));
-if (start && end) ok('the curve starts 50 before the waypoint and ends 50 after it');
-else fail('the curve does not start and end the radius from the waypoint');
+// Legs: pieces between waypoint 1 and 2 are leg 1, and the order never goes back.
+const index = point => curve.points.findIndex(p => near(p[0], point[0]) && near(p[1], point[1]));
+const [a, b] = [index(waypoints[1]), index(waypoints[2])];
+const between = curve.legs.slice(a, b);
+if (between.length > 0 && between.every(leg => leg === 1)) ok('each stretch is on the leg it came from');
+else fail(`legs between the waypoints: ${JSON.stringify(between)}`);
+if (curve.legs.every((leg, i) => i === 0 || leg >= curve.legs[i - 1])) ok('legs run in order');
+else fail('legs went backwards');
+if (curve.legs.length === curve.points.length) ok('one leg per point');
+else fail('legs and points differ in length');
 
-if (bend.legs.length === bend.points.length && bend.legs[0] === 0 && bend.legs.at(-2) === 1) ok('each stretch is on the leg it came from');
-else fail(`legs: ${JSON.stringify(bend.legs)}`);
+// A straight run stays straight.
+const straight = curveThrough([[0, 0], [100, 0], [250, 0]]);
+if (straight.points.every(([, y]) => near(y, 0, 1e-6))) ok('a straight run stays straight');
+else fail('a straight run bent');
 
-// A short leg limits the curve to half of it, so the next corner is not reached.
-const tight = roundCorners([[0, 0], [100, 0], [100, 20], [200, 20]], 50);
-// The 20-long leg is shared: each corner may take half of it, and no more.
-const onLeg = tight.points.filter(([x, y]) => near(x, 100) && y > 1e-6 && y < 20 - 1e-6);
-if (onLeg.length === 2 && onLeg.every(([, y]) => near(y, 10))) ok('a short leg is shared, each corner taking half');
-else fail(`the short leg was overrun: ${JSON.stringify(onLeg)}`);
+// A single leg is a straight line between its two ends.
+const single = curveThrough([[0, 0], [100, 100]]);
+const offLine = Math.max(...single.points.map(([x, y]) => Math.abs(x - y)));
+if (offLine < 1e-6 && has(single.points, [100, 100])) ok('a single leg is straight');
+else fail('a single leg bent');
 
-// No corner, no change.
-const straight = roundCorners([[0, 0], [100, 0], [200, 0]], 50);
-if (straight.points.length === 3) ok('a straight run is left alone');
-else fail(`straight run became ${straight.points.length} points`);
-const two = roundCorners([[0, 0], [100, 100]], 50);
-if (two.points.length === 2 && two.legs.length === 2) ok('a single leg is left alone');
-else fail('a single leg changed');
-if (roundCorners([], 50).points.length === 0 && roundCorners(null, 50).points.length === 0) ok('nothing in, nothing out');
+if (curveThrough([]).points.length === 0 && curveThrough(null).points.length === 0) ok('nothing in, nothing out');
 else fail('empty input produced points');
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall passed');

@@ -10,7 +10,7 @@ import {
     cleanPoints, legPixels, routePixels, gridDistance, distancePixels, pointAlong, convertDistance,
     nearestWaypoint, nearestOnRoute, legTerrains, terrainFactor, insertWaypoint, removeWaypoint,
     snapTo, chainRoutes, TERRAINS, pathLegs, totalEffort, distanceForEffort, legIndexAt, routeEnds, routeTitle, splitRouteName,
-    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate, effortForDistance, travelHours, travelPlan, roundCorners
+    defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate, effortForDistance, travelHours, travelPlan, curveThrough
 } from './utils-routes.js';
 import { motionSpeed } from './utils-motion.js';
 import { simplify } from './utils-autowall.js';
@@ -1725,9 +1725,9 @@ class RoutesManager {
         const size = Number(canvas.scene?.grid?.size) || 100;
         const share = Number(game.settings.get(MODULE.ID, 'routes.lineWidth')) || 3;
         const line = Math.max(2, size * share / 100);
-        // How far before a waypoint its corner starts to curve; none with rounding off.
-        const corner = game.settings.get(MODULE.ID, 'routes.curveCorners') ? size * 0.5 : 0;
-        return { line, dot: line * 1.1, font: Math.max(14, Math.round(size * 0.22)), corner };
+        // Whether a route runs as a curve through its waypoints, or as straight legs.
+        const curved = !!game.settings.get(MODULE.ID, 'routes.curveCorners');
+        return { line, dot: line * 1.1, font: Math.max(14, Math.round(size * 0.22)), curved };
     }
 
     /** How thick a route's line is on this map, in scene pixels, as the Route Line Width setting has it. */
@@ -1845,9 +1845,9 @@ class RoutesManager {
     _line(points, color, sizes, { alpha = 1, terrain = [], editing = false, selected = null, ring = false } = {}) {
         const graphics = new PIXI.Graphics();
         const dash = sizes.line * 2.5;
-        // The line as drawn: its corners rounded, or not, with the leg each stretch of it belongs to.
-        const { points: path, legs } = sizes.corner > 0
-            ? roundCorners(points, sizes.corner)
+        // The line as drawn: a curve through the waypoints, or not, with the leg each stretch of it belongs to.
+        const { points: path, legs } = sizes.curved
+            ? curveThrough(points)
             : { points, legs: points.map((_, i) => i) };
         // Runs of it that are dashed or solid together, so a pattern is not broken at a bend.
         const runs = [];
