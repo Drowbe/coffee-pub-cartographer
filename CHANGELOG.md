@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [14.3.0]
+
+### ADDED
+
+- **Select: turn a wall into a door or a window with a click** (`scripts/manager-autowall.js`, `scripts/window-autowall.js`, `lang/en.json`). A third tool on the Draw tab, beside Points and Sketch. With **Door** or **Window** chosen under What you draw, clicking a wall on the scene changes it to that, using the settings on the tab: a door's state, sound and animation, a window's see-through distance and attenuation. The wall under the pointer is outlined in the kind's colour first. A door made a window loses its door, and a window made a door loses its threshold, so either can be changed to the other. Undo last (Backspace) puts the wall back as it was, one click at a time. With Wall chosen, Select does nothing and says so. **Not yet walked in a running world.**
+
+### CHANGED
+
+- **A right click ends a chain on the Draw tab** (`scripts/manager-autowall.js`, `lang/en.json`). While drawing points, a right click that does not move ends the chain, as Esc and Enter do and as Foundry's own tools do; a right-drag still pans. **Not yet walked in a running world.**
+
+
 ## [14.2.1]
 
 ### FIXED
