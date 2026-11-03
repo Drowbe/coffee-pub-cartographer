@@ -250,6 +250,7 @@ class DrawingTool {
 
         // Routes show their info when the pointer is over them; so do the routes sketched here
         routesManager.sketchSource = () => this.routeSketches();
+        routesManager.sketchRemover = id => this.deleteDrawingById(id);
 
         console.log(`✅ ${MODULE.NAME}: ${this.displayName} initialized`);
     }
@@ -871,7 +872,9 @@ class DrawingTool {
             .filter(drawing => drawing.route && drawing.points?.length > 1)
             .map(drawing => ({
                 id: drawing.id,
+                userId: drawing.userId,
                 userName: drawing.userName,
+                color: drawing.strokeColor,
                 points: drawing.points.map(([x, y]) => [drawing.startX + x, drawing.startY + y])
             }));
     }

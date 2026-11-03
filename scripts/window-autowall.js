@@ -236,7 +236,8 @@ export class AutoWallWindow extends BlacksmithToolWindowBaseV2 {
         const draw = session.draw;
         const how = this._segmented('autowall-draw-tool', localize('drawHow'), [
             { id: 'point', icon: 'fa-solid fa-location-dot', labelKey: 'drawPoint' },
-            { id: 'sketch', icon: 'fa-solid fa-pen', labelKey: 'drawSketch' }
+            { id: 'sketch', icon: 'fa-solid fa-pen', labelKey: 'drawSketch' },
+            { id: 'select', icon: 'fa-solid fa-arrow-pointer', labelKey: 'drawSelect' }
         ], options.drawTool, 'tool') + (options.drawTool === 'sketch' ? this._slider('smoothing', localize('smoothing'), localize('smoothingHint')) : '');
         const kindSettings = {
             wall: () => '',

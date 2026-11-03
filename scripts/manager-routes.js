@@ -13,6 +13,7 @@ import {
     defaultPathTravel, travelEffort, DEFAULT_HOURS_PER_DAY, timelineWith, timelineRate, effortForDistance, travelHours, travelPlan, roundCorners
 } from './utils-routes.js';
 import { motionSpeed } from './utils-motion.js';
+import { simplify } from './utils-autowall.js';
 import { formatDistance, formatSpan, paceChoices, paceIcon, matchPace, defaultPace } from './utils-travel.js';
 
 /** The Routes window's choices, per browser: the tab, the pace times are shown at, and which routes show their legs. */
@@ -1005,7 +1006,9 @@ class RoutesManager {
                     // With both ends named, a name is optional; without them, it has one.
                     name: ends.from && ends.to ? name(data.route.name, '') : name(data.route.name, this._nextName(list)),
                     ...ends,
+                    // One of the palette, or a colour kept from a sketch (a player's own).
                     color: ROUTE_COLORS.includes(data.route.color) ? data.route.color
+                        : /^#[0-9a-f]{6}$/i.test(String(data.route.color)) ? String(data.route.color).toLowerCase()
                         : ROUTE_COLORS.find(c => !list.some(r => r.color === c)) ?? ROUTE_COLORS[list.length % ROUTE_COLORS.length],
                     points,
                     terrain: legTerrains(points, data.route.terrain),
@@ -1424,18 +1427,25 @@ class RoutesManager {
         }
         const callout = game.modules.get('coffee-pub-blacksmith')?.api?.callout;
         if (!hovered) {
-            if (this._hovered) callout?.hide(CALLOUT_ID);
+            // A box with a button waits a moment, so the pointer can cross the gap to it.
+            if (this._hovered) callout?.hide(CALLOUT_ID, this._hoveredKeep ? { grace: true } : undefined);
             this._hovered = null;
+            this._hoveredKeep = false;
+            this._hoveredSketch = false;
             return;
         }
         const anchor = { x: at[0], y: at[1] };
         // Along the same route the box is only moved; showing again would rebuild it on every move.
-        if (this._hovered === hovered.id && callout?.update(CALLOUT_ID, { anchor })) return;
+        // One with a button stays where it opened, so the button is not carried out from under the pointer.
+        if (this._hovered === hovered.id) {
+            if (hovered.keep ? callout?.isOpen?.(CALLOUT_ID) : callout?.update(CALLOUT_ID, { anchor })) return;
+        }
         this._hovered = hovered.id;
+        this._hoveredKeep = !!hovered.keep;
+        this._hoveredSketch = !!hovered.sketch;
         // Read at the pace the Routes window shows times at, so the two agree.
         const scene = canvas.scene;
         const time = this.timeText(travelHours(hovered.legs, hovered.terrain, this.timesPace(scene)?.perHour), this.settings(scene).hoursPerDay);
-        // Nothing in it to press, so it never takes the pointer from the map.
         callout?.show(CALLOUT_ID, {
             anchor,
             title: hovered.title,
@@ -1445,7 +1455,17 @@ class RoutesManager {
                 { label: game.i18n.localize(`${MODULE.ID}.routes.calloutDistance`), value: hovered.distance },
                 ...(time ? [{ label: game.i18n.localize(`${MODULE.ID}.routes.calloutTime`), value: time }] : [])
             ],
-            interactive: false
+            // A sketch its maker (or the GM) may keep has a button; anything else has nothing
+            // to press, so its box never takes the pointer from the map.
+            ...(hovered.keep
+                ? {
+                    actions: [{
+                        label: game.i18n.localize(`${MODULE.ID}.routes.keep`),
+                        icon: 'fa-solid fa-floppy-disk',
+                        onClick: () => { void this.keepSketch(hovered.id); }
+                    }]
+                }
+                : { interactive: false })
         });
     }
 
@@ -1458,6 +1478,8 @@ class RoutesManager {
         if (!grid || !this.sketchSource) return [];
         return this.sketchSource().map(sketch => ({
             id: sketch.id,
+            sketch: true,
+            keep: game.user.isGM || sketch.userId === game.user.id,
             points: sketch.points,
             title: game.i18n.localize(`${MODULE.ID}.routes.sketchTitle`),
             subtitle: sketch.userName ?? '',
@@ -1573,6 +1595,28 @@ class RoutesManager {
         const points = cleanPoints(this.draft.points);
         this._endDrawing();
         if (points.length < 2) return;
+        await this._nameAndSave(points);
+    }
+
+    /**
+     * A route sketched with the draw hotkey, kept as a saved route: its path cut
+     * down to waypoints, its colour the player's, named by whoever keeps it. The
+     * sketch goes once the route is asked for, so it is not left to erase itself.
+     */
+    async keepSketch(id) {
+        const sketch = this.sketchSource?.().find(item => item.id === id);
+        if (!sketch || !canvas.scene?.grid?.distance) return;
+        const epsilon = Math.max(6, (Number(canvas.scene.grid.size) || 100) * 0.12);
+        const points = cleanPoints(simplify(sketch.points, epsilon));
+        if (points.length < 2) return;
+        const color = /^#[0-9a-f]{6}$/i.test(String(sketch.color)) ? String(sketch.color).toLowerCase() : undefined;
+        const asked = await this._nameAndSave(points, color);
+        // A player's route is made by the GM; with none to make it, the sketch stays.
+        if (asked && (game.user.isGM || game.users.activeGM)) this.sketchRemover?.(id);
+    }
+
+    /** Ask for a drawn route's name and save it. False when the dialog was closed. */
+    async _nameAndSave(points, color) {
         const localize = key => game.i18n.localize(`${MODULE.ID}.routes.${key}`);
         const length = formatDistance(gridDistance(routePixels(points), canvas.scene.grid), canvas.scene.grid.units);
         // Its ends named after the map notes they reach, where there are any.
@@ -1587,9 +1631,10 @@ class RoutesManager {
             okLabel: localize('save')
         });
         // Closing the dialog discards the route; that is the way out of a mis-drawn one.
-        if (!names) return;
-        await this.add({ ...names, points });
+        if (!names) return false;
+        await this.add({ ...names, points, color });
         this.openWindow();
+        return true;
     }
 
     removeLastPoint() {
@@ -1725,7 +1770,7 @@ class RoutesManager {
             });
         }
         // A route that is no longer drawn takes its callout with it.
-        if (this._hovered && !this._drawnRoutes.some(route => route.id === this._hovered)) {
+        if (this._hovered && !this._hoveredSketch && !this._drawnRoutes.some(route => route.id === this._hovered)) {
             game.modules.get('coffee-pub-blacksmith')?.api?.callout?.hide(CALLOUT_ID);
             this._hovered = null;
         }

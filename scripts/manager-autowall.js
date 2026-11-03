@@ -1263,7 +1263,7 @@ class AutoWallManager {
 
     setDrawTool(tool) {
         const session = this.session;
-        if (!session || !['point', 'sketch'].includes(tool) || session.options.drawTool === tool) return;
+        if (!session || !['point', 'sketch', 'select'].includes(tool) || session.options.drawTool === tool) return;
         this._drawEndChain({ quiet: true });
         session.options.drawTool = tool;
         writeOptions(session.options);
@@ -1307,6 +1307,10 @@ class AutoWallManager {
         if (!session) return '';
         const draw = session.draw;
         if (!draw.active) return this._localize('drawOff');
+        if (session.options.drawTool === 'select') {
+            const kind = session.options.drawKind;
+            return kind === 'wall' ? this._localize('drawSelectWall') : this._localize('drawSelectHint', { kind: this._localize(kind === 'door' ? 'kindDoor' : 'kindWindow').toLowerCase() });
+        }
         if (session.options.drawTool === 'sketch') return this._localize('drawSketching');
         if (!draw.last) return this._localize('drawFirst');
         return this._localize('drawNext', { x: draw.last[0], y: draw.last[1] });
@@ -1320,7 +1324,8 @@ class AutoWallManager {
     // ---- placing points
 
     _drawDown(event) {
-        // Right and middle buttons still pan and open menus.
+        // Right and middle buttons still pan and open menus; a right click that does not move ends the chain.
+        if (event.button === 2) this._rightPress = { x: event.clientX, y: event.clientY };
         if (event.button !== 0) return;
         this._swallow(event);
         const point = this._scenePoint(event);
@@ -1333,6 +1338,17 @@ class AutoWallManager {
     }
 
     _drawUp(event) {
+        if (event.button === 2) {
+            const press = this._rightPress;
+            this._rightPress = null;
+            const draw = this.session.draw;
+            // As Esc does, and as Foundry's own tools do: a right click, not a pan, ends the chain.
+            if (press && (draw.last || draw.points) && Math.hypot(event.clientX - press.x, event.clientY - press.y) <= CLICK_PIXELS) {
+                this._swallow(event);
+                this._drawEndChain();
+            }
+            return;
+        }
         if (event.button !== 0) return;
         this._swallow(event);
         if (this.session.options.drawTool === 'sketch') return;
@@ -1340,7 +1356,79 @@ class AutoWallManager {
         this._press = null;
         if (!press || Math.hypot(event.clientX - press.x, event.clientY - press.y) > CLICK_PIXELS) return;
         const point = this._scenePoint(event);
-        if (point) this._drawPoint(point, event.shiftKey);
+        if (!point) return;
+        if (this.session.options.drawTool === 'select') void this._selectWall(point);
+        else this._drawPoint(point, event.shiftKey);
+    }
+
+    // ---- selecting a wall to make a door or a window of
+
+    /** The wall nearest a point, within reach of the pointer, or null. */
+    _wallAt(point) {
+        const reach = HANDLE_PIXELS / (canvas.stage?.scale?.x || 1);
+        let best = null;
+        for (const wall of canvas.scene.walls.contents) {
+            const [x1, y1, x2, y2] = wall.c;
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const lengthSq = dx * dx + dy * dy;
+            const t = lengthSq ? Math.max(0, Math.min(1, ((point[0] - x1) * dx + (point[1] - y1) * dy) / lengthSq)) : 0;
+            const distance = Math.hypot(point[0] - (x1 + t * dx), point[1] - (y1 + t * dy));
+            if (distance <= reach && (!best || distance < best.distance)) best = { wall, distance };
+        }
+        return best?.wall ?? null;
+    }
+
+    /** What a wall is set to when it is made a door or a window, from the settings on the Draw tab. */
+    _openingChanges(kind) {
+        const data = this._wallData(this.session, [], 0, kind);
+        delete data.c;
+        delete data.flags;
+        delete data.levels;
+        // A door that becomes a window stops being a door, and the other way round it loses its threshold.
+        if (kind === 'window') Object.assign(data, { door: CONST.WALL_DOOR_TYPES.NONE, ds: CONST.WALL_DOOR_STATES.CLOSED });
+        else Object.assign(data, { threshold: { light: null, sight: null, sound: null, attenuation: false } });
+        return data;
+    }
+
+    /** A click on a wall: it becomes a door or a window, as the Draw tab's settings say. One undo takes it back. */
+    async _selectWall(point) {
+        const session = this.session;
+        const kind = session.options.drawKind;
+        if (kind === 'wall') return;
+        const wall = this._wallAt(point);
+        if (!wall) return;
+        const changes = this._openingChanges(kind);
+        const previous = wall.toObject();
+        const restore = { _id: wall.id };
+        for (const key of Object.keys(changes)) restore[key] = foundry.utils.deepClone(previous[key]);
+        const draw = session.draw;
+        draw.queue = draw.queue.then(async () => {
+            try {
+                await canvas.scene.updateEmbeddedDocuments('Wall', [{ _id: wall.id, ...changes }], { [SKIP_JOIN]: true });
+                draw.history.push({ ids: [], restore: [restore] });
+                this._endsCache = null;
+                this._setDrawStatus(this._localize('drawConverted', { kind: this._localize(kind === 'door' ? 'kindDoor' : 'kindWindow').toLowerCase() }));
+            } catch (error) {
+                console.error(`${MODULE.NAME}: could not change the wall`, error);
+                ui.notifications.error(this._localize('failed'));
+            }
+        });
+        await draw.queue;
+    }
+
+    /** The wall under the pointer, outlined, so the GM sees what a click will change. */
+    _selectSync(point) {
+        if (!this._layer()) return;
+        this._clearPreview();
+        const wall = point && this.session.options.drawKind !== 'wall' ? this._wallAt(point) : null;
+        if (!wall) return;
+        const line = Math.max(3, (Number(canvas.scene.grid.size) || 100) * 0.06);
+        const color = { door: 0x5b7bff, window: 0x6fd0ff }[this.session.options.drawKind] ?? 0xffd23f;
+        const graphics = new PIXI.Graphics();
+        graphics.lineStyle({ width: line * 1.6, color, alpha: 0.7, cap: 'round' });
+        graphics.moveTo(wall.c[0], wall.c[1]).lineTo(wall.c[2], wall.c[3]);
+        this._graphics = this._container.addChild(graphics);
     }
 
     /** A point placed: the first begins a chain; each after joins the last with a wall. */
@@ -1412,6 +1500,18 @@ class AutoWallManager {
         const entry = draw.history.pop();
         if (!entry) {
             this._drawEndChain();
+            return;
+        }
+        // A wall made a door or a window goes back to what it was; no chain is stood on.
+        if (entry.restore) {
+            try {
+                const present = entry.restore.filter(wall => canvas.scene.walls.has(wall._id));
+                if (present.length) await canvas.scene.updateEmbeddedDocuments('Wall', present, { [SKIP_JOIN]: true });
+            } catch (error) {
+                console.error(`${MODULE.NAME}: could not take back the change`, error);
+            }
+            this._endsCache = null;
+            this._setDrawStatus(this._drawStatusText());
             return;
         }
         try {
@@ -1516,6 +1616,7 @@ class AutoWallManager {
     _drawMove(event) {
         if (this.session.options.drawTool === 'sketch') return;
         const point = this._scenePoint(event);
+        if (this.session.options.drawTool === 'select') return this._selectSync(point);
         if (!point) return;
         const target = this._drawTarget(point, event.shiftKey);
         this._drawSync(target.point, target.node);
